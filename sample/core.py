@@ -10,3 +10,7 @@ def hmm():
     """Contemplation..."""
     if helpers.get_answer():
         print(get_hmm())
+
+import numpy as np
+
+np.sqrt
