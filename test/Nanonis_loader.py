@@ -41,14 +41,15 @@ class __Nanonis_sxm__:
     """
     file_path: str
     fname: str
+    raw_header: dict
     header: dict
 
     def __init__(self, f_path: str) -> None:
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.__sxm_header_reform__(self.__sxm_header_reader__(f_path))
+        self.__sxm_header_reform__(self.raw_header)
 
-    def __sxm_header_reader__(self, f_path: str) -> dict:
+    def __sxm_header_reader__(self, f_path: str) -> None:
         """[summary]
 
         Args:
@@ -74,7 +75,7 @@ class __Nanonis_sxm__:
                 else:  # Load entries & corresponding parameters into pre-defined dict
                     contents += line
                     raw_header[entry] = contents.strip('\n')  # remove EOL
-        return raw_header
+        self.raw_header = raw_header
 
     def __sxm_header_reform__(self, raw_header: dict) -> None:
         """[summary]
@@ -87,24 +88,38 @@ class __Nanonis_sxm__:
             'ACQ_TIME', 'BIAS', 'Scan>lines', 'Scan>pixels/line',
             'Scan>speed backw. (m/s)', 'Scan>speed forw. (m/s)'
         ]
-        table: list[str] = ['DATA_INFO', 'Scan>Scanfield', 'Z-CONTROLLER']
-        # The order of scan_field_key should not be changed
+        scan_info_str: list[str] = [
+            'COMMENT', 'REC_DATE', 'REC_TIME', 'SCAN_DIR', 'SCAN_FILE'
+        ]
+        # table: list[str] = ['DATA_INFO', 'Scan>Scanfield', 'Z-CONTROLLER']
         scan_field_key: list[str] = [
             'X_OFFSET', 'Y_OFFSET', 'X_RANGE', 'Y_RANGE', 'ANGLE'
-        ]
+        ] # The order of scan_field_key should not be changed
         trash_bin: list[str] = [
             'NANONIS_VERSION', 'REC_TEMP', 'SCANIT_TYPE', 'SCAN_ANGLE',
             'SCAN_OFFSET', 'SCAN_PIXELS', 'SCAN_RANGE', 'SCAN_TIME',
             'Scan>channels'
         ]
-        scan_info_str: list[str] = [
-            'COMMENT', 'REC_DATE', 'REC_TIME', 'SCAN_DIR', 'SCAN_FILE'
-        ]
 
         header: dict = {}
         entries: list = list(raw_header.keys())
         
-        for scan_info_float in enumerate(entries):
+        for i in enumerate(entries):
+            if i[1] in scan_info_float:
+                header[i[1]] = float(raw_header[i[1]])
+            elif i[1] in scan_info_str:
+                header[i[1]] = raw_header[i[1]].strip(' ')
+            elif i[1] == 'Z-CONTROLLER':
+                z_controller: dict = {}
+                z_controller_config = raw_header['Z-CONTROLLER'].split('\n')[0].strip('\t').split('\t')
+                z_controller_configVar = raw_header['Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
+                for j, s in enumerate(z_controller_config):
+                    z_controller[s] = z_controller_configVar[j]
+                header[i[1]] = z_controller
+            elif i[1] == 'DATA_INFO':
+                data_info: dict = {}
+                config = raw_header['DATA_INFO'].split('\n')[0].strip('\t').split('\t')
+                
             
 
 
