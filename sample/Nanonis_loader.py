@@ -104,7 +104,7 @@ class __Nanonis_sxm__:
         header: dict = {}
         entries: list = list(raw_header.keys())
         
-        for scan_info_float in enumerate(entries):
+        # for scan_info_float in enumerate(entries):
             
 
 
