@@ -54,6 +54,7 @@ class __Nanonis_sxm__:
     """
     file_path: str
     fname: str
+    __raw_header: 'dict[str, str]'
     header: 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], list[float], float, str]]'
 
     def __init__(self, f_path: str) -> None:
@@ -64,13 +65,14 @@ class __Nanonis_sxm__:
         """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.__sxm_header_reform__(self.__raw_header)
+        self.__raw_header = self.__sxm_header_reader__(f_path) 
+        self.header = self.__sxm_header_reform__(self.__raw_header)
 
-    def __sxm_header_reader__(self, f_path: str) -> None:
+    def __sxm_header_reader__(self, f_path: str) -> 'dict[str, str]':
         """[summary]
 
-        Args:
-            f_path (str): [description]
+        Returns:
+            [type]: [description]
         """
         entry: str = ''
         contents: str = ''
@@ -89,13 +91,15 @@ class __Nanonis_sxm__:
                 else:  # Load entries & corresponding parameters into pre-defined dict
                     contents += line
                     raw_header[entry] = contents.strip('\n')  # remove EOL
-        self.__raw_header = raw_header
+        return raw_header
 
-    def __sxm_header_reform__(self, raw_header: 'dict[str, str]') -> None:
+    def __sxm_header_reform__(
+        self, raw_header: 'dict[str, str]'
+    ) -> 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], list[float], float, str]]': 
         """[summary]
 
-        Args:
-            raw_header (dict[str, str]): [description]
+        Returns:
+            [type]: [description]
         """
         scan_info: list[str] = [  # Scan information
             'ACQ_TIME', 'BIAS', 'Scan>lines', 'Scan>pixels/line',
@@ -147,8 +151,8 @@ class __Nanonis_sxm__:
             elif i[1] == 'Scan>Scanfield':
                 # [X_OFFSET, Y_OFFSET, X_RANGE, Y_RANGE, ANGLE] in float type
                 header[i[1]] = [float(j) for j in raw_header[i[1]].split(';')]
-        self.header = header
-
+        return header
+# TODO: Getting data & rotation
 
 # class __Nanonis_dat__:
 #     """
