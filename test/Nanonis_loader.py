@@ -3,6 +3,7 @@ import os
 import re
 
 import numpy as np
+from typing import Union
 
 
 def loader(f_path: str):
@@ -33,34 +34,47 @@ def loader(f_path: str):
         print('File type not supported.')
 
 
-class __Nanonis_sxm__:
-    """[summary]
+def __is_number(s: str) -> Union[float, str]:
+    """String converter.
+
+    Args:
+        s (str): Input string.
 
     Returns:
-        [type]: [description]
+        Union[float, str]: Convert an input string into float if possible, or it would return the input string itself.
+    """
+    try:
+        return float(s)
+    except ValueError:
+        return s
+
+
+class __Nanonis_sxm__:
+    """[summary]
     """
     file_path: str
     fname: str
-    raw_header: dict
-    header: dict
+    header: 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], list[float], float, str]]'
 
     def __init__(self, f_path: str) -> None:
+        """[summary]
+
+        Args:
+            f_path (str): [description]
+        """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.__sxm_header_reform__(self.raw_header)
+        self.__sxm_header_reform__(self.__raw_header)
 
     def __sxm_header_reader__(self, f_path: str) -> None:
         """[summary]
 
         Args:
             f_path (str): [description]
-
-        Returns:
-            dict: [description]
         """
         entry: str = ''
         contents: str = ''
-        raw_header: dict = {}
+        raw_header: dict[str, str] = {}
         with open(f_path, 'rb') as f:  # read the .sxm file
             header_end = False
             while not header_end:
@@ -75,52 +89,65 @@ class __Nanonis_sxm__:
                 else:  # Load entries & corresponding parameters into pre-defined dict
                     contents += line
                     raw_header[entry] = contents.strip('\n')  # remove EOL
-        self.raw_header = raw_header
+        self.__raw_header = raw_header
 
-    def __sxm_header_reform__(self, raw_header: dict) -> None:
+    def __sxm_header_reform__(self, raw_header: 'dict[str, str]') -> None:
         """[summary]
 
         Args:
-            raw_header (dict): [description]
+            raw_header (dict[str, str]): [description]
         """
-
-        scan_info_float: list[str] = [
+        scan_info: list[str] = [  # Scan information
             'ACQ_TIME', 'BIAS', 'Scan>lines', 'Scan>pixels/line',
-            'Scan>speed backw. (m/s)', 'Scan>speed forw. (m/s)'
+            'Scan>speed backw. (m/s)', 'Scan>speed forw. (m/s)', 'COMMENT',
+            'REC_DATE', 'REC_TIME', 'SCAN_DIR', 'SCAN_FILE'
         ]
-        scan_info_str: list[str] = [
-            'COMMENT', 'REC_DATE', 'REC_TIME', 'SCAN_DIR', 'SCAN_FILE'
-        ]
-        # table: list[str] = ['DATA_INFO', 'Scan>Scanfield', 'Z-CONTROLLER']
-        scan_field_key: list[str] = [
-            'X_OFFSET', 'Y_OFFSET', 'X_RANGE', 'Y_RANGE', 'ANGLE'
-        ] # The order of scan_field_key should not be changed
-        trash_bin: list[str] = [
-            'NANONIS_VERSION', 'REC_TEMP', 'SCANIT_TYPE', 'SCAN_ANGLE',
-            'SCAN_OFFSET', 'SCAN_PIXELS', 'SCAN_RANGE', 'SCAN_TIME',
-            'Scan>channels'
-        ]
+        # scan_field_key: list[str] = [
+        # 'X_OFFSET', 'Y_OFFSET', 'X_RANGE', 'Y_RANGE', 'ANGLE'
+        # ]  # The order of scan_field_key should not be changed
+        # trash_bin: list[str] = [
+        #     'NANONIS_VERSION', 'REC_TEMP', 'SCANIT_TYPE', 'SCAN_ANGLE',
+        #     'SCAN_OFFSET', 'SCAN_PIXELS', 'SCAN_RANGE', 'SCAN_TIME',
+        #     'Scan>channels'
+        # ]
 
-        header: dict = {}
-        entries: list = list(raw_header.keys())
-        
+        header: dict[str, Union[dict[str, Union[float, str]],
+                                dict[str, dict[str, Union[float, str]]],
+                                list[float], float, str]] = {}
+        entries: list[str] = list(raw_header.keys())
+
         for i in enumerate(entries):
-            if i[1] in scan_info_float:
-                header[i[1]] = float(raw_header[i[1]])
-            elif i[1] in scan_info_str:
-                header[i[1]] = raw_header[i[1]].strip(' ')
-            elif i[1] == 'Z-CONTROLLER':
-                z_controller: dict = {}
-                z_controller_config = raw_header['Z-CONTROLLER'].split('\n')[0].strip('\t').split('\t')
-                z_controller_configVar = raw_header['Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
+            if i[1] in scan_info:  # float type header
+                header[i[1]] = __is_number(raw_header[i[1]].strip(' '))
+            elif i[1] == 'Z-CONTROLLER':  # Table type header: information of feedback z controller
+                z_controller: dict[str, Union[float, str]] = {}
+                z_controller_config: list[str] = raw_header[
+                    'Z-CONTROLLER'].split('\n')[0].strip('\t').split('\t')
+                z_controller_configVar: list[str] = raw_header[
+                    'Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
                 for j, s in enumerate(z_controller_config):
-                    z_controller[s] = z_controller_configVar[j]
+                    z_controller[s] = __is_number(z_controller_configVar[j])
                 header[i[1]] = z_controller
-            elif i[1] == 'DATA_INFO':
-                data_info: dict = {}
-                config = raw_header['DATA_INFO'].split('\n')[0].strip('\t').split('\t')
-                
-            
+            elif i[1] == 'DATA_INFO':  # data channel information
+                data_info: dict[str, dict[str, Union[float, str]]] = {}
+                raw_data_info: list[str] = raw_header[i[1]].split('\n')
+                config = raw_data_info[0].strip('\t').split('\t')
+                for i in range(1, len(raw_data_info)):
+                    channel_info: dict[str, Union[float, str]] = {
+                    }  # Initialization of dict channel information
+                    name: str = ''  # Initialization of dict channel name
+                    for j in range(len(config)):
+                        if config[j] == 'Name':
+                            name = raw_data_info[i].strip('\t').split('\t')[j]
+                        else:
+                            channel_info[config[j]] = __is_number(
+                                raw_data_info[i].strip('\t').split('\t')[j])
+                    data_info[name] = channel_info
+                header[i[1]] = data_info
+            elif i[1] == 'Scan>Scanfield':
+                # [X_OFFSET, Y_OFFSET, X_RANGE, Y_RANGE, ANGLE] in float type
+                header[i[1]] = [float(j) for j in raw_header[i[1]].split(';')]
+        self.header = header
 
 
 # class __Nanonis_dat__:
@@ -138,9 +165,6 @@ class __Nanonis_sxm__:
 # class __Nanonis_3ds__:
 #     """[summary]
 #     """
-#     file_path: str
-#     fname: str
-
 #     def __init__(self, f_path: str) -> None:
 #         self.file_path = os.path.split(f_path)[0]
 #         self.fname = os.path.split(f_path)[1]
