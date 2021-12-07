@@ -3,7 +3,7 @@ import os
 import re
 
 import numpy as np
-from typing import Union
+from typing import Literal, Union, Tuple
 
 
 def loader(f_path: str):
@@ -34,7 +34,7 @@ def loader(f_path: str):
         print('File type not supported.')
 
 
-def __is_number(s: str) -> Union[float, str]:
+def __is_number__(s: str) -> Union[float, str]:
     """String converter.
 
     Args:
@@ -52,21 +52,19 @@ def __is_number(s: str) -> Union[float, str]:
 class __Nanonis_sxm__:
     """[summary]
     """
-    file_path: str
-    fname: str
-    __raw_header: 'dict[str, str]'
-    header: 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], list[float], float, str]]'
-
     def __init__(self, f_path: str) -> None:
         """[summary]
 
         Args:
             f_path (str): [description]
         """
+
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.__raw_header = self.__sxm_header_reader__(f_path) 
+        self.__raw_header = self.__sxm_header_reader__(f_path)
         self.header = self.__sxm_header_reform__(self.__raw_header)
+        self.data, self.channel_dir = self.__sxm_data_reader__(
+            f_path, self.header)
 
     def __sxm_header_reader__(self, f_path: str) -> 'dict[str, str]':
         """[summary]
@@ -95,7 +93,7 @@ class __Nanonis_sxm__:
 
     def __sxm_header_reform__(
         self, raw_header: 'dict[str, str]'
-    ) -> 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], list[float], float, str]]': 
+    ) -> 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], tuple[float], float, str]]':
         """[summary]
 
         Returns:
@@ -114,15 +112,13 @@ class __Nanonis_sxm__:
         #     'SCAN_OFFSET', 'SCAN_PIXELS', 'SCAN_RANGE', 'SCAN_TIME',
         #     'Scan>channels'
         # ]
-
         header: dict[str, Union[dict[str, Union[float, str]],
                                 dict[str, dict[str, Union[float, str]]],
-                                list[float], float, str]] = {}
+                                tuple[float], float, str]] = {}
         entries: list[str] = list(raw_header.keys())
-
         for i in enumerate(entries):
             if i[1] in scan_info:  # float type header
-                header[i[1]] = __is_number(raw_header[i[1]].strip(' '))
+                header[i[1]] = __is_number__(raw_header[i[1]].strip(' '))
             elif i[1] == 'Z-CONTROLLER':  # Table type header: information of feedback z controller
                 z_controller: dict[str, Union[float, str]] = {}
                 z_controller_config: list[str] = raw_header[
@@ -130,29 +126,79 @@ class __Nanonis_sxm__:
                 z_controller_configVar: list[str] = raw_header[
                     'Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
                 for j, s in enumerate(z_controller_config):
-                    z_controller[s] = __is_number(z_controller_configVar[j])
+                    # TODO: regex to split value str with units
+                    z_controller[s] = __is_number__(z_controller_configVar[j])
                 header[i[1]] = z_controller
             elif i[1] == 'DATA_INFO':  # data channel information
                 data_info: dict[str, dict[str, Union[float, str]]] = {}
                 raw_data_info: list[str] = raw_header[i[1]].split('\n')
                 config = raw_data_info[0].strip('\t').split('\t')
-                for i in range(1, len(raw_data_info)):
+                for j in range(1, len(raw_data_info)):
                     channel_info: dict[str, Union[float, str]] = {
                     }  # Initialization of dict channel information
                     name: str = ''  # Initialization of dict channel name
-                    for j in range(len(config)):
-                        if config[j] == 'Name':
-                            name = raw_data_info[i].strip('\t').split('\t')[j]
+                    for k in range(len(config)):
+                        if config[k] == 'Name':
+                            name = raw_data_info[j].strip('\t').split('\t')[k]
                         else:
-                            channel_info[config[j]] = __is_number(
-                                raw_data_info[i].strip('\t').split('\t')[j])
+                            channel_info[config[k]] = __is_number__(
+                                raw_data_info[j].strip('\t').split('\t')[k])
                     data_info[name] = channel_info
                 header[i[1]] = data_info
             elif i[1] == 'Scan>Scanfield':
-                # [X_OFFSET, Y_OFFSET, X_RANGE, Y_RANGE, ANGLE] in float type
-                header[i[1]] = [float(j) for j in raw_header[i[1]].split(';')]
+                # (X_OFFSET, Y_OFFSET, X_RANGE, Y_RANGE, ANGLE) in float type
+                header[i[1]] = tuple(
+                    float(j) for j in raw_header[i[1]].split(';'))
         return header
-# TODO: Getting data & rotation
+
+    def __sxm_data_reader__(self, f_path: str,
+                            header: dict) -> Tuple[np.ndarray, tuple]:
+
+        with open(f_path, 'rb') as f:
+            read_all = f.read()
+            offset = read_all.find('\x1A\x04'.encode(encoding='utf-8'))
+            f.seek(offset + 2)
+            data = np.fromfile(f, dtype='>f')
+        # Check the data dimensions
+        channel_counts = 0
+        channel_dir: list[bool] = []
+        channel_ls = list(header['DATA_INFO'].keys())
+        for i in range(len(channel_ls)):
+            if header['DATA_INFO'][channel_ls[i]]['Direction'] == 'both':
+                channel_counts += 2
+                channel_dir.append(True)  # true for fwd
+                channel_dir.append(False)  # false for bwd
+            elif header['DATA_INFO'][
+                    channel_ls[i]]['Direction'] == 'fwd':  # forward only
+                channel_counts += 1
+                channel_dir.append(True)
+            else:  # backward only
+                channel_counts += 1
+                channel_dir.append(False)
+        dim = (int(channel_counts), int(header['Scan>pixels/line']),
+               int(header['Scan>lines']))
+        data = data.reshape(dim)  # data reshaped
+        if header['Scan>Scanfield'][4] % 90 == 0:  # mutiple 90˚, rotate
+            for i in range(dim[0]):
+                if channel_dir[i]:
+                    data[i] = np.rot90(data[i],
+                                       int(header['Scan>Scanfield'][4] // 90))
+                else:
+                    data[i] = np.fliplr(
+                        np.rot90(data[i],
+                                 int(header['Scan>Scanfield'][4] // 90)))
+        else:  # arbitary angle, no rotation
+            for i in range(dim[0]):
+                if channel_dir[i]:
+                    continue
+                else:
+                    data[i] = np.fliplr(data[i])
+        return data, tuple(channel_dir)
+
+
+# TODO: Getting .sxm data & rotation
+# TODO: spectrum .dat class
+# TODO: grid spectrum .3ds class
 
 # class __Nanonis_dat__:
 #     """
