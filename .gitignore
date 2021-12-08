@@ -93,3 +93,6 @@ ENV/
 # Local history
 .history
 .DS_Store
+
+# VScode
+.vscode
