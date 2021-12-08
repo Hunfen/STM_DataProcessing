@@ -70,7 +70,7 @@ class __Nanonis_sxm__:
         """[summary]
 
         Returns:
-            [type]: [description]
+            dict[str, str]: [description]
         """
         entry: str = ''
         contents: str = ''
@@ -153,6 +153,15 @@ class __Nanonis_sxm__:
 
     def __sxm_data_reader__(self, f_path: str,
                             header: dict) -> Tuple[np.ndarray, tuple]:
+        """[summary]
+
+        Args:
+            f_path (str): [description]
+            header (dict): [description]
+
+        Returns:
+            Tuple[np.ndarray, tuple]: [description]
+        """
 
         with open(f_path, 'rb') as f:
             read_all = f.read()
@@ -196,10 +205,7 @@ class __Nanonis_sxm__:
         return data, tuple(channel_dir)
 
 
-# TODO: Getting .sxm data & rotation
 # TODO: spectrum .dat class
-# TODO: grid spectrum .3ds class
-
 # class __Nanonis_dat__:
 #     """
 
@@ -212,6 +218,7 @@ class __Nanonis_sxm__:
 #         self.file_path = os.path.split(f_path)[0]
 #         self.fname = os.path.split(f_path)[1]
 
+# TODO: grid spectrum .3ds class
 # class __Nanonis_3ds__:
 #     """[summary]
 #     """
