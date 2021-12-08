@@ -25,7 +25,7 @@ def loader(f_path: str):
     """
     switch = {
         '.sxm': lambda x: __Nanonis_sxm__(x),
-        # '.dat': lambda x: __Nanonis_dat__(x),
+        '.dat': lambda x: __Nanonis_dat__(x),
         # '.3ds': lambda x: __Nanonis_3ds__(x)
     }
     try:
@@ -50,15 +50,21 @@ def __is_number__(s: str) -> Union[float, str]:
 
 
 class __Nanonis_sxm__:
-    """[summary]
-    """
     def __init__(self, f_path: str) -> None:
-        """[summary]
+        """Nanonis .sxm file class.
 
         Args:
-            f_path (str): [description]
+            f_path (str): Absolute path to the Nanonis .sxm file.
+            
+        Returns:
+            {
+                file_path(str): Absolute path to the Nanonis .sxm file.
+                fname(str): Name of the Nanonis .sxm file.
+                header(dict): Nanonis .sxm file header.
+                data(np.ndarray): .sxm data.
+                channel_dir(tuple): Showing direction of every channel. Trur for forward, False for backward.
+            }
         """
-
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
         self.__raw_header = self.__sxm_header_reader__(f_path)
@@ -67,10 +73,10 @@ class __Nanonis_sxm__:
             f_path, self.header)
 
     def __sxm_header_reader__(self, f_path: str) -> 'dict[str, str]':
-        """[summary]
+        """Reading the .sxm file header into dict.
 
         Returns:
-            dict[str, str]: [description]
+            dict[str, str]: Header of the .sxm file, including all the file attributes.
         """
         entry: str = ''
         contents: str = ''
@@ -94,10 +100,10 @@ class __Nanonis_sxm__:
     def __sxm_header_reform__(
         self, raw_header: 'dict[str, str]'
     ) -> 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], tuple[float], float, str]]':
-        """[summary]
+        """Convert raw header into an accessible/readable dict.
 
         Returns:
-            [type]: [description]
+            dict: Reformed header variable.
         """
         scan_info: list[str] = [  # Scan information
             'ACQ_TIME', 'BIAS', 'Scan>lines', 'Scan>pixels/line',
@@ -153,14 +159,14 @@ class __Nanonis_sxm__:
 
     def __sxm_data_reader__(self, f_path: str,
                             header: dict) -> Tuple[np.ndarray, tuple]:
-        """[summary]
+        """Read the data of .sxm file.
 
         Args:
-            f_path (str): [description]
-            header (dict): [description]
+            f_path (str): Absolute path to the Nanonis .sxm file.
+            header (dict): Reformed header variable.
 
         Returns:
-            Tuple[np.ndarray, tuple]: [description]
+            Tuple[np.ndarray, tuple]: Formated data matrix and the direction for every channel.
         """
 
         with open(f_path, 'rb') as f:
@@ -206,17 +212,33 @@ class __Nanonis_sxm__:
 
 
 # TODO: spectrum .dat class
-# class __Nanonis_dat__:
-#     """
+class __Nanonis_dat__:
+    def __init__(self, f_path: str) -> None:
+        """[summary]
 
-#     """
+        Args:
+            f_path (str): [description]
+        """
+        self.file_path = os.path.split(f_path)[0]
+        self.fname = os.path.split(f_path)[1]
+        
+    def __dat_header_reader__(self, f_path: str) -> 'list[str]':
+        """[summary]
 
-#     file_path: str
-#     fname: str
+        Returns:
+            raw_header(list[str]): .
+        """
+        raw_header: list[str] = []
+        with open(f_path, 'r') as f:
+            header_end = False
+            while not header_end:
+                line = f.readline()
+                if re.match(r'\[DATA\]', line):
+                    header_end = True
+                else:
+                    raw_header.append(line)
+        return raw_header
 
-#     def __init__(self, f_path: str) -> None:
-#         self.file_path = os.path.split(f_path)[0]
-#         self.fname = os.path.split(f_path)[1]
 
 # TODO: grid spectrum .3ds class
 # class __Nanonis_3ds__:
