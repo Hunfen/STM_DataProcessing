@@ -212,32 +212,32 @@ class __Nanonis_sxm__:
 
 
 # TODO: spectrum .dat class
-class __Nanonis_dat__:
-    def __init__(self, f_path: str) -> None:
-        """[summary]
+# class __Nanonis_dat__:
+#     def __init__(self, f_path: str) -> None:
+#         """[summary]
 
-        Args:
-            f_path (str): [description]
-        """
-        self.file_path = os.path.split(f_path)[0]
-        self.fname = os.path.split(f_path)[1]
+#         Args:
+#             f_path (str): [description]
+#         """
+#         self.file_path = os.path.split(f_path)[0]
+#         self.fname = os.path.split(f_path)[1]
         
-    def __dat_header_reader__(self, f_path: str) -> 'list[str]':
-        """[summary]
+#     def __dat_header_reader__(self, f_path: str) -> 'list[str]':
+#         """[summary]
 
-        Returns:
-            raw_header(list[str]): .
-        """
-        raw_header: list[str] = []
-        with open(f_path, 'r') as f:
-            header_end = False
-            while not header_end:
-                line = f.readline()
-                if re.match(r'\[DATA\]', line):
-                    header_end = True
-                else:
-                    raw_header.append(line)
-        return raw_header
+#         Returns:
+#             raw_header(list[str]): .
+#         """
+#         raw_header: list[str] = []
+#         with open(f_path, 'r') as f:
+#             header_end = False
+#             while not header_end:
+#                 line = f.readline()
+#                 if re.match(r'\[DATA\]', line):
+#                     header_end = True
+#                 else:
+#                     raw_header.append(line)
+#         return raw_header
 
 
 # TODO: grid spectrum .3ds class
