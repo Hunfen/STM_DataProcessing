@@ -49,6 +49,7 @@ def __is_number__(s: str) -> Union[float, str]:
         return s
 
 
+# TODO: explicit releasing the memory
 class __Nanonis_sxm__:
     def __init__(self, f_path: str) -> None:
         """Nanonis .sxm file class.
@@ -211,7 +212,6 @@ class __Nanonis_sxm__:
         return data, tuple(channel_dir)
 
 
-# TODO: spectrum .dat class
 class __Nanonis_dat__:
     def __init__(self, f_path: str) -> None:
         """[summary]
@@ -221,13 +221,16 @@ class __Nanonis_dat__:
         """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.raw_header = self.__dat_header_reader__(f_path)
+        # self.raw_header = self.__dat_header_reader__(f_path)
+        self.header = self.__dat_header_reformer__(
+            self.__dat_header_reader__(f_path))
+        self.data = self.__dat_data_reader__(f_path)
 
     def __dat_header_reader__(self, f_path: str) -> 'list[str]':
         """[summary]
 
         Returns:
-            raw_header(list[str]): .
+            raw_header(list[str]): 
         """
         raw_header: list[str] = []
         with open(f_path, 'r') as f:
@@ -239,11 +242,50 @@ class __Nanonis_dat__:
                 else:
                     raw_header.append(line)
         return raw_header
-    
-    def __dat_header_reformer__(self, raw_header: 'list[str]') -> dict:
-        
-        
+
+    def __dat_header_reformer__(
+            self, raw_header: 'list[str]') -> 'dict[str, Union[str, float]]':
+        """[summary]
+
+        Args:
+            raw_header (list[str]): [description]
+
+        Returns:
+            dict: [description]
+        """
+        header: dict[str, Union[str, float]] = {}
+        header_ls: list[list[str]] = []
+        for i in range(len(raw_header)):
+            header_ls.append(raw_header[i].strip('\n').strip('\t').split('\t'))
+        header_ls = header_ls[:-1]  # remove last element
+        raw_header = []  # release memory
+
+        for i in range(len(header_ls)):
+            try:
+                header[header_ls[i][0]] = __is_number__(header_ls[i][1])
+            except IndexError:
+                header[header_ls[i][0]] = ''
+        header_ls = []  # release memory
         return header
+
+    def __dat_data_reader__(self, f_path: str) -> np.ndarray:
+        data_str: Union[str, list[str]] = ''
+        data_list = []
+        with open(f_path, 'r') as f:  # search data start positon
+            while True:
+                if re.match(r'\[DATA\]', f.readline()):
+                    f.readline()
+                    data_str = f.read()
+                    break
+                else:
+                    continue
+        # Notification: data_str type changed
+        data_str = data_str.split('\n')
+        data_str = data_str[:-1]
+        for i in range(len(data_str)):
+            data_list.append(data_str[i].split('\t'))
+        data_str = []  # release
+        return np.array(data_list).astype(float)
 
 
 # TODO: grid spectrum .3ds class
