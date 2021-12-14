@@ -221,6 +221,7 @@ class __Nanonis_dat__:
         """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
+        self.raw_header = self.__dat_header_reader__(f_path)
 
     def __dat_header_reader__(self, f_path: str) -> 'list[str]':
         """[summary]
@@ -239,7 +240,10 @@ class __Nanonis_dat__:
                     raw_header.append(line)
         return raw_header
     
-    
+    def __dat_header_reformer__(self, raw_header: 'list[str]') -> dict:
+        
+        
+        return header
 
 
 # TODO: grid spectrum .3ds class
