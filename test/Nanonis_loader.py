@@ -297,7 +297,6 @@ class __Nanonis_dat__:
         return np.array(data_list).astype(float)
 
 
-# TODO: grid spectrum .3ds class
 class __Nanonis_3ds__:
     def __init__(self, f_path: str) -> None:
         """Nanonis .3ds file class.
@@ -362,11 +361,11 @@ class __Nanonis_3ds__:
         header['# Parameters shape'] = tuple([
             header['Grid dim'][0] * header['Grid dim'][1],
             header['# Parameters (4 byte)']
-        ]) # shape of the .Parameters
+        ])  # shape of the .Parameters
         header['data shape'] = tuple([
             header['Grid dim'][0] * header['Grid dim'][1],
             len(header['Channels']), header['Points']
-        ]) # shape of the .data
+        ])  # shape of the .data
         return header
 
     def __3ds_data_reader__(self, f_path: str,
