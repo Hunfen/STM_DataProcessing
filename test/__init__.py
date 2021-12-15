@@ -1,5 +1,5 @@
-__all__ = ['core', 'Nanonis_loader', 'helpers']
+__all__ = ['loader', 'core']
 
-from . import core
-from . import helpers
-from . import Nanonis_loader
+import core
+# import helpers
+from .Nanonis_loader import loader

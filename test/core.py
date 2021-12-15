@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# from . import helpers
-from Nanonis_loader import *
+import os
+import re
+
+import numpy as np
+
 
 
 # @profile
-def mem_test():
+# def mem_test():
     # f_path = '/Users/hunfen/Documents/Experimental/STM1500_data/2021/2021-12-10/Grid Spectroscopy012.3ds'
     # a = loader(f_path)
     # b = a.header
