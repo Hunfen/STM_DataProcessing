@@ -43,13 +43,13 @@ def __is_number__(s: str) -> Union[int, float, str]:
     Returns:
         Union[int, float, str]: Convert an input string into int or float if possible, or it would return the input string itself.
     """
-    if s.isdigit(): # judge if str is an int.
+    if s.isdigit():  # judge if str is an int.
         return int(s)
     else:
         try:
-            return float(s) # convert into float.
+            return float(s)  # convert into float.
         except ValueError:
-            return s # return input string without change.
+            return s  # return input string without change.
 
 
 class __Nanonis_sxm__:
@@ -307,9 +307,18 @@ class __Nanonis_3ds__:
         """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.raw_header = self.__3ds_header_reader__(f_path)
+        # self.raw_header = self.__3ds_header_reader__(f_path)
+        self.header = self.__3ds_header_reformer__(
+            self.__3ds_header_reader__(f_path))
+        self.Parameters, self.data = self.__3ds_data_reader__(
+            f_path, self.header)
 
     def __3ds_header_reader__(self, f_path: str) -> 'dict[str, str]':
+        """Read the .3ds file header into dict.
+
+        Returns:
+            dict[str, str]: Header of the .3ds file, including all the file attributes.
+        """
         entry: str = ''
         contents: str = ''
         raw_header: dict[str, str] = {}
@@ -324,11 +333,80 @@ class __Nanonis_3ds__:
                     contents = contents.strip('"\r\n')
                 raw_header[entry] = contents
         return raw_header
-    
-    def __3ds_header_reformer__(self, raw_header: dict) -> dict:
-        
-        scan_info_tuple = ['Grid dim']
-        
-        entries: list[str] = list(raw_header.keys())
-        
-        return 
+
+    def __3ds_header_reformer__(self, raw_header: 'dict[str, str]') -> dict:
+        """Convert raw header into an accessible/readable dict.
+
+        Returns:
+            dict: Reformed header.
+        """
+        scan_info_tuple = ['Grid dim', 'Grid settings']
+        scan_info_parameters = [
+            'Experiment parameters', 'Channels', 'Fixed parameters'
+        ]
+        entries = list(raw_header.keys())
+        header = {}
+        for i in enumerate(entries):
+            if i[1] in scan_info_tuple:
+                if re.fullmatch(r'\d\s[x]\s\d', raw_header[i[1]]):
+                    header[i[1]] = tuple(
+                        int(j) for j in raw_header[i[1]].split(' x '))
+                else:
+                    header[i[1]] = tuple(
+                        float(j) for j in raw_header[i[1]].split(';'))
+            elif i[1] in scan_info_parameters:
+                header[i[1]] = raw_header[i[1]].split(';')
+            else:
+                header[i[1]] = __is_number__(raw_header[i[1]])
+        # FIXME: Defining type hints for header raises erorrs.
+        header['# Parameters shape'] = tuple([
+            header['Grid dim'][0] * header['Grid dim'][1],
+            header['# Parameters (4 byte)']
+        ]) # shape of the .Parameters
+        header['data shape'] = tuple([
+            header['Grid dim'][0] * header['Grid dim'][1],
+            len(header['Channels']), header['Points']
+        ]) # shape of the .data
+        return header
+
+    def __3ds_data_reader__(self, f_path: str,
+                            header: dict) -> Tuple[np.ndarray, np.ndarray]:
+        """Read the data of .3ds file.
+
+        Args:
+            f_path (str): Absolute path to the Nanonis .3ds file.
+            header (dict): Reformed header variable.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: spec attributes and the data matrix.
+        """
+        with open(f_path, 'rb') as f:
+            read_all = f.read()
+            offset = read_all.find(
+                ':HEADER_END:\x0d\x0a'.encode(encoding='utf-8'))
+            f.seek(offset + 14)
+            data = np.fromfile(f, dtype='>f')
+        Parameters = np.zeros(header['# Parameters shape'])
+        spec_data = np.zeros((header['Grid dim'][0] * header['Grid dim'][1],
+                              len(header['Channels']), header['Points']))
+        if data.size == header['Grid dim'][0] * header['Grid dim'][1] * (
+                header['# Parameters (4 byte)'] +
+                header['Experiment size (bytes)'] / 4):
+            for i in range(header['Grid dim'][0] * header['Grid dim'][1]):
+                # Read Parameters
+                for j in range(header['# Parameters (4 byte)']):
+                    Parameters[i][j] = data[
+                        i * int(header['# Parameters (4 byte)'] +
+                                header['Experiment size (bytes)'] / 4) + j]
+                # Read spec data
+                for k in range(len(header['Channels'])):
+                    for l in range(header['Points']):
+                        spec_data[i][k][l] = data[
+                            int(i * (header['Experiment size (bytes)'] / 4 +
+                                     header['# Parameters (4 byte)']) +
+                                (k * header['Points'] +
+                                 header['# Parameters (4 byte)']) + l)]
+        # TODO: Data integrity check
+        # else:
+
+        return Parameters, spec_data
