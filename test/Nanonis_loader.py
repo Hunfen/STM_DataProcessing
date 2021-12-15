@@ -26,7 +26,7 @@ def loader(f_path: str):
     switch = {
         '.sxm': lambda x: __Nanonis_sxm__(x),
         '.dat': lambda x: __Nanonis_dat__(x),
-        # '.3ds': lambda x: __Nanonis_3ds__(x)
+        '.3ds': lambda x: __Nanonis_3ds__(x)
     }
     try:
         return switch[os.path.splitext(f_path)[1]](f_path)
@@ -34,22 +34,24 @@ def loader(f_path: str):
         print('File type not supported.')
 
 
-def __is_number__(s: str) -> Union[float, str]:
+def __is_number__(s: str) -> Union[int, float, str]:
     """String converter.
 
     Args:
         s (str): Input string.
 
     Returns:
-        Union[float, str]: Convert an input string into float if possible, or it would return the input string itself.
+        Union[int, float, str]: Convert an input string into int or float if possible, or it would return the input string itself.
     """
-    try:
-        return float(s)
-    except ValueError:
-        return s
+    if s.isdigit(): # judge if str is an int.
+        return int(s)
+    else:
+        try:
+            return float(s) # convert into float.
+        except ValueError:
+            return s # return input string without change.
 
 
-# TODO: explicit releasing the memory
 class __Nanonis_sxm__:
     def __init__(self, f_path: str) -> None:
         """Nanonis .sxm file class.
@@ -57,7 +59,7 @@ class __Nanonis_sxm__:
         Args:
             f_path (str): Absolute path to the Nanonis .sxm file.
             
-        Returns:
+        Attributes:
             {
                 file_path(str): Absolute path to the Nanonis .sxm file.
                 fname(str): Name of the Nanonis .sxm file.
@@ -74,7 +76,7 @@ class __Nanonis_sxm__:
             f_path, self.header)
 
     def __sxm_header_reader__(self, f_path: str) -> 'dict[str, str]':
-        """Reading the .sxm file header into dict.
+        """Read the .sxm file header into dict.
 
         Returns:
             dict[str, str]: Header of the .sxm file, including all the file attributes.
@@ -214,10 +216,10 @@ class __Nanonis_sxm__:
 
 class __Nanonis_dat__:
     def __init__(self, f_path: str) -> None:
-        """[summary]
+        """Nanonis .dat file class.
 
         Args:
-            f_path (str): [description]
+            f_path (str): Absolute path to the Nanonis .dat file.
         """
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
@@ -227,10 +229,10 @@ class __Nanonis_dat__:
         self.data = self.__dat_data_reader__(f_path)
 
     def __dat_header_reader__(self, f_path: str) -> 'list[str]':
-        """[summary]
+        """Read the .dat file header into list of strings.
 
         Returns:
-            raw_header(list[str]): 
+            str: Header of the .dat file, including all the file attributes.
         """
         raw_header: list[str] = []
         with open(f_path, 'r') as f:
@@ -245,13 +247,13 @@ class __Nanonis_dat__:
 
     def __dat_header_reformer__(
             self, raw_header: 'list[str]') -> 'dict[str, Union[str, float]]':
-        """[summary]
+        """Convert raw header into an accessible/readable dict.
 
         Args:
-            raw_header (list[str]): [description]
+            raw_header (list[str]): .
 
         Returns:
-            dict: [description]
+            dict[str, str | float]: Reformed header variable.
         """
         header: dict[str, Union[str, float]] = {}
         header_ls: list[list[str]] = []
@@ -269,6 +271,14 @@ class __Nanonis_dat__:
         return header
 
     def __dat_data_reader__(self, f_path: str) -> np.ndarray:
+        """[summary]
+
+        Args:
+            f_path (str): Absolute path to the Nanonis .dat file.
+
+        Returns:
+            np.ndarray: data of Nanonis .dat file. 
+        """
         data_str: Union[str, list[str]] = ''
         data_list = []
         with open(f_path, 'r') as f:  # search data start positon
@@ -279,7 +289,6 @@ class __Nanonis_dat__:
                     break
                 else:
                     continue
-        # Notification: data_str type changed
         data_str = data_str.split('\n')
         data_str = data_str[:-1]
         for i in range(len(data_str)):
@@ -289,9 +298,37 @@ class __Nanonis_dat__:
 
 
 # TODO: grid spectrum .3ds class
-# class __Nanonis_3ds__:
-#     """[summary]
-#     """
-#     def __init__(self, f_path: str) -> None:
-#         self.file_path = os.path.split(f_path)[0]
-#         self.fname = os.path.split(f_path)[1]
+class __Nanonis_3ds__:
+    def __init__(self, f_path: str) -> None:
+        """Nanonis .3ds file class.
+
+        Args:
+            f_path (str): Absolute path to the Nanonis .3ds file.
+        """
+        self.file_path = os.path.split(f_path)[0]
+        self.fname = os.path.split(f_path)[1]
+        self.raw_header = self.__3ds_header_reader__(f_path)
+
+    def __3ds_header_reader__(self, f_path: str) -> 'dict[str, str]':
+        entry: str = ''
+        contents: str = ''
+        raw_header: dict[str, str] = {}
+        with open(f_path, 'rb') as f:
+            header_end = False
+            while not header_end:
+                line = f.readline().decode(encoding='utf-8', errors='replace')
+                if re.match(':HEADER_END:', line):
+                    header_end = True
+                else:
+                    entry, contents = line.split('=')
+                    contents = contents.strip('"\r\n')
+                raw_header[entry] = contents
+        return raw_header
+    
+    def __3ds_header_reformer__(self, raw_header: dict) -> dict:
+        
+        scan_info_tuple = ['Grid dim']
+        
+        entries: list[str] = list(raw_header.keys())
+        
+        return 
