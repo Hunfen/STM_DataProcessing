@@ -1,5 +1,5 @@
-__all__ = ['loader', 'core']
+__all__ = ['loader']
 
-import core
+# import core
 # import helpers
 from .Nanonis_loader import loader
