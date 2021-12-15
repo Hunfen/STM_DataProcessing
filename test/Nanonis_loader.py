@@ -406,6 +406,4 @@ class __Nanonis_3ds__:
                                 (k * header['Points'] +
                                  header['# Parameters (4 byte)']) + l)]
         # TODO: Data integrity check
-        # else:
-
         return Parameters, spec_data
