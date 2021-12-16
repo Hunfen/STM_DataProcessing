@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+__all__ = ['loader']
+
 from typing import Union, Tuple
 import os
 import re
@@ -347,7 +349,7 @@ class __Nanonis_3ds__:
         header = {}
         for i in enumerate(entries):
             if i[1] in scan_info_tuple:
-                if re.fullmatch(r'\d\s[x]\s\d', raw_header[i[1]]):
+                if re.fullmatch(r'\d+\s[x]\s\d+', raw_header[i[1]]):
                     header[i[1]] = tuple(
                         int(j) for j in raw_header[i[1]].split(' x '))
                 else:
