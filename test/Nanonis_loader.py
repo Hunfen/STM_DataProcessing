@@ -60,7 +60,7 @@ class __Nanonis_sxm__:
 
         Args:
             f_path (str): Absolute path to the Nanonis .sxm file.
-            
+
         Attributes:
             {
                 file_path(str): Absolute path to the Nanonis .sxm file.
@@ -137,7 +137,7 @@ class __Nanonis_sxm__:
                 z_controller_configVar: list[str] = raw_header[
                     'Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
                 for j, s in enumerate(z_controller_config):
-                    # TODO: regex to split value str with units
+                    # FIXME: regex to split value str with units
                     z_controller[s] = __is_number__(z_controller_configVar[j])
                 header[i[1]] = z_controller
             elif i[1] == 'DATA_INFO':  # data channel information
