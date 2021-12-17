@@ -55,8 +55,18 @@ def __is_number__(s: str) -> Union[int, float, str]:
         try:
             return float(s)  # convert into float.
         except ValueError:
+
             return s  # return input string without change.
 
+
+# from
+
+# def timeit(func):
+#     def wrapper(func):
+
+#         func()
+
+#     return wrapper
 
 print(
     __dat_header_reader__(
