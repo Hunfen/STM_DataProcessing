@@ -9,18 +9,18 @@ import numpy as np
 
 
 def loader(f_path: str):
-    """To load the data files created by Nanonis SPM controller. 
-    
+    """To load the data files created by Nanonis SPM controller.
+
     Args:
         f_path : Path to the data file.
-    
+
     Returns:
         {
             __Nanonis_sxm__ : if file type is .sxm.
             __Nanonis_dat__ : if file type is .dat.
             __Nanonis_3ds__ : if file type is .3ds.
         }
-    
+
     Raises:
         KeyError : If file type is still not supported.
 
@@ -43,7 +43,8 @@ def __is_number__(s: str) -> Union[int, float, str]:
         s (str): Input string.
 
     Returns:
-        Union[int, float, str]: Convert an input string into int or float if possible, or it would return the input string itself.
+        Union[int, float, str]: Convert an input string into int or float
+        if possible, or it would return the input string itself.
     """
     if s.isdigit():  # judge if str is an int.
         return int(s)
@@ -67,7 +68,8 @@ class __Nanonis_sxm__:
                 fname(str): Name of the Nanonis .sxm file.
                 header(dict): Nanonis .sxm file header.
                 data(np.ndarray): .sxm data.
-                channel_dir(tuple): Showing direction of every channel. Trur for forward, False for backward.
+                channel_dir(tuple): Showing direction of every channel.
+                                    True for forward, False for backward.
             }
         """
         self.file_path = os.path.split(f_path)[0]
@@ -81,7 +83,8 @@ class __Nanonis_sxm__:
         """Read the .sxm file header into dict.
 
         Returns:
-            dict[str, str]: Header of the .sxm file, including all the file attributes.
+            dict[str, str]: Header of the .sxm file,
+                            including all the file attributes.
         """
         entry: str = ''
         contents: str = ''
@@ -97,14 +100,13 @@ class __Nanonis_sxm__:
                 elif re.match(':.+:', line):
                     entry = line[1:-2]  # Read header_entry
                     contents = ''  # Clear contents
-                else:  # Load entries & corresponding parameters into pre-defined dict
+                # Load entries & corresponding parameters into pre-defined dict
+                else:
                     contents += line
                     raw_header[entry] = contents.strip('\n')  # remove EOL
         return raw_header
 
-    def __sxm_header_reform__(
-        self, raw_header: 'dict[str, str]'
-    ) -> 'dict[str, Union[dict[str, Union[float, str]], dict[str, dict[str, Union[float, str]]], tuple[float], float, str]]':
+    def __sxm_header_reform__(self, raw_header: 'dict[str, str]') -> dict:
         """Convert raw header into an accessible/readable dict.
 
         Returns:
@@ -130,7 +132,8 @@ class __Nanonis_sxm__:
         for i in enumerate(entries):
             if i[1] in scan_info:  # float type header
                 header[i[1]] = __is_number__(raw_header[i[1]].strip(' '))
-            elif i[1] == 'Z-CONTROLLER':  # Table type header: information of feedback z controller
+            # Table type header: information of feedback z controller
+            elif i[1] == 'Z-CONTROLLER':
                 z_controller: dict[str, Union[float, str]] = {}
                 z_controller_config: list[str] = raw_header[
                     'Z-CONTROLLER'].split('\n')[0].strip('\t').split('\t')
@@ -171,7 +174,8 @@ class __Nanonis_sxm__:
             header (dict): Reformed header variable.
 
         Returns:
-            Tuple[np.ndarray, tuple]: Formated data matrix and the direction for every channel.
+            Tuple[np.ndarray, tuple]: Formated data matrix and
+            the direction for every channel.
         """
 
         with open(f_path, 'rb') as f:
@@ -279,7 +283,7 @@ class __Nanonis_dat__:
             f_path (str): Absolute path to the Nanonis .dat file.
 
         Returns:
-            np.ndarray: data of Nanonis .dat file. 
+            np.ndarray: data of Nanonis .dat file.
         """
         data_str: Union[str, list[str]] = ''
         data_list = []
@@ -318,7 +322,8 @@ class __Nanonis_3ds__:
         """Read the .3ds file header into dict.
 
         Returns:
-            dict[str, str]: Header of the .3ds file, including all the file attributes.
+            dict[str, str]: Header of the .3ds file, including
+            all the file attributes.
         """
         entry: str = ''
         contents: str = ''
@@ -400,12 +405,12 @@ class __Nanonis_3ds__:
                         i * int(header['# Parameters (4 byte)'] +
                                 header['Experiment size (bytes)'] / 4) + j]
                 # Read spec data
-                for k in range(len(header['Channels'])):
-                    for l in range(header['Points']):
-                        spec_data[i][k][l] = data[
+                for j in range(len(header['Channels'])):
+                    for k in range(header['Points']):
+                        spec_data[i][j][k] = data[
                             int(i * (header['Experiment size (bytes)'] / 4 +
                                      header['# Parameters (4 byte)']) +
-                                (k * header['Points'] +
-                                 header['# Parameters (4 byte)']) + l)]
-        # TODO: Data integrity check
+                                (j * header['Points'] +
+                                 header['# Parameters (4 byte)']) + k)]
+        # TODO: Data integrity check.
         return Parameters, spec_data

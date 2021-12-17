@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
 # -*- test the decorator -*-
 
-from typing import Union, Tuple
-
-import os
+from typing import Union
 import re
-
-import numpy as np
-
-
 
 
 def __dat_header_reformer__(func):
@@ -27,7 +21,9 @@ def __dat_header_reformer__(func):
                 header[header_ls[i][0]] = ''
         header_ls = []  # release memory
         return header
+
     return wrapper
+
 
 @__dat_header_reformer__
 def __dat_header_reader__(f_path):
@@ -42,6 +38,7 @@ def __dat_header_reader__(f_path):
                 raw_header.append(line)
     return raw_header
 
+
 def __is_number__(s: str) -> Union[int, float, str]:
     """String converter.
 
@@ -49,7 +46,8 @@ def __is_number__(s: str) -> Union[int, float, str]:
         s (str): Input string.
 
     Returns:
-        Union[int, float, str]: Convert an input string into int or float if possible, or it would return the input string itself.
+        Union[int, float, str]: Convert an input string into int or float
+        if possible, or it would return the input string itself.
     """
     if s.isdigit():  # judge if str is an int.
         return int(s)
@@ -60,8 +58,7 @@ def __is_number__(s: str) -> Union[int, float, str]:
             return s  # return input string without change.
 
 
-
-    
-
-
-print(__dat_header_reader__('/Users/hunfen/Documents/Experimental/STM1500_data/2021/2021-12-14/Bias-Spectroscopy00013.dat'))
+print(
+    __dat_header_reader__(
+        '/Users/hunfen/Documents/Experimental/STM1500_data/' +
+        '2021/2021-12-14/Bias-Spectroscopy00013.dat'))
