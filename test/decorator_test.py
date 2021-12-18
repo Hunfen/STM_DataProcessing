@@ -3,29 +3,39 @@
 
 from typing import Union
 import re
+from dataclasses import dataclass
 
 
-def __dat_header_reformer__(func):
-    def wrapper(*arg, **kwarg):
-        raw_header = func(*arg, **kwarg)
-        header: dict[str, Union[str, float]] = {}
-        header_ls: list[list[str]] = []
-        for i in range(len(raw_header)):
-            header_ls.append(raw_header[i].strip('\n').strip('\t').split('\t'))
-        header_ls = header_ls[:-1]  # remove last element
-        raw_header = []  # release memory
-        for i in range(len(header_ls)):
-            try:
-                header[header_ls[i][0]] = __is_number__(header_ls[i][1])
-            except IndexError:
-                header[header_ls[i][0]] = ''
-        header_ls = []  # release memory
-        return header
-
-    return wrapper
 
 
-@__dat_header_reformer__
+@dataclass
+class __nanonis_dat__:
+    
+
+
+class header_reformer:
+    def __dat_header_reformer__(self, func):
+        def wrapper(*arg, **kwarg):
+            raw_header = func(*arg, **kwarg)
+            header: dict[str, Union[str, float]] = {}
+            header_ls: list[list[str]] = []
+            for i in range(len(raw_header)):
+                header_ls.append(
+                    raw_header[i].strip('\n').strip('\t').split('\t'))
+            header_ls = header_ls[:-1]  # remove last element
+            raw_header = []  # release memory
+            for i in range(len(header_ls)):
+                try:
+                    header[header_ls[i][0]] = __is_number__(header_ls[i][1])
+                except IndexError:
+                    header[header_ls[i][0]] = ''
+            header_ls = []  # release memory
+            return header
+
+        return wrapper
+
+
+@header_reformer.__dat_header_reformer__
 def __dat_header_reader__(f_path):
     raw_header: list[str] = []
     with open(f_path, 'r') as f:
