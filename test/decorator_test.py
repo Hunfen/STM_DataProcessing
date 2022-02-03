@@ -3,14 +3,7 @@
 
 from typing import Union
 import re
-from dataclasses import dataclass
-
-
-
-
-@dataclass
-class __nanonis_dat__:
-    
+# from dataclasses import dataclass
 
 
 class header_reformer:
@@ -35,7 +28,6 @@ class header_reformer:
         return wrapper
 
 
-@header_reformer.__dat_header_reformer__
 def __dat_header_reader__(f_path):
     raw_header: list[str] = []
     with open(f_path, 'r') as f:
