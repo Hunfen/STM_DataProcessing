@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-__all__ = ['slice_3ds']
+__all__ = ['slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent']
 
 from typing import Any
 import numpy as np
+from scipy.optimize import curve_fit
 
 
 def slice_3ds(f: Any, bias: float = 0, full: bool = False):
@@ -62,3 +63,57 @@ def find_nearest(array: np.ndarray, value: float):
     """
     idx, val = min(enumerate(array), key=lambda x: abs(x[1] - value))
     return idx
+
+
+def level_plain(raw_topo: np.ndarray) -> np.ndarray:
+
+    vector: list = []
+    x: np.ndarray = np.zeros((raw_topo.ndim, raw_topo.size))
+    topo_plain: np.ndarray = np.zeros(raw_topo.shape)
+    for i in range(raw_topo.ndim):
+        vector.append(np.linspace(0, raw_topo.shape[i] - 1, raw_topo.shape[i]))
+    mesh_grid: list[np.ndarray] = np.meshgrid(*vector)
+    for i in range(raw_topo.ndim):
+        x[i] = mesh_grid[i].flatten()
+
+    if raw_topo.ndim == 2:
+        parameter = curve_fit(linear_2d, x, raw_topo.flatten())
+        topo_plain_flatten = raw_topo.flatten() - linear_2d(x, *parameter[0])
+        topo_plain = topo_plain_flatten.reshape(raw_topo.shape)
+        topo_plain -= topo_plain.min()
+    return topo_plain
+
+
+def align_row_diff_median(raw_topo: np.ndarray) -> np.ndarray:
+    topo_shift = np.zeros(raw_topo.shape)
+    row_median = np.median(raw_topo, axis=1)
+    for i in range(len(row_median)):
+        topo_shift[i] = raw_topo[i] - (row_median[i] - row_median[0])
+    topo_shift -= topo_shift.min()
+    return topo_shift
+
+
+# TODO: Create multi-dimensional linear function
+def linear_2d(x: np.ndarray, a: float, b: float, d: float) -> np.ndarray:
+    return a * x[0] + b * x[1] + d
+
+
+def topo_extent(header: dict) -> 'tuple[float, float, float, float]':
+    """
+    Calculate position of topograph.
+
+    Parameter
+    ---------
+    header : reformed header of .sxm
+
+    Return
+    ------
+    position tuple (left[X], right[X], bottom[Y], top[Y])
+    """
+
+    center_X = header['Scan>Scanfield'][0]
+    center_Y = header['Scan>Scanfield'][1]
+    range_X = header['Scan>Scanfield'][2]
+    range_Y = header['Scan>Scanfield'][3]
+    return (center_X - range_X / 2, center_X + range_X / 2,
+            center_Y - range_Y / 2, center_Y + range_Y / 2)
