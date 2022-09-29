@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-__all__ = ['plot_topo', 'plot_grid_slice']
+__all__ = [
+    'plot_topo', 'plot_grid_slice', 'marker_layer', 'plot_grid',
+    'plot_grid_respective', 'plot_grid_by_idx'
+]
 
-from typing import Union
+from typing import Any, Union
 import numpy as np
 import os
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-from utilities import level_plain, slice_3ds
+from utilities import level_plain, slice_3ds, topo_extent
 from nanonis_loader import loader
 
 # color map
@@ -97,7 +100,8 @@ def plot_grid_slice(input: str = '',
             ax.imshow(grid_mapping[i])
         ax.axis('off')
         if title:
-            ax.set_title(str(round(grid_mapping_stat[i][0] * 1e3, 2)) + 'mV', fontsize = 16)
+            ax.set_title(str(round(grid_mapping_stat[i][0] * 1e3, 2)) + 'mV',
+                         fontsize=16)
         fig.tight_layout(pad=0, w_pad=0, h_pad=0)
         fig.savefig(output + str(i).zfill(3) + '_' +
                     str(round(grid_mapping_stat[i][0] * 1e3, 2)) + 'mV.png')
@@ -109,3 +113,212 @@ def plot_grid_slice(input: str = '',
 
     fig.tight_layout(pad=0, w_pad=0, h_pad=0)
     fig.savefig(output + 'grid_z.png')
+
+
+def marker_layer(f_path: str = '', spec_path: str = '', output: str = ''):
+    """_summary_
+
+    Args:
+        f_path (str, optional): _description_. Defaults to ''.
+        spec_path (str, optional): _description_. Defaults to ''.
+        output (str, optional): _description_. Defaults to ''.
+    """
+    topo = loader(f_path)
+    specs = loader(spec_path)
+    extent = topo_extent(topo.header)
+    fig, ax = plt.subplots(figsize=(3.375, 3.375))
+
+    ax.set_xlim(extent[0], extent[1])
+    ax.set_ylim(extent[2], extent[3])
+    ax.axis('off')
+
+    if spec_path[-3:] == 'dat':
+        ax.plot(float(specs.header['X (m)']),
+                float(specs.header['Y (m)']),
+                '^',
+                ms=8,
+                color='black')
+    elif spec_path[-3:] == '3ds':
+        for i in range(len(specs.Parameters)):
+            ax.plot(specs.Parameters[i][2], specs.Parameters[i][3], '^', ms=8)
+
+    ax.set_facecolor('none')
+    fig.set_facecolor('none')
+    fig.tight_layout(pad=0, w_pad=0, h_pad=0)
+    fig.savefig(output, transparent=True, dpi=100)
+
+
+def plot_grid(input_grid: str = '',
+              offset_x: float = 0,
+              offset_y: float = 0,
+              xlim: 'list[float]' = [],
+              ylim: 'list[float]' = [],
+              ratio_xy: float = 1 / 2,
+              output_grid: str = ''):
+    """_summary_
+
+    Args:
+        input_grid (str, optional): _description_. Defaults to ''.
+        offset_x (float, optional): _description_. Defaults to 0.
+        offset_y (float, optional): _description_. Defaults to 0.
+        xlim (list[float], optional): _description_. Defaults to [].
+        ylim (list[float], optional): _description_. Defaults to [].
+        output_grid (str, optional): _description_. Defaults to ''.
+    """
+    grid = loader(input_grid)  # acquire spectra
+
+    # Plot spectra
+    fig, ax = plt.subplots(figsize=(3.375, 3.375 / ratio_xy))
+
+    for i in range(len(grid.Parameters)):
+        if np.abs(grid.Parameters[i][0] - grid.Parameters[i][1]) >= 1:
+            bias = np.linspace(grid.Parameters[i][0], grid.Parameters[i][1],
+                               grid.header['Points']) - offset_x
+            ax.set_xlabel('Bias [V]', fontsize=16)
+        else:
+            bias = np.linspace(grid.Parameters[i][0] * 1e3,
+                               grid.Parameters[i][1] * 1e3,
+                               grid.header['Points']) - offset_x
+            ax.set_xlabel('Bias [mV]', fontsize=16)
+        ax.plot(bias, (grid.data[i][1] + grid.data[i][4]) / 2 + offset_y * i,
+                'v',
+                ms=2)
+        if offset_y:
+            ax.axhline(y=offset_y * i,
+                       xmin=0.48,
+                       xmax=0.52,
+                       ls='-',
+                       lw=1,
+                       color='black')
+
+    if xlim:
+        ax.set_xlim(xlim[0], xlim[1])
+
+    if ylim:
+        ax.set_ylim(ylim[0], ylim[1])
+    else:
+        ax.set_ylim(0, )
+
+    ax.set_ylabel('dI/dV [arb. units]', fontsize=16)
+    fig.tight_layout(w_pad=0, h_pad=0)
+    fig.savefig(output_grid, dpi=300)
+
+
+def plot_grid_respective(grid_path: str = '',
+                         output: str = '',
+                         offset_v: float = 0,
+                         ratio_xy: float = 1 / 2):
+    if not os.path.exists(output):
+        os.makedirs(output)
+    grid = loader(grid_path)
+    fig, ax = plt.subplots(figsize=(3.375, 3.375 / ratio_xy))
+    for i in range(len(grid.Parameters)):
+        bias = (np.linspace(grid.Parameters[i][0], grid.Parameters[i][1],
+                            grid.header['Points']) - offset_v) * 1e3
+        spec = (grid.data[i][1] + grid.data[i][4]) / 2
+        ax.plot(bias, spec, 'v', ms=2, color='r')
+        ax.set_xlim((bias.max() + bias.min()) / 2 -
+                    (bias.max() - bias.min()) / 0.9 / 2,
+                    (bias.max() + bias.min()) / 2 +
+                    (bias.max() - bias.min()) / 0.9 / 2)
+        ax.set_ylim(0, spec.max() / 0.9)
+
+        ax.set_xlabel('Bias [mV]', fontsize=16)
+        ax.set_ylabel('dI/dV [arb. units]', fontsize=16)
+        fig.tight_layout(w_pad=0, h_pad=0)
+        fig.savefig(
+            output + str(i).zfill(4) + '_' +
+            '({0}, {1})'.format(round(grid.Parameters[i][2] * 1e9, 2),
+                                round(grid.Parameters[i][3] * 1e9, 2)) + '_' +
+            '({0}, {1})'.format(
+                round(
+                    i % grid.header['Grid dim'][0] *
+                    (grid.header['Grid settings'][2] * 1e9 /
+                     grid.header['Grid dim'][0]) +
+                    (grid.header['Grid settings'][2] * 1e9 /
+                     grid.header['Grid dim'][0]) / 2, 2),
+                round((grid.header['Grid dim'][1] -
+                       i // grid.header['Grid dim'][0] - 1) *
+                      (grid.header['Grid settings'][3] * 1e9 /
+                       grid.header['Grid dim'][1]) +
+                      (grid.header['Grid settings'][3] * 1e9 /
+                       grid.header['Grid dim'][1]) / 2, 2)) + '_' +
+            '({0}, {1})'.format(
+                grid.header['Grid dim'][1] - i // grid.header['Grid dim'][0] -
+                1, i % grid.header['Grid dim'][0]) + '.png',
+            dpi=100)
+        ax.cla()
+
+
+def plot_grid_by_idx(grid_path = '',
+                     idx: list = [],
+                     avg: bool = False,
+                     offset_x: float = 0,
+                     offset_y: float = 0,
+                     xlim: list = [],
+                     ylim: list = [],
+                     ratio_xy: float = 1 / 2,
+                     cmap: str = 'viridis',
+                     output: str = ''):
+    if isinstance(grid_path, str):
+        grid = loader(grid_path)
+    else:
+        grid = grid_path
+    fig, ax = plt.subplots(figsize=(3.375, 3.375 / ratio_xy))
+    if not avg:
+        for i in range(len(idx)):
+            cm = plt.get_cmap(cmap)
+            spec = (grid.data[idx[i]][1] + grid.data[idx[i]][4]) / 2
+            if np.abs(grid.Parameters[i][0] - grid.Parameters[i][1]) >= 1:
+                bias = np.linspace(grid.Parameters[i][0],
+                                   grid.Parameters[i][1],
+                                   grid.header['Points']) - offset_x
+                ax.set_xlabel('Bias [V]', fontsize=16)
+            else:
+                bias = (
+                    np.linspace(grid.Parameters[i][0], grid.Parameters[i][1],
+                                grid.header['Points']) - offset_x) * 1e3
+                ax.set_xlabel('Bias [mV]', fontsize=16)
+            ax.plot(bias,
+                    spec + offset_y * i,
+                    'v',
+                    ms=2,
+                    color=cm(i / len(idx)))
+            ax.axhline(
+                y=offset_y * i,
+                xmin=(0 - (bias.max() - bias.min()) * 0.02 - bias.min()) /
+                (bias.max() - bias.min()),
+                xmax=(0 + (bias.max() - bias.min()) * 0.02 - bias.min()) /
+                (bias.max() - bias.min()),
+                ls='-',
+                lw=2,
+                color=cm(i / len(idx)))
+    else:
+        spec = np.zeros(grid.header['Points'])
+        for i in idx:
+            spec += (grid.data[i][1] + grid.data[i][4]) / 2
+        spec /= len(idx)
+        if np.abs(grid.Parameters[i][0] - grid.Parameters[i][1]) >= 1:
+            bias = np.linspace(grid.Parameters[0][0], grid.Parameters[0][1],
+                               grid.header['Points']) - offset_x
+            ax.set_xlabel('Bias [V]', fontsize=16)
+        else:
+            bias = (np.linspace(grid.Parameters[0][0], grid.Parameters[0][1],
+                                grid.header['Points']) - offset_x) * 1e3
+            ax.set_xlabel('Bias [mV]', fontsize=16)
+        ax.plot(bias, spec, 'v', ms=2, color='r')
+        
+    if xlim:
+        ax.set_xlim(xlim[0], xlim[1])
+    else:
+        ax.set_xlim((bias.max() + bias.min()) / 2 -
+                    (bias.max() - bias.min()) / 0.9 / 2,
+                    (bias.max() + bias.min()) / 2 +
+                    (bias.max() - bias.min()) / 0.9 / 2)
+    if ylim:
+        ax.set_ylim(ylim[0], ylim[1])
+    else:
+        ax.set_ylim(0, )
+    ax.set_ylabel('dI/dV [arb. units]', fontsize=16)
+    fig.tight_layout(w_pad=0, h_pad=0)
+    fig.savefig(output, dpi=100)

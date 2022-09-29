@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-__all__ = ['slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent']
+__all__ = [
+    'slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent',
+    'get_line_r', 'get_line_g', 'coor_to_idx', 'idx_to_coor', 'get_idx_r'
+]
 
-from typing import Any
+from typing import Any, Union
+# from matplotlib.pyplot import grid
 import numpy as np
 from scipy.optimize import curve_fit
 
@@ -66,6 +70,14 @@ def find_nearest(array: np.ndarray, value: float):
 
 
 def level_plain(raw_topo: np.ndarray) -> np.ndarray:
+    """Level data by mean plane subtraction.
+
+    Args:
+        raw_topo (np.ndarray): Raw data of 2-dimensional topographic image.
+
+    Returns:
+        np.ndarray: Linear-background-removed 2-dimensional topographic image. 
+    """
 
     vector: list = []
     x: np.ndarray = np.zeros((raw_topo.ndim, raw_topo.size))
@@ -98,6 +110,78 @@ def linear_2d(x: np.ndarray, a: float, b: float, d: float) -> np.ndarray:
     return a * x[0] + b * x[1] + d
 
 
+def get_line_r(
+        init: tuple = (0, 0),
+        dest: tuple = (0, 0),
+        sampling: int = 1000,
+        frame_size: tuple = (30, 30),  # real-space(nm)
+        grid_size: tuple = (50, 50)  # grid-space
+):
+    """_summary_
+
+    Args:
+        init (tuple, optional): _description_. Defaults to (0, 0).
+        dest (tuple, optional): _description_. Defaults to (0, 0).
+        sampling (int, optional): _description_. Defaults to 1000.
+        frame_size (tuple, optional): _description_. Defaults to (30, 30).
+
+    Returns:
+        _type_: _description_
+    """
+    coor_x = np.linspace(init[0], dest[0], sampling)
+    coor_y = np.linspace(init[1], dest[1], sampling)
+    idx = []
+    coor_grid = []
+    for i in range(sampling):
+        order = coor_to_idx((coor_x[i], coor_y[i]),
+                            frame_size=frame_size,
+                            grid_size=grid_size,
+                            mode='r')
+        if order not in idx:
+            idx.append(order)
+    for i in range(len(idx)):
+        coor_grid.append(
+            idx_to_coor(idx[i],
+                        frame_size=frame_size,
+                        grid_size=grid_size,
+                        mode='g'))
+    return idx, coor_grid
+
+
+def get_line_g(init: 'tuple[int, int]' = (0, 0),
+               dest: 'tuple[int, int]' = (0, 0),
+               frame_size: 'tuple[float, float]' = (30, 30),
+               grid_size: 'tuple[int, int]' = (50, 50)):
+    """_summary_
+
+    Args:
+        init (tuple[int, int], optional): _description_. Defaults to (0, 0).
+        dest (tuple[int, int], optional): _description_. Defaults to (0, 0).
+        frame_size (tuple[float, float], optional): _description_. Defaults to (30, 30).
+        grid_size (tuple[int, int], optional): _description_. Defaults to (50, 50).
+
+    Returns:
+        _type_: _description_
+    """
+    coor_x = np.linspace(init[0], dest[0], 1000)
+    coor_y = np.linspace(init[1], dest[1], 1000)
+    coor = []
+    idx = []
+    for i in range(1000):
+        order = coor_to_idx((round(coor_x[i]), round(coor_y[i])),
+                            grid_size=grid_size,
+                            mode='g')
+        if order not in idx:
+            idx.append(order)
+    for i in range(len(idx)):
+        coor.append(
+            idx_to_coor(idx[i],
+                        frame_size=frame_size,
+                        grid_size=grid_size,
+                        mode='r'))
+    return idx, coor
+
+
 def topo_extent(header: dict) -> 'tuple[float, float, float, float]':
     """
     Calculate position of topograph.
@@ -117,3 +201,57 @@ def topo_extent(header: dict) -> 'tuple[float, float, float, float]':
     range_Y = header['Scan>Scanfield'][3]
     return (center_X - range_X / 2, center_X + range_X / 2,
             center_Y - range_Y / 2, center_Y + range_Y / 2)
+
+
+def cal_length(coor: tuple = (0, 0), o: tuple = (0, 0)) -> float:
+    return np.sqrt((coor[0] - o[0])**2 + (coor[0] - o[0])**2)
+
+
+def coor_to_idx(coor: tuple = (0, 0),
+                frame_size: 'tuple[float, float]' = (30, 30),
+                grid_size: 'tuple[int, int]' = (50, 50),
+                mode: str = 'r') -> int:
+    idx: int = 0
+    if mode == 'r':
+        x_interval = frame_size[0] / grid_size[0]
+        y_interval = frame_size[1] / grid_size[1]
+        idx = int(coor[1] // y_interval * grid_size[0] + coor[0] // x_interval)
+    elif mode == 'g':
+        idx = int((grid_size[1] - coor[0] - 1) * grid_size[0] + coor[1])
+    return idx
+
+
+def idx_to_coor(idx: int = 0,
+                frame_size: 'tuple[float, float]' = (30, 30),
+                grid_size: 'tuple[int, int]' = (50, 50),
+                mode: str = 'r') -> tuple:
+    coor: Union[tuple[float, float], tuple[int, int]] = (0, 0)
+    if mode == 'r':
+        x_interval = frame_size[0] / grid_size[0]
+        y_interval = frame_size[1] / grid_size[1]
+        coor = (round(x_interval * (1 / 2 + idx % grid_size[0]),
+                      2), round(y_interval * (idx // grid_size[0] + 1 / 2), 2))
+    elif mode == 'g':
+        coor = (grid_size[1] - idx // grid_size[0] - 1, idx % grid_size[0])
+    return coor
+
+
+def get_idx_r(input: list,
+              frame_size: tuple = (30, 30),
+              grid_size: tuple = (50, 50)):
+    idx = []
+    coor = []
+    for i in range(len(input)):
+        order = coor_to_idx(input[i],
+                            frame_size=frame_size,
+                            grid_size=grid_size,
+                            mode='r')
+        if order not in idx:
+            idx.append(order)
+    for i in range(len(idx)):
+        coor.append(
+            idx_to_coor(idx[i],
+                        frame_size=frame_size,
+                        grid_size=grid_size,
+                        mode='g'))
+    return idx, coor
