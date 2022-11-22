@@ -393,8 +393,8 @@ class __Nanonis_3ds__:
             f.seek(offset + 14)
             data = np.fromfile(f, dtype='>f')
         Parameters = np.zeros(header['# Parameters shape'])
-        spec_data = np.empty((header['Grid dim'][0] * header['Grid dim'][1],
-                              len(header['Channels']), header['Points'])).fill(np.nan)
+        spec_data = np.zeros((header['Grid dim'][0] * header['Grid dim'][1],
+                              len(header['Channels']), header['Points']))
         if data.size == header['Grid dim'][0] * header['Grid dim'][1] * (
                 header['# Parameters (4 byte)'] +
                 header['Experiment size (bytes)'] / 4):
