@@ -250,7 +250,7 @@ def plot_grid_respective(grid_path: str = '',
         ax.cla()
 
 
-def plot_grid_by_idx(grid_path = '',
+def plot_grid_by_idx(grid_path='',
                      idx: list = [],
                      avg: bool = False,
                      offset_x: float = 0,
@@ -307,7 +307,7 @@ def plot_grid_by_idx(grid_path = '',
                                 grid.header['Points']) - offset_x) * 1e3
             ax.set_xlabel('Bias [mV]', fontsize=16)
         ax.plot(bias, spec, 'v', ms=2, color='r')
-        
+
     if xlim:
         ax.set_xlim(xlim[0], xlim[1])
     else:
