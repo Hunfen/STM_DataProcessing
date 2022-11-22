@@ -4,7 +4,7 @@ __all__ = [
     'plot_grid_respective', 'plot_grid_by_idx'
 ]
 
-from typing import Any, Union
+from typing import Union
 import numpy as np
 import os
 
@@ -51,7 +51,7 @@ def plot_topo(input: Union[str, np.ndarray] = '',
     fig, ax = plt.subplots(figsize=size)
 
     if v_min:
-        ax.imshow(topo, cmap=gwyddion, vmin=v_min)
+        ax.imshow(topo, cmap=gwyddion, vmin=v_min)  # type: ignore
     elif sigma:
         topo_median = np.median(topo)
         topo_std = np.std(topo)
@@ -60,7 +60,7 @@ def plot_topo(input: Union[str, np.ndarray] = '',
                   vmin=[
                       topo_median - sigma * topo_std,
                       topo_median + sigma * topo_std
-                  ])
+                  ])  # type: ignore
     else:
         ax.imshow(topo, cmap=gwyddion)
     ax.axis('off')
