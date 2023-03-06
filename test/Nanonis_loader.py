@@ -395,22 +395,26 @@ class __Nanonis_3ds__:
         Parameters = np.zeros(header['# Parameters shape'])
         spec_data = np.zeros((header['Grid dim'][0] * header['Grid dim'][1],
                               len(header['Channels']), header['Points']))
-        if data.size == header['Grid dim'][0] * header['Grid dim'][1] * (
-                header['# Parameters (4 byte)'] +
-                header['Experiment size (bytes)'] / 4):
-            for i in range(header['Grid dim'][0] * header['Grid dim'][1]):
-                # Read Parameters
-                for j in range(header['# Parameters (4 byte)']):
-                    Parameters[i][j] = data[
-                        i * int(header['# Parameters (4 byte)'] +
-                                header['Experiment size (bytes)'] / 4) + j]
-                # Read spec data
-                for j in range(len(header['Channels'])):
-                    for k in range(header['Points']):
-                        spec_data[i][j][k] = data[
-                            int(i * (header['Experiment size (bytes)'] / 4 +
-                                     header['# Parameters (4 byte)']) +
-                                (j * header['Points'] +
-                                 header['# Parameters (4 byte)']) + k)]
-        # TODO: Data integrity check.
+        data_size = header['Grid dim'][0] * header['Grid dim'][1] * (
+            header['# Parameters (4 byte)'] +
+            header['Experiment size (bytes)'] / 4)
+        if not data.size == data_size:
+            # If .3ds file is not integrated, dataset would be filled with 0.
+            data = np.pad(data, (0, int(data_size - data.size)),
+                          'constant',
+                          constant_values=0)
+        for i in range(header['Grid dim'][0] * header['Grid dim'][1]):
+            # Read Parameters
+            for j in range(header['# Parameters (4 byte)']):
+                Parameters[i][j] = data[
+                    i * int(header['# Parameters (4 byte)'] +
+                            header['Experiment size (bytes)'] / 4) + j]
+            # Read spec data
+            for j in range(len(header['Channels'])):
+                for k in range(header['Points']):
+                    spec_data[i][j][k] = data[
+                        int(i * (header['Experiment size (bytes)'] / 4 +
+                                 header['# Parameters (4 byte)']) +
+                            (j * header['Points'] +
+                             header['# Parameters (4 byte)']) + k)]
         return Parameters, spec_data
