@@ -15,7 +15,7 @@ from utilities import level_plain, slice_3ds, topo_extent
 from nanonis_loader import loader
 
 # color map
-cdict: dict = {
+cdict_gwyddion: dict = {
     'red': [(0.0, 0.0, 0.0), (0.34, 168 / 256, 168 / 256),
             (0.67, 243 / 256, 243 / 256), (1.0, 1.0, 1.0)],
     'green': [(0.0, 0.0, 0.0), (0.34, 40 / 256, 40 / 256),
@@ -23,13 +23,24 @@ cdict: dict = {
     'blue': [(0.0, 0.0, 0.0), (0.34, 15 / 256, 15 / 256),
              (0.67, 93 / 256, 93 / 256), (1.0, 1.0, 1.0)]
 }
-gwyddion = LinearSegmentedColormap('gwyddion', segmentdata=cdict, N=256)
+gwyddion = LinearSegmentedColormap('gwyddion', segmentdata=cdict_gwyddion, N=256)
+
+# cdict_DFit: dict = {
+#     'red': [(0.0, 0.0, 0.0), (222 / 256, 168 / 256, 168 / 256),
+#             (0.67, 243 / 256, 243 / 256), (1.0, 1.0, 1.0)],
+#     'green': [(0.0, 0.0, 0.0), (0.34, 40 / 256, 40 / 256),
+#               (0.67, 194 / 256, 194 / 256), (1.0, 1.0, 1.0)],
+#     'blue': [(0.0, 0.0, 0.0), (0.34, 15 / 256, 15 / 256),
+#              (0.67, 93 / 256, 93 / 256), (1.0, 1.0, 1.0)]
+# }
+# DFit = LinearSegmentedColormap('DFit', segmentdata=cdict_DFit, N=256)
 
 
 def plot_topo(input: Union[str, np.ndarray] = '',
               output: str = '',
               v_min: 'list[float]' = [],
-              sigma: float = 0) -> None:
+              sigma: float = 0,
+              color_map=gwyddion) -> None:
     """_summary_
 
     Args:
@@ -51,25 +62,27 @@ def plot_topo(input: Union[str, np.ndarray] = '',
     fig, ax = plt.subplots(figsize=size)
 
     if v_min:
-        ax.imshow(topo, cmap=gwyddion, vmin=v_min)  # type: ignore
+        ax.imshow(topo, cmap=color_map, vmin=v_min)  # type: ignore
     elif sigma:
         topo_median = np.median(topo)
         topo_std = np.std(topo)
         ax.imshow(topo,
-                  cmap=gwyddion,
+                  cmap=color_map,
                   vmin=[
                       topo_median - sigma * topo_std,
                       topo_median + sigma * topo_std
                   ])  # type: ignore
     else:
-        ax.imshow(topo, cmap=gwyddion)
+        ax.imshow(topo, cmap=color_map)
     ax.axis('off')
 
     fig.tight_layout(pad=0, w_pad=0, h_pad=0)
-    if isinstance(input, str):
+    if output:
+        fig.savefig(output, dpi=300)
+    elif isinstance(input, str):
         fig.savefig(input.replace(input[-3:], 'png'), dpi=300)
     else:
-        fig.savefig(output, dpi=300)
+        print('Pls Give a savepath.')
 
 
 def plot_grid_slice(input: str = '',
@@ -95,7 +108,7 @@ def plot_grid_slice(input: str = '',
                 vmin=[
                     grid_mapping_stat[i][1] - sigma * grid_mapping_stat[i][2],
                     grid_mapping_stat[i][1] + sigma * grid_mapping_stat[i][2]
-                ])
+                ])  # type:ignore
         else:
             ax.imshow(grid_mapping[i])
         ax.axis('off')
@@ -295,10 +308,15 @@ def plot_grid_by_idx(grid_path='',
                 color=cm(i / len(idx)))
     else:
         spec = np.zeros(grid.header['Points'])
-        for i in idx:
-            spec += (grid.data[i][1] + grid.data[i][4]) / 2
-        spec /= len(idx)
-        if np.abs(grid.Parameters[i][0] - grid.Parameters[i][1]) >= 1:
+        if idx:
+            for i in idx:
+                spec += (grid.data[i][1] + grid.data[i][4]) / 2
+            spec /= len(idx)
+        else:
+            for i in range(len(grid.Parameters)):
+                spec += (grid.data[i][1] + grid.data[i][4]) / 2
+            spec /= (i + 1)
+        if np.abs(grid.Parameters[0][0] - grid.Parameters[0][1]) >= 1:
             bias = np.linspace(grid.Parameters[0][0], grid.Parameters[0][1],
                                grid.header['Points']) - offset_x
             ax.set_xlabel('Bias [V]', fontsize=16)
