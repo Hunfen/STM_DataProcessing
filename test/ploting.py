@@ -23,7 +23,9 @@ cdict_gwyddion: dict = {
     'blue': [(0.0, 0.0, 0.0), (0.34, 15 / 256, 15 / 256),
              (0.67, 93 / 256, 93 / 256), (1.0, 1.0, 1.0)]
 }
-gwyddion = LinearSegmentedColormap('gwyddion', segmentdata=cdict_gwyddion, N=256)
+gwyddion = LinearSegmentedColormap('gwyddion',
+                                   segmentdata=cdict_gwyddion,
+                                   N=256)
 
 # cdict_DFit: dict = {
 #     'red': [(0.0, 0.0, 0.0), (222 / 256, 168 / 256, 168 / 256),

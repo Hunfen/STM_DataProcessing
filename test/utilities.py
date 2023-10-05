@@ -97,6 +97,18 @@ def level_plain(raw_topo: np.ndarray) -> np.ndarray:
 
 
 def align_row_diff_median(raw_topo: np.ndarray) -> np.ndarray:
+    """_summary_
+    Aligns the topography by shifting each row by the median of the row minus the median of the first row.
+    This is done to remove the effect of the topography of the sample.
+    Parameters
+    ----------
+    raw_topo : np.ndarray
+        The raw topography of the sample.
+    Returns
+    -------
+    np.ndarray
+        The aligned topography of the sample.
+    """
     topo_shift = np.zeros(raw_topo.shape)
     row_median = np.median(raw_topo, axis=1)
     for i in range(len(row_median)):
