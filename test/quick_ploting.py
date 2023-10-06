@@ -4,15 +4,16 @@ __all__ = [
     'plot_grid_respective', 'plot_grid_by_idx'
 ]
 
+import os
 from typing import Union
 import numpy as np
-import os
+
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-from utilities import level_plain, slice_3ds, topo_extent
-from nanonis_loader import loader
+from matrix_utilities import level_plain, slice_3ds, topo_extent
+from Nanonis_loader import loader
 
 # color map
 cdict_gwyddion: dict = {
