@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+"""
+Python module that helps read the Nanonis files. 
+"""
 __all__ = ['loader']
 
 from typing import Union, Tuple
