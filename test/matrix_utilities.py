@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+"""
+Python module for matrix malipulation.
+Name: matrix_utilities
+"""
 __all__ = [
     'slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent',
     'get_line_r', 'get_line_g', 'coor_to_idx', 'idx_to_coor', 'get_idx_r'

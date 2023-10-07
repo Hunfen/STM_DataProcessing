@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Python module that helps read the Nanonis files. 
+Python module that helps read the Nanonis files.
 """
 __all__ = ['loader']
 
@@ -59,6 +59,7 @@ def __is_number__(s: str) -> Union[int, float, str]:
 
 
 class __Nanonis_sxm__:
+
     def __init__(self, f_path: str) -> None:
         """Nanonis .sxm file class.
 
@@ -224,6 +225,7 @@ class __Nanonis_sxm__:
 
 
 class __Nanonis_dat__:
+
     def __init__(self, f_path: str) -> None:
         """Nanonis .dat file class.
 
@@ -307,6 +309,7 @@ class __Nanonis_dat__:
 
 
 class __Nanonis_3ds__:
+
     def __init__(self, f_path: str) -> None:
         """Nanonis .3ds file class.
 
