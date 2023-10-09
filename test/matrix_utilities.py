@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Python module for matrix malipulation.
-Name: matrix_utilities
+Python module for matrix manipulation.
+Name: matrix_utilities.py
 """
 __all__ = [
     'slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent',

@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+"""
+Python module for basic plotting functions.
+Name: quick_ploting.py
+"""
 __all__ = [
     'plot_topo', 'plot_grid_slice', 'marker_layer', 'plot_grid',
     'plot_grid_respective', 'plot_grid_by_idx'
