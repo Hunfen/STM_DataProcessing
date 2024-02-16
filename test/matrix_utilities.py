@@ -5,7 +5,8 @@ Name: matrix_utilities.py
 """
 __all__ = [
     'slice_3ds', 'level_plain', 'align_row_diff_median', 'topo_extent',
-    'get_line_r', 'get_line_g', 'coor_to_idx', 'idx_to_coor', 'get_idx_r'
+    'get_line_r', 'get_line_g', 'coor_to_idx', 'idx_to_coor', 'get_idx_r',
+    'is_in_poly'
 ]
 
 from typing import Any, Union
@@ -15,15 +16,16 @@ from scipy.optimize import curve_fit
 
 
 def slice_3ds(f: Any, bias: float = 0, full: bool = False):
-    """[summary]
+    """
+    对3D扫描数据进行切片。
 
     Args:
-        f (Any): [description]
-        bias (float, optional): [description]. Defaults to 0.
-        full (bool, optional): [description]. Defaults to False.
+        f (Any): 输入的3D扫描数据。
+        bias (float, optional): 偏置值，用于确定切片的位置。默认为0。
+        full (bool, optional): 如果为True，则对所有扫描点进行切片；如果为False，则只对偏置值对应的扫描点进行切片。默认为False。
 
     Returns:
-        [type]: [description]
+        tuple: 返回一个元组，包含扫描点的值、切片数据和z值。
     """
     dim = f.header['Grid dim']
     points = f.header['Points']
@@ -271,3 +273,46 @@ def get_idx_r(input: list,
                         grid_size=grid_size,
                         mode='g'))
     return idx, coor
+
+
+def __sort_coordinates(poly):
+    list_of_xy_coords = np.array(poly)
+    cx, cy = list_of_xy_coords.mean(0)
+    x, y = list_of_xy_coords.T
+    angles = np.arctan2(x - cx, y - cy)
+    indices = np.argsort(angles)
+    return list_of_xy_coords[indices]
+
+
+def is_in_poly(p, poly):
+    """
+    :param p: [x, y]
+    :param poly: [[], [], [], [], ...]
+    :return:
+    """
+    px, py = p
+    poly_sorted = __sort_coordinates(poly).tolist()
+    is_in = False
+    for i, corner in enumerate(poly_sorted):
+        next_i = i + 1 if i + 1 < len(poly_sorted) else 0
+        x1, y1 = corner
+        x2, y2 = poly_sorted[next_i]
+        if (x1 == px and y1 == py) or (x2 == px
+                                       and y2 == py):  # if point is on vertex
+            is_in = True
+            break
+        if min(y1, y2) < py <= max(y1, y2):  # find horizontal edges of polygon
+            x = x1 + (py - y1) * (x2 - x1) / (y2 - y1)
+            if x == px:  # if point is on edge
+                is_in = True
+                break
+            elif x > px:  # if point is on left-side of line
+                is_in = not is_in
+    return is_in
+
+
+# def arb_to_S(input_3ds) -> np.ndarray:
+#     current_fwd = input_3ds.data[:, 0]
+#     current_bwd =
+
+#     return

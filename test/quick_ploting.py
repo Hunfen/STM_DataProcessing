@@ -48,14 +48,15 @@ def plot_topo(input: Union[str, np.ndarray] = '',
               v_min: 'list[float]' = [],
               sigma: float = 0,
               color_map=gwyddion) -> None:
-    """_summary_
+    """
+    绘制地形图。
 
     Args:
-        input (Union[str, np.ndarray], optional): _description_.
-        Defaults to ''.
-        output (str, optional): _description_. Defaults to ''.
-        v_min (list[float], optional): _description_. Defaults to [].
-        sigma (float, optional): _description_. Defaults to 0.
+        input (Union[str, np.ndarray], optional): 输入数据，可以是文件路径或者numpy数组。默认为''。
+        output (str, optional): 输出文件的路径。默认为''。
+        v_min (list[float], optional): 颜色映射的最小值。默认为[]。
+        sigma (float, optional): 如果v_min未给出，使用此参数计算颜色映射的最小值。默认为0。
+        color_map: 颜色映射。默认为gwyddion。
     """
     if isinstance(input, str):
         topo: np.ndarray = np.loadtxt(input)
@@ -89,14 +90,22 @@ def plot_topo(input: Union[str, np.ndarray] = '',
     elif isinstance(input, str):
         fig.savefig(input.replace(input[-3:], 'png'), dpi=300)
     else:
-        print('Pls Give a savepath.')
+        print('请提供保存路径。')
 
 
 def plot_grid_slice(input: str = '',
                     output: str = '',
                     sigma: float = 0,
                     title: bool = False):
+    """
+    绘制网格切片图。
 
+    Args:
+        input (str, optional): 输入数据的文件路径。默认为''。
+        output (str, optional): 输出文件的路径。默认为''。
+        sigma (float, optional): 如果v_min未给出，使用此参数计算颜色映射的最小值。默认为0。
+        title (bool, optional): 是否在图上添加标题。默认为False。
+    """
     grid = loader(input)
     if not os.path.exists(output):
         os.makedirs(output)
@@ -133,6 +142,49 @@ def plot_grid_slice(input: str = '',
 
     fig.tight_layout(pad=0, w_pad=0, h_pad=0)
     fig.savefig(output + 'grid_z.png')
+
+
+# def plot_grid_slice(input: str = '',
+#                     output: str = '',
+#                     sigma: float = 0,
+#                     title: bool = False):
+
+#     grid = loader(input)
+#     if not os.path.exists(output):
+#         os.makedirs(output)
+#     grid_sweep, grid_mapping, grid_z = slice_3ds(f=grid, full=True)
+#     grid_mapping_stat = np.zeros((grid.header['Points'], 3))
+#     for i in range(len(grid_mapping_stat)):
+#         grid_mapping_stat[i][0] = grid_sweep[i]  # bias
+#         grid_mapping_stat[i][1] = np.median(grid_mapping[i])  # Median
+#         grid_mapping_stat[i][2] = np.std(grid_mapping[i])
+
+#     for i in range(len(grid_sweep)):
+#         fig, ax = plt.subplots(figsize=(3.375, 3.375))
+#         if sigma:
+#             ax.imshow(
+#                 grid_mapping[i],
+#                 vmin=[
+#                     grid_mapping_stat[i][1] - sigma * grid_mapping_stat[i][2],
+#                     grid_mapping_stat[i][1] + sigma * grid_mapping_stat[i][2]
+#                 ])  # type:ignore
+#         else:
+#             ax.imshow(grid_mapping[i])
+#         ax.axis('off')
+#         if title:
+#             ax.set_title(str(round(grid_mapping_stat[i][0] * 1e3, 2)) + 'mV',
+#                          fontsize=16)
+#         fig.tight_layout(pad=0, w_pad=0, h_pad=0)
+#         fig.savefig(output + str(i).zfill(3) + '_' +
+#                     str(round(grid_mapping_stat[i][0] * 1e3, 2)) + 'mV.png')
+
+#     fig, ax = plt.subplots(figsize=(3.375, 3.375))
+
+#     ax.imshow(level_plain(grid_z), cmap=gwyddion)
+#     ax.axis('off')
+
+#     fig.tight_layout(pad=0, w_pad=0, h_pad=0)
+#     fig.savefig(output + 'grid_z.png')
 
 
 def marker_layer(f_path: str = '', spec_path: str = '', output: str = ''):
