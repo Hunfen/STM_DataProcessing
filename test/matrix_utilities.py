@@ -16,17 +16,6 @@ from scipy.optimize import curve_fit
 
 
 def slice_3ds(f: Any, bias: float = 0, full: bool = False):
-    """
-    对3D扫描数据进行切片。
-
-    Args:
-        f (Any): 输入的3D扫描数据。
-        bias (float, optional): 偏置值，用于确定切片的位置。默认为0。
-        full (bool, optional): 如果为True，则对所有扫描点进行切片；如果为False，则只对偏置值对应的扫描点进行切片。默认为False。
-
-    Returns:
-        tuple: 返回一个元组，包含扫描点的值、切片数据和z值。
-    """
     dim = f.header['Grid dim']
     points = f.header['Points']
 
