@@ -43,12 +43,14 @@ class NanonisFileLoader:
 
         Returns:
             _type_: _description_
-        """        
+        """
         raw_header = {}
         decoded_line: str = ""
         with open(f_path, "rb") as f:
             for line in f:
-                decoded_line = line.decode(encoding="utf-8", errors="replace").strip(' ')
+                decoded_line = (line.decode(
+                    encoding="utf-8", errors="replace")
+                    .strip(' '))
                 if re.match(":SCANIT_END:", decoded_line):
                     break
                 if re.match(":.+:", decoded_line):
@@ -69,7 +71,7 @@ class NanonisFileLoader:
 
         Returns:
             _type_: _description_
-        """        
+        """
         header = {}
         return header
 
