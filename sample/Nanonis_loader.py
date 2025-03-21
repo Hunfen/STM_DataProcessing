@@ -25,7 +25,19 @@ class NanonisFileLoader:
             self.file_type = "sxm"
             self.raw_header = self.__read_sxm_header__(f_path)
             self.header = self.__reform_sxm_header__(self.raw_header)
-            self.data = self.__read_sxm_data__(f_path, self.header)
+            # ---------------------------------------------------------------------------
+            # General scanning information quick access
+            self.pixels = tuple(map(int, self.header["SCAN_PIXELS"].split()))
+            self.range = tuple(map(float, self.header["SCAN_RANGE"].split()))
+            self.center = tuple(map(float, self.header["SCAN_OFFSET"].split()))
+            self.frame_angle = float(self.header["SCAN_ANGLE"])
+            self.dir = self.header["SCAN_DIR"] == "up"
+            self.bias = float(self.header["BIAS"])
+            self.setpoint = float(self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
+            self.channels: list = self.header["Scan"]["channels"][0].split(";")
+            # --------------------------------------------------------------------------
+            self.data = self.__read_sxm_data__(f_path)
+
         elif f_path.endswith(".dat"):
             self.file_type = "dat"
             self.raw_header = self.__read_dat_header__(f_path)
@@ -93,7 +105,7 @@ class NanonisFileLoader:
         for key in ["Z-CONTROLLER", "DATA_INFO"]:
             df = pd.DataFrame([row.split("\t") for row in raw_header[key].split("\n")])
             df.columns = df.iloc[0]
-            header[key] = df[1:].dropna(how="any")
+            header[key] = df[1:].reset_index(drop=True).dropna(how="any")
 
         for module, count in modules.items():
             if count == 1:
@@ -108,19 +120,20 @@ class NanonisFileLoader:
                     else:
                         continue
                 header[module] = pd.DataFrame(temp_dict)
+
         return header
 
-    def __read_sxm_data__(self, f_path: str, header):
-        # data = np.zeros((1, 1))
-        with open(f_path, 'rb') as f:
+    def __read_sxm_data__(self, f_path: str):
+        with open(f_path, "rb") as f:
             read_all = f.read()
-            offset = read_all.find(b'\x1A\x04')
-            f.seek(offset+2)
-            data =np.fromfile(f, dtype='>f')
-            
-        
-        
-            
+            offset = read_all.find(b"\x1a\x04")
+            f.seek(offset + 2)
+            data = np.fromfile(f, dtype=">f")
+            data = data.reshape((len(self.channels) * 2, *self.pixels))
+            for i in range(data.shape[0]):
+                if i % 2 == 0:
+                    data[i] = np.fliplr(data[i])
+
         return data
 
     def __read_dat_header__(self, f_path: str):
@@ -137,6 +150,16 @@ class NanonisFileLoader:
 
     def __read_3ds_header__(self, f_path: str):
         raw_header = {}
+        with open(f_path, "rb") as f:
+            for line in iter(
+                lambda: f.readline().decode("utf-8", errors="replace").strip(),
+                ":HEADER_END:",
+            ):
+                if "=" not in line:
+                    continue
+                entry, contents = line.split("=")
+                raw_header[entry] = contents.rstrip("\r\n")
+
         return raw_header
 
     def __reform_3ds_header__(self, raw_header):
