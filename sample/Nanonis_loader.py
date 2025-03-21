@@ -5,8 +5,10 @@ Python module that helps read the Nanonis files.
 __all__ = []
 
 import os
-import numpy as np
 import re
+from collections import Counter
+import numpy as np
+import pandas as pd
 
 
 class NanonisFileLoader:
@@ -48,13 +50,13 @@ class NanonisFileLoader:
         decoded_line: str = ""
         with open(f_path, "rb") as f:
             for line in f:
-                decoded_line = (line.decode(
-                    encoding="utf-8", errors="replace")
-                    .strip(' '))
+                decoded_line = line.decode(encoding="utf-8", errors="replace").strip(
+                    " "
+                )
                 if re.match(":SCANIT_END:", decoded_line):
                     break
                 if re.match(":.+:", decoded_line):
-                    entry = decoded_line.strip('\n').strip(':')
+                    entry = decoded_line.strip("\n").strip(":")
                     contents = ""
                 else:
                     if not contents:
@@ -73,10 +75,52 @@ class NanonisFileLoader:
             _type_: _description_
         """
         header = {}
+        modules = []
+
+        for key in raw_header.keys():
+            if re.search(">", key):  # initial dicts for modules
+                if key.startswith("Ext. VI 1>"):
+                    # deal with external VI attributes
+                    modules.append(key.strip("Ext. VI 1>").split(">")[0])
+                else:  # deal with the internal modules
+                    modules.append(key.split(">")[0])
+
+            else:
+                header[key] = raw_header[key].strip("\n")
+        # count the number of attributes in every module
+        modules = Counter(modules)
+
+        for key in ["Z-CONTROLLER", "DATA_INFO"]:
+            df = pd.DataFrame([row.split("\t") for row in raw_header[key].split("\n")])
+            df.columns = df.iloc[0]
+            header[key] = df[1:].dropna(how="any")
+
+        for module, count in modules.items():
+            if count == 1:
+                for key, value in raw_header.items():
+                    if key.strip("Ext. VI 1>").startswith(module):
+                        header[module] = value.strip("\n")
+            else:
+                temp_dict = {}
+                for key, value in raw_header.items():
+                    if key.strip("Ext. VI 1>").startswith(module):
+                        temp_dict[key.split(">")[-1]] = [value.strip("\n")]
+                    else:
+                        continue
+                header[module] = pd.DataFrame(temp_dict)
         return header
 
     def __read_sxm_data__(self, f_path: str, header):
-        data = np.empty((1, 1))
+        # data = np.zeros((1, 1))
+        with open(f_path, 'rb') as f:
+            read_all = f.read()
+            offset = read_all.find(b'\x1A\x04')
+            f.seek(offset+2)
+            data =np.fromfile(f, dtype='>f')
+            
+        
+        
+            
         return data
 
     def __read_dat_header__(self, f_path: str):
@@ -101,4 +145,5 @@ class NanonisFileLoader:
 
     def __read_3ds_data__(self, f_path: str, header):
         data = np.empty((1, 1))
+
         return data
