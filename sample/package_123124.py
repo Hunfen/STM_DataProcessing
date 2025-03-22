@@ -1,426 +1,432 @@
 # -*- coding: utf-8 -*-
 """
-Python module that helps read the Nanonis files.
+ 
+Created on 05.06.2012
+ 
+@author: Felix Wählisch
+ 
+Description:
+============
+This Script reads in .sxm files for the Version 2. It still does not care for 
+up/down scan directions or something alike. I added some non-core functions as
+example how to use the module 
+        (   see:     if __name__=="__main__":    at end of script). 
+ 
+To run the script I recommend PythonXY - the scientific oriented python enviroment
+http://code.google.com/p/pythonxy/
+it includes numpy, pylab, scipy - all you will need.
+        
+The module is not fully functional, in doublt doublecheck with gwyddion.
+This is NOT intended to be a full solution but save you quite some time 
+implementing the binary read-in. I hope it does exactly this for you.
+By now, this script can for sure NOT handle correctly:
+    * data that only were read in in one direction
+    * up/down or down/up - I did not care for now
+    * incomplete images
+    * ...
+    
+See the class descriptions for more infos:
+- NanonisAFM:
+    handles the data in self.signals and the header in self.infos
+    signals is an array of class Datachannel
+    infos is a dictionary
+- Datachannel
+    data and informations concerning one channel
+- Fit
+    2D fit functions to flatten your AFM data - used by
+    NanonisAFM.substract2Dfit()
+    1D fit function to flatten your AFM data - used by
+    NanonisAFM.substract1Dfit()
+    PLEASE NOTE THAT THE DATA MANIPULATION IS DONE ON ALL DATACHANNELS FOR NOW!
+    Please also note, that the manipulation is done IN PLACE (=replace old data)
+ 
+Disclaimer:
+===========
+I am not responsible to any havoc, malevolence or inconvenience that happens to
+you or your data while using this script (:
+    
+License:
+========
+"THE BEER-WARE LICENSE":
+As long as you retain this notice you can do whatever you want with this stuff. 
+If we meet some day, and you think this stuff is worth it, you can buy me 
+a beer in return.
+    - Felix Wählisch
+    
 """
-__all__ = ['loader']
 
-from typing import Union, Tuple
+
+import numpy as N
+import pylab as P
 import os
 import re
-import numpy as np
+import string
+import struct
+from scipy import optimize
 
 
-def loader(f_path: str):
-    """To load the data files created by Nanonis SPM controller.
+class NanonisAFM:
+    ''' data contains:
+        fname           filename
+        infos           dictionary with all header entries
+        datachannels    array of the datachannels in datachannel class format
+    '''
 
-    Args:
-        f_path : Path to the data file.
+    def __init__(self, fname=''):
+        ''' creates empty class and asks for file to process if not given '''
+        self.signals = []
+        self.infos = {}
+        self.fname = ''
+        if fname == '':
+            # your custom ask for file
+            print "init(): please program me!"
+        elif fname == '':
+            print "selection aborted"
+            return
+        else:
+            self.fname = fname
+            print "file: ", os.path.split(self.fname)[1]
+            self.readin()
 
-    Returns:
-        {
-            __Nanonis_sxm__ : if file type is .sxm.
-            __Nanonis_dat__ : if file type is .dat.
-            __Nanonis_3ds__ : if file type is .3ds.
-        }
+    def _checkfile(self):
+        '''inherit with some reality-checks that verify a good filename. It is recommended to run this after selecting self.fname'''
+        if self.fname.endswith('.sxm'):
+            return True
+        else:
+            print "wrong file ending (not .sxm)", self.fname
+            return False
 
-    Raises:
-        KeyError : If file type is still not supported.
+    def readin(self):
+        if not self._checkfile():
+            return -1
+        self._read_header()
+        self._read_body()
 
-    """
-    switch = {
-        '.sxm': __Nanonis_sxm__,
-        '.dat': __Nanonis_dat__,
-        '.3ds': __Nanonis_3ds__
-    }
-    try:
-        return switch[os.path.splitext(f_path)[1]](f_path)
-    except KeyError as exc:
-        raise KeyError('File type not supported.') from exc
-
-
-def __is_number__(s: str) -> Union[int, float, str]:
-    """String converter.
-
-    Args:
-        s (str): Input string.
-
-    Returns:
-        Union[int, float, str]: Convert an input string into int or float
-        if possible, or it would return the input string itself.
-    """
-    try:
-        return int(s)  # convert into int
-    except ValueError:
-        try:
-            return float(s)  # convert into float
-        except ValueError:
-            return s  # return input string without change
-
-
-class __Nanonis_sxm__:
-
-    def __init__(self, f_path: str) -> None:
-        """Nanonis .sxm file class.
-
-        Args:
-            f_path (str): Absolute path to the Nanonis .sxm file.
-
-        Attributes:
-            {
-                file_path(str): Absolute path to the Nanonis .sxm file.
-                fname(str): Name of the Nanonis .sxm file.
-                header(dict): Nanonis .sxm file header.
-                data(np.ndarray): .sxm data.
-                channel_dir(tuple): Showing direction of every channel.
-                                    True for forward, False for backward.
-            }
-        """
-        self.file_path = os.path.split(f_path)[0]
-        self.fname = os.path.split(f_path)[1]
-        self.__raw_header = self.__sxm_header_reader__(f_path)
-        self.header = self.__sxm_header_reform__(self.__raw_header)
-        self.data, self.channel_dir = self.__sxm_data_reader__(
-            f_path, self.header)
-
-    def __sxm_header_reader__(self, f_path: str) -> 'dict[str, str]':
-        """Read the .sxm file header into dict.
-
-        Returns:
-            dict[str, str]: Header of the .sxm file,
-                            including all the file attributes.
-        """
-        entry: str = ''
-        contents: str = ''
-        raw_header: dict[str, str] = {}
-        with open(f_path, 'rb') as f:  # read the .sxm file
-            header_end = False
-            while not header_end:
-                line = f.readline().decode(encoding='utf-8', errors='replace')
-                # if reach the end of header
-                if re.match(':SCANIT_END:\n', line):
-                    header_end = True
-                # ':.+:' is the regex of the Nanonis .sxm file header entry.
-                elif re.match(':.+:', line):
-                    entry = line[1:-2]  # Read header_entry
-                    contents = ''  # Clear contents
-                # Load entries & corresponding parameters into pre-defined dict
-                else:
-                    contents += line
-                    raw_header[entry] = contents.strip('\n')  # remove EOL
-        return raw_header
-
-    def __sxm_header_reform__(self, raw_header: 'dict[str, str]') -> dict:
-        """Convert raw header into an accessible/readable dict.
-
-        Returns:
-            dict: Reformed header variable.
-        """
-        scan_info: list[str] = [  # Scan information
-            'ACQ_TIME', 'BIAS', 'Scan>lines', 'Scan>pixels/line',
-            'Scan>speed backw. (m/s)', 'Scan>speed forw. (m/s)', 'COMMENT',
-            'REC_DATE', 'REC_TIME', 'SCAN_DIR', 'SCAN_FILE'
-        ]
-        # scan_field_key: list[str] = [
-        # 'X_OFFSET', 'Y_OFFSET', 'X_RANGE', 'Y_RANGE', 'ANGLE'
-        # ]  # The order of scan_field_key should not be changed
-        # trash_bin: list[str] = [
-        #     'NANONIS_VERSION', 'REC_TEMP', 'SCANIT_TYPE', 'SCAN_ANGLE',
-        #     'SCAN_OFFSET', 'SCAN_PIXELS', 'SCAN_RANGE', 'SCAN_TIME',
-        #     'Scan>channels'
-        # ]
-        header: dict[str, Union[dict[str, Union[float, str]],
-                                dict[str, dict[str, Union[float, str]]],
-                                tuple[float], float, str]] = {}
-        entries: list[str] = list(raw_header.keys())
-        for i in enumerate(entries):
-            if i[1] in scan_info:  # float type header
-                header[i[1]] = __is_number__(raw_header[i[1]].strip(' '))
-            # Table type header: information of feedback z controller
-            elif i[1] == 'Z-CONTROLLER':
-                z_controller: dict[str, Union[float, str]] = {}
-                z_controller_config: list[str] = raw_header[
-                    'Z-CONTROLLER'].split('\n')[0].strip('\t').split('\t')
-                z_controller_configVar: list[str] = raw_header[
-                    'Z-CONTROLLER'].split('\n')[1].strip('\t').split('\t')
-                for j, s in enumerate(z_controller_config):
-                    # FIXME: regex to split value str with units
-                    z_controller[s] = __is_number__(z_controller_configVar[j])
-                header[i[1]] = z_controller
-            elif i[1] == 'DATA_INFO':  # data channel information
-                data_info: dict[str, dict[str, Union[float, str]]] = {}
-                raw_data_info: list[str] = raw_header[i[1]].split('\n')
-                config = raw_data_info[0].strip('\t').split('\t')
-                for j in range(1, len(raw_data_info)):
-                    channel_info: dict[str, Union[float, str]] = {
-                    }  # Initialization of dict channel information
-                    name: str = ''  # Initialization of dict channel name
-                    for k, value in enumerate(config):
-                        if value == 'Name':
-                            name = raw_data_info[j].strip('\t').split('\t')[k]
-                        else:
-                            channel_info[value] = __is_number__(
-                                raw_data_info[j].strip('\t').split('\t')[k])
-                    data_info[name] = channel_info
-                header[i[1]] = data_info
-            elif i[1] == 'Scan>Scanfield':
-                # (X_OFFSET, Y_OFFSET, X_RANGE, Y_RANGE, ANGLE) in float type
-                header[i[1]] = tuple(
-                    float(j) for j in raw_header[i[1]].split(';'))
-        return header
-
-    def __sxm_data_reader__(self, f_path: str,
-                            header: dict) -> Tuple[np.ndarray, tuple]:
-        """Read the data of .sxm file.
-
-        Args:
-            f_path (str): Absolute path to the Nanonis .sxm file.
-            header (dict): Reformed header variable.
-
-        Returns:
-            Tuple[np.ndarray, tuple]: Formated data matrix and
-            the direction for every channel.
-        """
-
-        with open(f_path, 'rb') as f:
-            read_all = f.read()
-            offset = read_all.find('\x1A\x04'.encode(encoding='utf-8'))
-            f.seek(offset + 2)
-            data = np.fromfile(f, dtype='>f')
-        # Check the data dimensions
-        channel_counts = 0
-        channel_dir: list[bool] = []
-        channel_ls = list(header['DATA_INFO'].keys())
-        for i, channel in enumerate(channel_ls):
-            if header['DATA_INFO'][channel]['Direction'] == 'both':
-                channel_counts += 2
-                channel_dir.append(True)  # true for fwd
-                channel_dir.append(False)  # false for bwd
-            elif header['DATA_INFO'][channel]['Direction'] == 'fwd':
-                # forward only
-                channel_counts += 1
-                channel_dir.append(True)
-            else:  # backward only
-                channel_counts += 1
-                channel_dir.append(False)
-        dim = (int(channel_counts), int(header['Scan>pixels/line']),
-               int(header['Scan>lines']))
-        data = data.reshape(dim)  # data reshaped
-        if header['Scan>Scanfield'][4] % 90 == 0:  # mutiple 90˚, rotate
-            for i in range(dim[0]):
-                if channel_dir[i]:
-                    data[i] = np.rot90(data[i],
-                                       int(header['Scan>Scanfield'][4] // 90))
-                else:
-                    data[i] = np.fliplr(
-                        np.rot90(data[i],
-                                 int(header['Scan>Scanfield'][4] // 90)))
-        else:  # arbitary angle, no rotation
-            for i in range(dim[0]):
-                if channel_dir[i]:
-                    continue
-                else:
-                    data[i] = np.fliplr(data[i])
-        return data, tuple(channel_dir)
-
-
-class __Nanonis_dat__:
-
-    def __init__(self, f_path: str) -> None:
-        """Nanonis .dat file class.
-
-        Args:
-            f_path (str): Absolute path to the Nanonis .dat file.
-        """
-        self.file_path = os.path.split(f_path)[0]
-        self.fname = os.path.split(f_path)[1]
-        # self.raw_header = self.__dat_header_reader__(f_path)
-        self.header = self.__dat_header_reformer__(
-            self.__dat_header_reader__(f_path))
-        self.data = self.__dat_data_reader__(f_path)
-
-    def __dat_header_reader__(self, f_path: str) -> 'list[str]':
-        """Read the .dat file header into list of strings.
-
-        Returns:
-            str: Header of the .dat file, including all the file attributes.
-        """
-        raw_header = []
-        with open(f_path, 'r', encoding='utf-8') as f:
-            header_end = False
-            while not header_end:
-                line = f.readline()
-                if re.match(r'\[DATA\]', line):
-                    header_end = True
-                else:
-                    raw_header.append(line)
-        return raw_header
-
-    def __dat_header_reformer__(
-            self, raw_header: 'list[str]') -> 'dict[str, Union[str, float]]':
-        """Convert raw header into an accessible/readable dict.
-
-        Args:
-            raw_header (list[str]): .
-
-        Returns:
-            dict[str, str | float]: Reformed header variable.
-        """
-        header: dict = {}
-        header_ls: list = []
-        for i, line in enumerate(raw_header):
-            header_ls.append(line.strip('\n').strip('\t').split('\t'))
-        header_ls = header_ls[:-1]  # remove last element
-        raw_header = []  # release memory
-
-        for i, header_item in enumerate(header_ls):
-            try:
-                header[header_item[0]] = __is_number__(header_item[1])
-            except IndexError:
-                header[header_item[0]] = ''
-        header_ls = []  # release memory
-        return header
-
-    def __dat_data_reader__(self, f_path: str) -> np.ndarray:
-        """[summary]
-
-        Args:
-            f_path (str): Absolute path to the Nanonis .dat file.
-
-        Returns:
-            np.ndarray: data of Nanonis .dat file.
-        """
-        data_str: Union[str, list[str]] = ''
-        data_list = []
-        with open(f_path, 'r', encoding='utf-8') as f:
-            # search data start positon
-            while True:
-                if re.match(r'\[DATA\]', f.readline()):
-                    f.readline()
-                    data_str = f.read()
-                    break
-                else:
-                    continue
-        data_str = data_str.split('\n')
-        data_str = data_str[:-1]
-        for i, data_item in enumerate(data_str):
-            data_list.append(data_item.split('\t'))
-        data_str = []  # release
-        return np.array(data_list).astype(float)
-
-
-class __Nanonis_3ds__:
-
-    def __init__(self, f_path: str) -> None:
-        """Nanonis .3ds file class.
-
-        Args:
-            f_path (str): Absolute path to the Nanonis .3ds file.
-        """
-        self.file_path = os.path.split(f_path)[0]
-        self.fname = os.path.split(f_path)[1]
-        # self.raw_header = self.__3ds_header_reader__(f_path)
-        self.header = self.__3ds_header_reformer__(
-            self.__3ds_header_reader__(f_path))
-        self.Parameters, self.data = self.__3ds_data_reader__(
-            f_path, self.header)
-
-    def __3ds_header_reader__(self, f_path: str) -> 'dict[str, str]':
-        """Read the .3ds file header into dict.
-
-        Returns:
-            dict[str, str]: Header of the .3ds file, including
-            all the file attributes.
-        """
-        entry: str = ''
-        contents: str = ''
-        raw_header: dict[str, str] = {}
-        with open(f_path, 'rb') as f:
-            header_end = False
-            while not header_end:
-                line = f.readline().decode(encoding='utf-8', errors='replace')
-                if re.match(':HEADER_END:', line):
-                    header_end = True
-                else:
-                    entry, contents = line.split('=')
-                    contents = contents.strip('"\r\n')
-                raw_header[entry] = contents
-        return raw_header
-
-    def __3ds_header_reformer__(self, raw_header: 'dict[str, str]') -> dict:
-        """Convert raw header into an accessible/readable dict.
-
-        Returns:
-            dict: Reformed header.
-        """
-        scan_info_tuple = ['Grid dim', 'Grid settings']
-        scan_info_parameters = [
-            'Experiment parameters', 'Channels', 'Fixed parameters'
-        ]
-        entries = list(raw_header.keys())
-        header = {}
-        for i in enumerate(entries):
-            if i[1] in scan_info_tuple:
-                if re.fullmatch(r'\d+\s[x]\s\d+', raw_header[i[1]]):
-                    header[i[1]] = tuple(
-                        int(j) for j in raw_header[i[1]].split(' x '))
-                else:
-                    header[i[1]] = tuple(
-                        float(j) for j in raw_header[i[1]].split(';'))
-            elif i[1] in scan_info_parameters:
-                header[i[1]] = raw_header[i[1]].split(';')
+    def _read_body(self):
+        '''The binary data begins after the header and is introduced by the (hex) code \1A\04. 
+        According to SCANIT_TYPE the data is encoded in 4 byte big endian floats. 
+        The channels are stored one after the other, forward scan followed by backward scan.
+        The data is stored chronologically as it is recorded. 
+        On an up-scan, the first point corresponds to the lower left corner 
+        of the scanfield (forward scan). On a down-scan, it is the upper 
+        left corner of the scanfield. 
+        Hence, backward scan data start on the right side of the scanfield.'''
+        # extract channes to be read in
+        data_info = self.infos['DATA_INFO']
+        lines = string.split(data_info, '\n')
+        # headers: Channel    Name      Unit        Direction                Calibration               Offset
+        lines.pop(0)
+        names = []
+        units = []
+        for line in lines:
+            entries = string.split(line)
+            if len(entries) > 1:
+                names.append(entries[1])
+                units.append(entries[2])
+                if entries[3] != 'both':
+                    print "warning, only one direction recorded, expect a crash :D", entries
+        print names
+        # extract lines, pixels
+        # xPixels = int(self.infos['Scan>pixels/line'])
+        # yPixels = int(self.infos['Scan>lines'])
+        xPixels, yPixels = string.split(self.infos['SCAN_PIXELS'])
+        xPixels = int(xPixels)
+        yPixels = int(yPixels)
+        # find position in file
+        fhandle = open(self.fname, 'rb')  # read binary
+        read_all = fhandle.read()
+        offset = read_all.find('\x1A\x04')
+        print 'found start at', offset
+        fhandle.seek(offset+2)  # data start 2 bytes afterwards
+        # read in data
+        fmt = '>f'  # float
+        ItemSize = struct.calcsize(fmt)
+        for i in range(len(names)*2):  # fwd+bwd
+            if i % 2 == 0:
+                direction = '_fwd'
             else:
-                header[i[1]] = __is_number__(raw_header[i[1]])
-        # FIXME: Defining type hints for header raises erorrs.
-        header['# Parameters shape'] = tuple([
-            header['Grid dim'][0] * header['Grid dim'][1],
-            header['# Parameters (4 byte)']
-        ])  # shape of the .Parameters
-        header['data shape'] = tuple([
-            header['Grid dim'][0] * header['Grid dim'][1],
-            len(header['Channels']), header['Points']
-        ])  # shape of the .data
-        return header
+                direction = '_bwd'
+            bindata = fhandle.read(ItemSize*xPixels*yPixels)
+            data = N.zeros(xPixels*yPixels)
+            for j in range(xPixels*yPixels):
+                data[j] = struct.unpack(
+                    fmt, bindata[j*ItemSize: j*ItemSize+ItemSize])[0]
+            data = data.reshape(yPixels, xPixels)
+            data = N.rot90(data)
+            if direction == '_bwd':
+                data = data[::-1]
+            channel = Datachannel(
+                name=names[i/2]+direction, data=data, unit=units[i/2])
+            print channel.name, channel.unit, channel.data.shape
+            self.signals.append(channel)
+        fhandle.close()
 
-    def __3ds_data_reader__(self, f_path: str,
-                            header: dict) -> Tuple[np.ndarray, np.ndarray]:
-        """Read the data of .3ds file.
+    def _read_header(self):
+        ''' reads the header and adds to info dictionary - ready for further parsing as needed'''
+        header_ended = False
+        fhandle = open(self.fname, 'r')
+        caption = re.compile(':*:')
+        key = ''
+        contents = ''
+        while not header_ended:
+            line = fhandle.readline()
+            if line == ":SCANIT_END:\n":  # check for end of header
+                header_ended = True
+                self.infos[key] = contents
+                # two blank lines
+                fhandle.readline()
+                fhandle.readline()
+            else:
+                if caption.match(line) != None:  # if it is a caption
+                    if key != '':  # avoid 1st run problems
+                        self.infos[key] = contents
+                    key = line[1:-2]  # set new name
+                    contents = ''  # reset contents
+                else:  # if not caption, it is content
+                    contents += (line)
+        fhandle.close()
 
-        Args:
-            f_path (str): Absolute path to the Nanonis .3ds file.
-            header (dict): Reformed header variable.
+    def create_img(self, nametag, clim=(None, None)):
+        '''puts out images of signals whose name contains the nametag.
+        adjust your color bar by using clim(lower, upper)'''
+        x_len, y_len = string.split(self.infos['SCAN_RANGE'])
+        x_len = float(x_len)
+        y_len = float(y_len)
+        # if you change to nm, also change the labels further below (;
+        x_len *= 1.0e6  # um
+        y_len *= 1.0e6  # um
+        for i in self.signals:
+            if nametag in i.name:
+                print "create_img(): creating", i.name, "image..."
+                P.figure()
+                ax = P.subplot(111)
+                z = N.fliplr(N.rot90(i.data, k=1))
+                if i.unit != 'V':
+                    z = z*1.0e9
+                    i.unit = 'n'+i.unit
+                P.imshow(z, origin="lower", cmap=P.cm.YlOrBr_r, aspect='auto')
+                # ticker adjustment
+                (yi, xi) = z.shape
+                # get old x-labels, create new ones
+                x_ticks = N.int_(
+                    N.round(N.linspace(0,  xi-1, len(ax.axes.get_xticklabels()))))
+                x_tlabels = N.round(N.linspace(0, x_len, len(
+                    ax.axes.get_xticklabels())), decimals=2)
+                ax.axes.set_xticks(x_ticks)
+                ax.axes.set_xticklabels(x_tlabels)
+                P.xlim(0, xi-1)  # plots from 0 to p-1, so only show that
+                P.xlabel("X [um]")
+                # get old y-labels, create new ones, note reverse axis ticks
+                y_ticks = N.int_(
+                    N.round(N.linspace(0,  yi-1, len(ax.axes.get_yticklabels()))))
+                y_tlabels = N.round(N.linspace(0, y_len,  len(
+                    ax.axes.get_yticklabels())), decimals=2)
+                ax.axes.set_yticks(y_ticks)
+                ax.axes.set_yticklabels(y_tlabels)
+                P.ylim(0, yi-1)  # plots from 0 to p-1, so only show that
+                P.ylabel("Y [um]")
+                if clim != (None, None):
+                    P.clim(clim[0], clim[1])
+                bar = P.colorbar(shrink=0.7)
+                bar.set_label(i.name+' ['+i.unit+']')
+                P.title(os.path.split(self.fname)[1][:-4])
+                P.draw()
+                P.savefig(self.fname[:-4]+'_'+i.name+'.png', transparent=True)
+                P.close()
 
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: spec attributes and the data matrix.
-        """
-        with open(f_path, 'rb') as f:
-            read_all = f.read()
-            offset = read_all.find(
-                ':HEADER_END:\x0d\x0a'.encode(encoding='utf-8'))
-            f.seek(offset + 14)
-            data = np.fromfile(f, dtype='>f')
-        Parameters = np.zeros(header['# Parameters shape'])
-        spec_data = np.zeros((header['Grid dim'][0] * header['Grid dim'][1],
-                              len(header['Channels']), header['Points']))
-        data_size = header['Grid dim'][0] * header['Grid dim'][1] * (
-            header['# Parameters (4 byte)'] +
-            header['Experiment size (bytes)'] / 4)
-        if not data.size == data_size:
-            # If .3ds file is not integrated, dataset would be filled with 0.
-            data = np.pad(data, (0, int(data_size - data.size)),
-                          'constant',
-                          constant_values=0)
-        for i in range(header['Grid dim'][0] * header['Grid dim'][1]):
-            # Read Parameters
-            for j in range(header['# Parameters (4 byte)']):
-                Parameters[i][j] = data[
-                    i * int(header['# Parameters (4 byte)'] +
-                            header['Experiment size (bytes)'] / 4) + j]
-            # Read spec data
-            for j in range(len(header['Channels'])):
-                for k in range(header['Points']):
-                    spec_data[i][j][k] = data[
-                        int(i * (header['Experiment size (bytes)'] / 4 +
-                                 header['# Parameters (4 byte)']) +
-                            (j * header['Points'] +
-                             header['# Parameters (4 byte)']) + k)]
-        return Parameters, spec_data
+    def substract_1Dfit(self, deg=1):
+        '''substracts a line by line fit from all data
+        degree = 0 offset fit        
+        degree = 1 linear fit
+        degree = 2 ...
+        '''
+        Fit = fit()
+        for i in self.signals:
+            data = i.data
+            res = Fit.poly_line_by_line(data, deg, axis=1)
+            i.data = data-res
+        return 0
+
+    def substract_2Dfit(self, deg=2):
+        '''substracts something like a 2D fit from all data
+        degree: 1- plane substract
+                2- parabolic substract'''
+        if deg not in range(1, 3, 1):  # goes to n-1
+            print "substract_2Dfit(): unknown degree of fit, abort..."
+            return -1
+        Fit = fit()
+        for i in self.signals:
+            data = i.data
+            # fit parameters initial values
+            if deg == 1:
+                params = Fit.fitplane(data)
+                fit_func = Fit.return_plane(params, data)
+            if deg == 2:
+                params = Fit.fitparabolic(data)
+                fit_func = Fit.return_parabolic(params, data)
+            i.data = data-fit_func
+        return 0
+
+    def friction_signal(self, ignore_large_img=True):
+        ''' calculates Horiz._Deflection fwd - bwd / 2.0 and appends the Friction channel to the signals.
+        Returns Friction.data. Ignores large images by default due to hysteresis.
+        '''
+        fwd = None
+        bwd = None
+        for i in self.signals:
+            if i.name == "Horiz._Deflection_fwd":
+                fwd = i.data
+            if i.name == "Horiz._Deflection_bwd":
+                bwd = i.data
+                unit = i.unit  # unit of both channels is supposed to be same
+            if i.name == 'Friction':
+                print "friction_signal(): Friction channel already exists, aborting..."
+                return -1
+        if fwd == None or bwd == None:
+            print "friction_signal(): could not find all signals needed, aborted."
+            return -1
+        # ignore large images due to hysteresis
+        x_len, y_len = string.split(self.infos['SCAN_RANGE'])
+        x_len = float(x_len)
+        y_len = float(y_len)
+        x_len *= 1.0e6  # um
+        y_len *= 1.0e6  # um
+        if x_len > 30.0 or y_len > 30.0:
+            if not ignore_large_img:
+                print "friction_signal(): warning, the friction signal might be shadowed due to large scan range and hysteresis!"
+            else:
+                print "friction_signal(): friction signal is not created due to image size"
+                return -1
+        print "friction_signal(): creating Friction channel."
+        frict = Datachannel(data=(fwd-bwd)/2.0, name='Friction',
+                            desc='horiz. deflection (fwd-bwd)/2', unit=unit)
+        self.signals.append(frict)
+        return frict.data
+
+
+class Datachannel:
+    '''data and their description...'''
+    unit = ""  # unit of the channel
+    name = ""  # name of the channel
+    desc = ""  # description / additional info
+    data = N.array([])  # data in the channel
+
+    def __init__(self, unit="", name="", desc="", data=""):
+        self.unit = str(unit)
+        self.name = str(name)
+        self.desc = str(desc)
+        self.data = N.array(data)
+
+
+class fit:
+    """ 2D Fit Functions """
+
+    def __init__(self):
+        return
+
+    ####################################
+    """ taken from the Scipy Cookbook - gauss is not used from Nanonis AFM"""
+
+    def gaussian(self, height, center_x, center_y, width_x, width_y):
+        """Returns a gaussian function with the given parameters"""
+        width_x = float(width_x)
+        width_y = float(width_y)
+        return lambda x, y: height*N.exp(
+            -(((center_x-x)/width_x)**2+((center_y-y)/width_y)**2)/2)
+
+    def gaussmoments(self, data):
+        """Returns (height, x, y, width_x, width_y)
+        the gaussian parameters of a 2D distribution by calculating its
+        moments """
+        total = data.sum()
+        X, Y = N.indices(data.shape)
+        x = (X*data).sum()/total
+        y = (Y*data).sum()/total
+        col = data[:, int(y)]
+        width_x = N.sqrt(abs((N.arange(col.size)-y)**2*col).sum()/col.sum())
+        row = data[int(x), :]
+        width_y = N.sqrt(abs((N.arange(row.size)-x)**2*row).sum()/row.sum())
+        height = data.max()
+        return height, x, y, width_x, width_y
+
+    def fitgaussian(self, data):
+        """Returns (height, x, y, width_x, width_y)
+        the gaussian parameters of a 2D distribution found by a fit"""
+        params = self.gaussmoments(data)
+        def errorfunction(p): return N.ravel(self.gaussian(*p)(*N.indices(data.shape)) -
+                                             data)
+        p, success = optimize.leastsq(errorfunction, params)
+        return p
+    ####################################
+
+    def parabolic(self, a0, a1, a2, b1, b2, x0, y0):
+        '''could also do slope and plain - wow! used by substract_2Dfit'''
+        return lambda x, y: a0 + a1*(x-x0) + a2*(x-x0)**2 + b1*(y-y0) + b2*(y-y0)**2
+
+    def parabolicmoments(self, data):
+        '''to be filled...'''
+        a0 = abs(data).min()
+        index = (data-a0).argmin()
+        x, y = data.shape
+        x0 = float(index / x)
+        y0 = float(index % y)
+        a1 = 0.0
+        a2 = 0.0
+        b1 = 0.0
+        b2 = 0.0
+        return a0, a1, a2, b1, b2, x0, y0
+
+    def fitparabolic(self, data):
+        params = self.parabolicmoments(data)
+        def errorfunction(p): return N.ravel(
+            self.parabolic(*p)(*N.indices(data.shape)) - data)
+        p, success = optimize.leastsq(errorfunction, params)
+        return p
+
+    def return_parabolic(self, params, data):
+        ''' returns an 2D array of the parabolic fit with the shape of data'''
+        fit_data = self.parabolic(*params)
+        return fit_data(*N.indices(data.shape))
+    ####################################
+
+    def plane(self, a0, a1, b1, x0, y0):
+        return lambda x, y: a0 + a1*(x-x0) + b1*(y-y0)
+
+    def planemoments(self, data):
+        a0 = N.abs(data).min()
+        index = (data-a0).argmin()
+        x, y = data.shape
+        x0 = float(index / x)
+        y0 = float(index % y)
+        a1 = 0.0
+        b1 = 0.0
+        return a0, a1, b1, x0, y0
+
+    def fitplane(self, data):
+        params = self.planemoments(data)
+        def errorfunction(p): return N.ravel(
+            self.plane(*p)(*N.indices(data.shape)) - data)
+        p, success = optimize.leastsq(errorfunction, params)
+        return p
+
+    def return_plane(self, params, data):
+        fit_data = self.plane(*params)
+        return fit_data(*N.indices(data.shape))
+
+    ####################################
+    def poly_line_by_line(self, data, deg=1, axis=0):
+        '''takes data, degree for polynomial line-by-line fitting, 
+        axis to fit along
+        returns fitted surface'''
+        if axis == 1:  # turn data around
+            data = N.rot90(data)
+
+        surface = N.zeros(data.shape)
+        x = range(data.shape[1])
+        for i in range(len(data)):
+            p = N.polyfit(x, data[i], deg)
+            surface[i] = N.polyval(p, x)
+
+        if axis == 1:  # turn results back around
+            surface = N.rot90(surface, k=3)
+        return surface
