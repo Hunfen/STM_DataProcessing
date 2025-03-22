@@ -33,7 +33,8 @@ class NanonisFileLoader:
             self.frame_angle = float(self.header["SCAN_ANGLE"])
             self.dir = self.header["SCAN_DIR"] == "up"
             self.bias = float(self.header["BIAS"])
-            self.setpoint = float(self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
+            self.setpoint = float(
+                self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
             self.channels: list = self.header["Scan"]["channels"][0].split(";")
             # --------------------------------------------------------------------------
             self.data = self.__read_sxm_data__(f_path)
@@ -45,9 +46,9 @@ class NanonisFileLoader:
             self.data = self.__read_dat_data__(f_path, self.header)
         elif f_path.endswith(".3ds"):
             self.file_path = "3ds"
-            self.raw_header = self.__read_3ds_header__(f_path)
+            self.raw_header, self.__data_stream = self.__3ds_loader__(f_path)
             self.header = self.__reform_3ds_header__(self.raw_header)
-            self.data = self.__read_3ds_data__(f_path, self.header)
+            self.data = self.__read_3ds_data__()
 
     def __read_sxm_header__(self, f_path: str):
         """_summary_
@@ -103,7 +104,8 @@ class NanonisFileLoader:
         modules = Counter(modules)
 
         for key in ["Z-CONTROLLER", "DATA_INFO"]:
-            df = pd.DataFrame([row.split("\t") for row in raw_header[key].split("\n")])
+            df = pd.DataFrame([row.split("\t")
+                              for row in raw_header[key].split("\n")])
             df.columns = df.iloc[0]
             header[key] = df[1:].reset_index(drop=True).dropna(how="any")
 
@@ -148,25 +150,22 @@ class NanonisFileLoader:
         data = np.empty((1, 1))
         return data
 
-    def __read_3ds_header__(self, f_path: str):
+    def __3ds_loader__(self, f_path: str):
         raw_header = {}
         with open(f_path, "rb") as f:
-            for line in iter(
-                lambda: f.readline().decode("utf-8", errors="replace").strip(),
-                ":HEADER_END:",
-            ):
-                if "=" not in line:
-                    continue
-                entry, contents = line.split("=")
-                raw_header[entry] = contents.rstrip("\r\n")
-
-        return raw_header
+            for line in iter(lambda: f.readline().decode('utf-8', errors='replace').strip(), b''):
+                if r':HEADER_END:' in line:
+                    f.seek(len(line) + 14, 1)
+                elif '=' in line:
+                    raw_header.update(dict([line.split('=', 1)]))
+            data_stream = np.fromfile(f, dtype='>f')
+        return raw_header, data_stream
 
     def __reform_3ds_header__(self, raw_header):
         header = {}
         return header
 
-    def __read_3ds_data__(self, f_path: str, header):
+    def __read_3ds_data__(self):
         data = np.empty((1, 1))
-
+        self.header = {}
         return data
