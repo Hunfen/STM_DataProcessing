@@ -87,9 +87,8 @@ class NanonisFileLoader:
         with open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
-                decoded_line = line.decode(encoding="utf-8", errors="replace").strip(
-                    " "
-                )
+                decoded_line = line.decode(encoding="utf-8",
+                                           errors="replace").strip(" ")
                 if ":SCANIT_END:" in decoded_line:
                     break
                 if re.match(":.+:", decoded_line):
@@ -271,7 +270,8 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split('>')[0]:
                         header[module].update(
-                            {key.split(">")[-1]                             : value.strip("\r\n").strip('"')}
+                            {key.split(">")[-1]:
+                                value.strip("\r\n").strip('"')}
                         )
                     else:
                         continue
@@ -304,7 +304,7 @@ class NanonisFileLoader:
         Returns:
             tuple: Contains:
                 - params (pd.DataFrame): DataFrame with pixel parameters.
-                    Columns from 'Fixed parameters' and 'Experiment parameters'.
+                    Columns from 'Fixed parameters' and 'Experiment parameters'
                 - grid (np.ndarray): 3D array of shape
                     (pixels[0]*pixels[1], len(channels), pts_per_chan).
 
@@ -318,7 +318,8 @@ class NanonisFileLoader:
         block_size = param_length + data_length
         total_pts = block_size * self.pixels[0] * self.pixels[1]
         grid = np.empty(
-            (self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan))
+            (self.pixels[0] * self.pixels[1], len(self.channels),
+             self.pts_per_chan))
         params = pd.DataFrame(columns=(
             self.header['Fixed parameters'].split(
                 ';') + self.header['Experiment parameters'].split(';')))
