@@ -97,3 +97,8 @@ ENV/
 # VScode
 .vscode
 *.code-workspace
+
+# Data files
+*.sxm
+*.3ds
+*.dat
