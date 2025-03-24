@@ -51,9 +51,15 @@ class NanonisFileLoader:
             self.header = self.__reform_3ds_header__()
             # --------------------------------------------------------------------------
             # General scanning information quick access
-            self.pixels
+            # self.pixels
+            # self.channels
+
+
             # --------------------------------------------------------------------------
-            # self.data = self.__reform_3ds_data__()
+            # self.data, self.parameters = self.__reform_3ds_data__()
+        else:
+            raise ValueError(f"Unsupported file type: {f_path}")
+
 
     def __sxm_loader__(self, f_path: str):
         """
