@@ -289,5 +289,5 @@ class NanonisFileLoader:
         return header
 
     def __reform_3ds_data__(self):
-        data = np.empty((1, 1))
+        
         return data
