@@ -51,11 +51,17 @@ class NanonisFileLoader:
             self.header = self.__reform_3ds_header__()
             # --------------------------------------------------------------------------
             # General scanning information quick access
-            self.pixels = self.__data_counter()
-            # self.channels
-
+            self.pixels = tuple(int(item)
+                                for item in self.header.get('Grid dim', '0x0').
+                                replace(" ", "").split('x'))
+            self.param_length = int(
+                self.header.get('# Parameters (4 byte)', 0))
+            self.data_length = int(
+                int(self.header.get('Experiment size (bytes)', 0)) / 4)
+            self.channels = self.header['Channels'].split(';')
+            self.pts_per_chan = int(self.header['Points'])
             # --------------------------------------------------------------------------
-            self.data, self.parameters = self.__reform_3ds_data__()
+            self.parameters, self.data = self.__reform_3ds_data__()
         else:
             raise ValueError(f"Unsupported file type: {f_path}")
 
@@ -265,7 +271,7 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split('>')[0]:
                         header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                            {key.split(">")[-1]                             : value.strip("\r\n").strip('"')}
                         )
                     else:
                         continue
@@ -286,14 +292,47 @@ class NanonisFileLoader:
         return header
 
     def __reform_3ds_data__(self):
-        parameters = 0
-        data = self.__data_1d
+        """
+        Reformats raw 3D spectroscopy (3DS) data into structured parameters
+        and grid.
 
-        return data, parameters
+        Processes raw 1D data into structured format by:
+        1. Calculating total data size from header metadata.
+        2. Reshaping into grid (pixels × channels × points per channel).
+        3. Extracting experiment parameters into DataFrame.
 
-    def __data_counter(self):
-        pixels = tuple(int(item)
-                       for item in self.header['Grid dim'].
-                       replace(" ", "").split('x'))
-        
-        return pixels
+        Returns:
+            tuple: Contains:
+                - params (pd.DataFrame): DataFrame with pixel parameters.
+                    Columns from 'Fixed parameters' and 'Experiment parameters'.
+                - grid (np.ndarray): 3D array of shape
+                    (pixels[0]*pixels[1], len(channels), pts_per_chan).
+
+        Note:
+            - Pads raw data with NaN if shorter than expected.
+            - Assumes raw data in self.__data_1d and metadata in self.header.
+        """
+        param_length = int(self.header['# Parameters (4 byte)'])
+        data_length = int(int(self.header['Experiment size (bytes)']) / 4)
+
+        block_size = param_length + data_length
+        total_pts = block_size * self.pixels[0] * self.pixels[1]
+        grid = np.empty(
+            (self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan))
+        params = pd.DataFrame(columns=(
+            self.header['Fixed parameters'].split(
+                ';') + self.header['Experiment parameters'].split(';')))
+
+        if total_pts > self.__data_1d.shape[0]:
+            data = np.concatenate([self.__data_1d, np.full(
+                max(0, total_pts - len(self.__data_1d)), np.nan)])
+        else:
+            data = self.__data_1d
+
+        for i in range(0, len(data), block_size):
+            block = data[i: i+block_size]
+            params.loc[len(params)] = block[:param_length]
+            grid[i//block_size] = block[param_length:block_size].reshape(
+                (len(self.channels), self.pts_per_chan))
+
+        return params, grid
