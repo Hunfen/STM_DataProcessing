@@ -51,15 +51,13 @@ class NanonisFileLoader:
             self.header = self.__reform_3ds_header__()
             # --------------------------------------------------------------------------
             # General scanning information quick access
-            # self.pixels
+            self.pixels = self.__data_counter()
             # self.channels
 
-
             # --------------------------------------------------------------------------
-            # self.data, self.parameters = self.__reform_3ds_data__()
+            self.data, self.parameters = self.__reform_3ds_data__()
         else:
             raise ValueError(f"Unsupported file type: {f_path}")
-
 
     def __sxm_loader__(self, f_path: str):
         """
@@ -267,8 +265,7 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split('>')[0]:
                         header[module].update(
-                            {key.split(">")[-1]
-                                       : value.strip("\r\n").strip('"')}
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
                         )
                     else:
                         continue
@@ -289,5 +286,14 @@ class NanonisFileLoader:
         return header
 
     def __reform_3ds_data__(self):
+        parameters = 0
+        data = self.__data_1d
+
+        return data, parameters
+
+    def __data_counter(self):
+        pixels = tuple(int(item)
+                       for item in self.header['Grid dim'].
+                       replace(" ", "").split('x'))
         
-        return data
+        return pixels
