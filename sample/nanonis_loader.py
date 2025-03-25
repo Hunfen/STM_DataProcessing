@@ -2,6 +2,7 @@
 """
 Python module that helps read the Nanonis files.
 """
+
 __all__ = []
 
 import os
@@ -297,14 +298,13 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
                         header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
-                        )
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')
+                             })
                     else:
                         continue
 
         for key, value in header["Bias Spectroscopy"].items():
             if "MultiLine Settings" in key:
-
                 header["Bias Spectroscopy"].update(
                     {
                         "MultiLine Settings": pd.DataFrame(
@@ -403,13 +403,14 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
-                        header[module].update({key.split(">")[-1]: value.strip("\r\n").strip('"')})
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')
+                             })
                     else:
                         continue
 
         for key, value in header["Bias Spectroscopy"].items():
             if "MultiLine Settings" in key:
-
                 header["Bias Spectroscopy"].update(
                     {
                         "MultiLine Settings": pd.DataFrame(
@@ -476,7 +477,7 @@ class NanonisFileLoader:
             data = self.__data_1d
 
         for i in range(0, len(data), block_size):
-            block = data[i: i + block_size]
+            block = data[i:i + block_size]
             params.loc[len(params)] = block[:param_length]
             grid[i // block_size] = block[param_length:block_size].reshape(
                 (len(self.channels), self.pts_per_chan)
