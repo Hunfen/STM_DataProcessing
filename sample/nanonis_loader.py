@@ -16,11 +16,9 @@ class NanonisFileLoader:
     """_summary_"""
 
     def __init__(self, f_path: str) -> None:
-        self.file_path = os.path.split(f_path)[0]
-        self.fname = os.path.split(f_path)[1]
+        self.file_path, self.fname = os.path.split(f_path)
         self._header = {}
         self._data = None
-        self.channel_dir = []
         self._pixels = None
 
         if f_path.endswith(".sxm"):
@@ -106,8 +104,6 @@ class NanonisFileLoader:
                     entry = decoded_line.rstrip("\n").strip(":")
                     contents, contents_updated = "", False
                 else:  # in the contents line, update contents
-                    if not decoded_line:
-                        contents += ""
                     contents += decoded_line
                     contents_updated = True
 
@@ -263,12 +259,8 @@ class NanonisFileLoader:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if decoded_line.rstrip("\r\n"):
                     data_lines.append(decoded_line.rstrip("\r\n").split("\t"))
-        data = pd.DataFrame(data_lines, columns=columns)
-        for col in data.columns:
-            try:
-                data[col] = pd.to_numeric(data[col])
-            except ValueError:
-                pass
+        data = pd.DataFrame(data_lines, columns=columns).apply(
+            pd.to_numeric, errors="coerce")
         return raw_header, data
 
     def __reform_dat_header__(self):
@@ -499,18 +491,15 @@ class NanonisFileLoader:
         if self._pixels is None:
             if self.file_type == "sxm":
                 self._pixels = tuple(
-                    map(int, self.header["SCAN_PIXELS"].split()))
+                    map(int, self.header.get("SCAN_PIXELS", "0 0").split()))
             elif self.file_type == "dat":
                 self._pixels = (1, 0)
             elif self.file_type == "3ds":
                 self._pixels = tuple(
-                    int(item)
-                    for item in self.header.get("Grid dim", "0x0")
-                    .replace(" ", "")
-                    .split("x")
-                )
-        if not isinstance(self._pixels, tuple):
-            self._pixels = (0, 0)
+                    int(item) for item in self.header.get("Grid dim", "0x0")
+                    .replace(" ", "").split("x"))
+            else:
+                self._pixels = (0, 0)
         return self._pixels
 
     @property
