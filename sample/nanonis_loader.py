@@ -17,17 +17,17 @@ class NanonisFileLoader:
     def __init__(self, f_path: str) -> None:
         self.file_path = os.path.split(f_path)[0]
         self.fname = os.path.split(f_path)[1]
-        self.header = {}
-        self.data = None
+        self._header = {}
+        self._data = None
         self.channel_dir = []
+        self._pixels = None
 
         if f_path.endswith(".sxm"):
             self.file_type = "sxm"
-            self.raw_header, self.__data_stream = self.__sxm_loader__(f_path)
-            self.header = self.__reform_sxm_header__()
+            self.raw_header, self.__data_1d = self.__sxm_loader__(f_path)
+            self._header = self.__reform_sxm_header__()
             # ---------------------------------------------------------------------------
             # General scanning information quick access
-            self.pixels = tuple(map(int, self.header["SCAN_PIXELS"].split()))
             self.range = tuple(map(float, self.header["SCAN_RANGE"].split()))
             self.center = tuple(map(float, self.header["SCAN_OFFSET"].split()))
             self.frame_angle = float(self.header["SCAN_ANGLE"])
@@ -38,67 +38,77 @@ class NanonisFileLoader:
                 self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
             self.channels: list = self.header["DATA_INFO"]["Name"].tolist()
             # --------------------------------------------------------------------------
-            self.data = self.__reform_sxm_data__()
+            self._data = self.__reform_sxm_data__()
 
         elif f_path.endswith(".dat"):
             self.file_type = "dat"
-            self.raw_header = self.__read_dat_header__(f_path)
-            self.header = self.__reform_dat_header__(self.raw_header)
-            self.data = self.__read_dat_data__(f_path, self.header)
+            self.raw_header, self._data = self.__dat_loader__(f_path)
+            self._header = self.__reform_dat_header__()
+
         elif f_path.endswith(".3ds"):
-            self.file_path = "3ds"
+            self.file_type = "3ds"
             self.raw_header, self.__data_1d = self.__3ds_loader__(f_path)
-            self.header = self.__reform_3ds_header__()
+            self._header = self.__reform_3ds_header__()
             # --------------------------------------------------------------------------
             # General scanning information quick access
-            self.pixels = tuple(int(item)
-                                for item in self.header.get('Grid dim', '0x0').
-                                replace(" ", "").split('x'))
+
             self.param_length = int(
-                self.header.get('# Parameters (4 byte)', 0))
+                self.header.get("# Parameters (4 byte)", 0))
             self.data_length = int(
-                int(self.header.get('Experiment size (bytes)', 0)) / 4)
-            self.channels = self.header['Channels'].split(';')
-            self.pts_per_chan = int(self.header['Points'])
+                int(self.header.get("Experiment size (bytes)", 0)) / 4
+            )
+            self.channels = self.header["Channels"].split(";")
+            self.pts_per_chan = int(self.header["Points"])
             # --------------------------------------------------------------------------
-            self.parameters, self.data = self.__reform_3ds_data__()
+            self.parameters, self._data = self.__reform_3ds_data__()
         else:
             raise ValueError(f"Unsupported file type: {f_path}")
 
     def __sxm_loader__(self, f_path: str):
         """
-        Loads and parses a .sxm file, extracting the header and binary data.
+        Load and parse .sxm file, extracting header and binary data.
+
+        Reads header until ":SCANIT_END:" marker, then extracts binary
+        data as big-endian floats. Header entries start with ":[key]:"
+        followed by content lines.
 
         Args:
-            f_path (str): The file path to the .sxm file.
+            f_path: Path to .sxm file as string.
 
         Returns:
-            tuple: A tuple containing two elements:
-                - raw_header (dict): parsed header information.
-                - 1d data (numpy.ndarray):binary data from the file.
+            Tuple containing:
+                - raw_header: Dictionary of parsed header entries
+                - data: 1D numpy array of binary data
 
-        The method reads the header line by line, stopping when it encounters
-        the ":SCANIT_END:" marker.
-        It then skips two lines and moves the file pointer to the start of the
-        binary data, which is read
-        as a NumPy array of big-endian floats.
+        Notes:
+            - Header entries must start with ":[key]:" markers
+            - Skips 2 lines after header before reading binary data
+            - Binary data read as big-endian 32-bit floats
+            - Uses UTF-8 decoding with error replacement
         """
         raw_header = {}
+        entry, contents, contents_updated = "", "", False
         with open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
-                decoded_line = line.decode(encoding="utf-8",
-                                           errors="replace").strip(" ")
+                decoded_line = line.decode(encoding="utf-8", errors="replace")
                 if ":SCANIT_END:" in decoded_line:
+                    raw_header.update({entry: contents})
                     break
-                if re.match(":.+:", decoded_line):
-                    entry = decoded_line.strip("\n").strip(":")
-                    contents = ""
-                else:
-                    if not contents:
-                        contents = ""
+                if re.fullmatch(r":.*:\n", decoded_line):
+                    # in the key line
+                    if contents_updated:
+                        # encounter the next key,
+                        # update last {key: contents}
+                        # & initialize key and contents
+                        raw_header.update({entry: contents.rstrip("\n")})
+                    entry = decoded_line.rstrip("\n").strip(":")
+                    contents, contents_updated = "", False
+                else:  # in the contents line, update contents
+                    if not decoded_line:
+                        contents += ""
                     contents += decoded_line
-                    raw_header[entry] = contents
+                    contents_updated = True
 
             # Skip two lines and move the file pointer
             for _ in range(2):
@@ -139,7 +149,7 @@ class NanonisFileLoader:
                 else:  # deal with the internal modules
                     modules.append(key.split(">")[0])
             else:
-                header[key] = value.strip("\n")
+                header.update({key: value})
 
         # count the number of attributes in every module
         modules = Counter(modules)
@@ -155,15 +165,16 @@ class NanonisFileLoader:
             if count == 1:
                 for key, value in self.raw_header.items():
                     if key.strip("Ext. VI 1>").startswith(module):
-                        header[module] = value.strip("\n")
+                        header.update({module: value.strip("\n")})
             else:
-                temp_dict = {}
+                header[module] = {}
                 for key, value in self.raw_header.items():
                     if key.strip("Ext. VI 1>").startswith(module):
-                        temp_dict[key.split(">")[-1]] = [value.strip("\n")]
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\n")})
+                        # temp_dict[key.split(">")[-1]] = [value.strip("\n")]
                     else:
                         continue
-                header[module] = pd.DataFrame(temp_dict)
 
         return header
 
@@ -178,8 +189,15 @@ class NanonisFileLoader:
             numpy.ndarray: Reformatted SXM data with corrected scanning
                           directions.
         """
-        data = self.__data_stream.reshape(
-            (len(self.channels) * 2, *self.pixels))
+        total_pts = len(self.channels) * 2 * self.pixels[0] * self.pixels[1]
+        if total_pts > len(self.__data_1d):
+            data = np.concatenate(
+                [
+                    self.__data_1d,
+                    np.full(max(0, total_pts - len(self.__data_1d)), np.nan),
+                ]
+            )
+        data = self.__data_1d.reshape((len(self.channels) * 2, *self.pixels))
         for i in range(data.shape[0]):
             if i % 2 != 0:
                 # deal with backward scanning
@@ -190,39 +208,143 @@ class NanonisFileLoader:
 
         return data
 
-    def __read_dat_header__(self, f_path: str):
+    def __dat_loader__(self, f_path: str) -> tuple[dict, pd.DataFrame]:
+        """
+        Loads Nanonis .dat file, parsing header and data sections.
+
+        Reads binary file to handle line endings precisely. Header entries
+        use format: key<tab>value<tab>\\r\\n. Data section starts after
+        [DATA] marker with tab-delimited columns.
+
+        Args:
+            f_path (str): Path to .dat file
+
+        Returns:
+            tuple: (raw_header, df) where:
+                - raw_header (dict): Header key-value pairs
+                - df (pd.DataFrame): Data table with auto-converted dtypes
+
+        Note:
+            - Preserves original line endings during header parsing
+            - Converts numeric columns automatically
+            - Handles malformed data with error replacement
+        """
         raw_header = {}
-        return raw_header
+        key, value_buffer = "", ""
+        columns, data_lines = [], []
 
-    def __reform_dat_header__(self, raw_header):
+        with open(f_path, "rb") as f:
+            for line in f:
+                decoded_line = line.decode("utf-8", errors="replace")
+                if "[DATA]" in decoded_line:  # End of header
+                    columns = (
+                        next(f)
+                        .decode("utf-8", errors="replace")
+                        .strip("\r\n")
+                        .split("\t")
+                    )
+                    break
+                if decoded_line.endswith("\t\r\n"):
+                    # Update key and value when encounter '\t\r\n'
+                    if "\t" in decoded_line.rstrip("\t\r\n"):
+                        key, value_buffer = decoded_line.rstrip(
+                            "\t\r\n").split("\t", 1)
+                    else:
+                        value_buffer += decoded_line.rstrip("\t\r\n")
+                    raw_header.update({key: value_buffer})
+                    value_buffer = ""
+                else:
+                    if "\t" in decoded_line:
+                        key, value_buffer = decoded_line.split("\t", 1)
+                    else:
+                        value_buffer += decoded_line
+            for line in f:
+                decoded_line = line.decode("utf-8", errors="replace")
+                if decoded_line.rstrip("\r\n"):
+                    data_lines.append(decoded_line.rstrip("\r\n").split("\t"))
+        data = pd.DataFrame(data_lines, columns=columns)
+        for col in data.columns:
+            try:
+                data[col] = pd.to_numeric(data[col])
+            except ValueError:
+                pass
+        return raw_header, data
+
+    def __reform_dat_header__(self):
         header = {}
-        return header
+        modules = []
 
-    def __read_dat_data__(self, f_path: str, header):
-        data = np.empty((1, 1))
-        return data
+        for key, value in self.raw_header.items():
+            if re.search(">", key):  # initial dicts for modules
+                if key.startswith("Ext. VI 1>"):
+                    # deal with external VI attributes
+                    modules.append(key.strip("Ext. VI 1>").split(">")[0])
+                else:  # deal with the internal modules
+                    modules.append(key.split(">")[0])
+            else:
+                header.update({key: value.strip("\n")})
+
+        modules = Counter(modules)
+
+        for module, count in modules.items():
+            if count == 1:
+                for key, value in self.raw_header.items():
+                    if module == key.strip("Ext. VI 1>").split(">")[0]:
+                        header.update({module: value.strip("\r\n")})
+            else:
+                # continue
+                header[module] = {}
+                for key, value in self.raw_header.items():
+                    if module == key.strip("Ext. VI 1>").split(">")[0]:
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                        )
+                    else:
+                        continue
+
+        for key, value in header["Bias Spectroscopy"].items():
+            if "MultiLine Settings" in key:
+
+                header["Bias Spectroscopy"].update(
+                    {
+                        "MultiLine Settings": pd.DataFrame(
+                            np.array(
+                                [
+                                    list(map(float, row.split(",")))
+                                    for row in value.split(";")
+                                ]
+                            ),
+                            columns=key.split(":")[-1].split(","),
+                        )
+                    }
+                )
+                header["Bias Spectroscopy"].pop(key)
+                break
+        return header
 
     def __3ds_loader__(self, f_path: str):
         """
-        Loads a 3DS file and extracts its header and 1d data.
+        Loads Nanonis .3ds file, parsing header and binary data.
+
+        Reads file in binary mode to handle header and data precisely.
+        Header ends at ':HEADER_END:' marker. Data is read as big-endian
+        floats after header.
 
         Args:
-            f_path (str): The file path to the 3DS file.
+            f_path (str): Path to .3ds file
 
         Returns:
-            tuple: A tuple containing two elements:
-                - raw_header (dict): A dictionary containing the header
-                information extracted from the file.
-                - data_stream (numpy.ndarray): A NumPy array containing the
-                1d data extracted from the file.
+            tuple: (raw_header, data_1d) where:
+                - raw_header (dict): Header key-value pairs
+                - data_1d (np.ndarray): 1D array of binary data
 
-        Notes:
-            - The header is read until the ":HEADER_END:" marker is
-            encountered.
-            - The data stream is read as a NumPy array with big-endian float
-            data type.
+        Note:
+            - Uses UTF-8 decoding with error replacement
+            - Handles multi-line header values
+            - Skips CRLF after header end marker
         """
         raw_header = {}
+        key, value_buffer = "", ""
         with open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
@@ -230,8 +352,20 @@ class NanonisFileLoader:
                     # b'\x0d\x0a' is following the ":HEADER_END:"
                     # f.readline() will automaticly skip them
                     break
-                elif "=" in decoded_line:
-                    raw_header.update(dict([decoded_line.split("=", 1)]))
+                if decoded_line.endswith("\r\n"):
+                    # Update key and value when encounter '\r\n'
+                    if "=" in decoded_line.strip("\r\n"):
+                        key, value_buffer = decoded_line.strip(
+                            "\r\n").split("=", 1)
+                    else:
+                        value_buffer += decoded_line.rstrip("\t\r\n")
+                    raw_header.update({key: value_buffer})
+                    value_buffer = ""
+                else:
+                    if "=" in decoded_line:
+                        key, value_buffer = decoded_line.split("=", 1)
+                    else:
+                        value_buffer += decoded_line
             data_1d = np.fromfile(f, dtype=">f")
         return raw_header, data_1d
 
@@ -262,32 +396,34 @@ class NanonisFileLoader:
         for module, count in modules.items():
             if count == 1:
                 for key, value in self.raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split('>')[0]:
+                    if module == key.strip("Ext. VI 1>").split(">")[0]:
                         header.update({module: value.strip("\r\n")})
             else:
                 # continue
                 header[module] = {}
                 for key, value in self.raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split('>')[0]:
-                        header[module].update(
-                            {key.split(">")[-1]:
-                                value.strip("\r\n").strip('"')}
-                        )
+                    if module == key.strip("Ext. VI 1>").split(">")[0]:
+                        header[module].update({key.split(">")[-1]: value.strip("\r\n").strip('"')})
                     else:
                         continue
 
-        for key, value in header['Bias Spectroscopy'].items():
+        for key, value in header["Bias Spectroscopy"].items():
             if "MultiLine Settings" in key:
 
-                header['Bias Spectroscopy'].update(
+                header["Bias Spectroscopy"].update(
                     {
-                        "MultiLine Settings": pd.DataFrame(np.array(
-                            [list(map(float, row.split(",")))
-                             for row in value.split(';')]
-                        ), columns=key.split(':')[-1].split(","))
+                        "MultiLine Settings": pd.DataFrame(
+                            np.array(
+                                [
+                                    list(map(float, row.split(",")))
+                                    for row in value.split(";")
+                                ]
+                            ),
+                            columns=key.split(":")[-1].split(","),
+                        )
                     }
                 )
-                header['Bias Spectroscopy'].pop(key)
+                header["Bias Spectroscopy"].pop(key)
                 break
         return header
 
@@ -312,28 +448,86 @@ class NanonisFileLoader:
             - Pads raw data with NaN if shorter than expected.
             - Assumes raw data in self.__data_1d and metadata in self.header.
         """
-        param_length = int(self.header['# Parameters (4 byte)'])
-        data_length = int(int(self.header['Experiment size (bytes)']) / 4)
+        param_length = int(self.header["# Parameters (4 byte)"])
+        data_length = int(int(self.header["Experiment size (bytes)"]) / 4)
 
         block_size = param_length + data_length
         total_pts = block_size * self.pixels[0] * self.pixels[1]
         grid = np.empty(
-            (self.pixels[0] * self.pixels[1], len(self.channels),
-             self.pts_per_chan))
-        params = pd.DataFrame(columns=(
-            self.header['Fixed parameters'].split(
-                ';') + self.header['Experiment parameters'].split(';')))
+            (self.pixels[0] * self.pixels[1],
+             len(self.channels), self.pts_per_chan)
+        )
+        params = pd.DataFrame(
+            index=range(self.pixels[0] * self.pixels[1]),
+            columns=(
+                self.header["Fixed parameters"].split(";")
+                + self.header["Experiment parameters"].split(";")
+            ),
+        )
 
         if total_pts > self.__data_1d.shape[0]:
-            data = np.concatenate([self.__data_1d, np.full(
-                max(0, total_pts - len(self.__data_1d)), np.nan)])
+            data = np.concatenate(
+                [
+                    self.__data_1d,
+                    np.full(max(0, total_pts - len(self.__data_1d)), np.nan),
+                ]
+            )
         else:
             data = self.__data_1d
 
         for i in range(0, len(data), block_size):
-            block = data[i: i+block_size]
+            block = data[i: i + block_size]
             params.loc[len(params)] = block[:param_length]
-            grid[i//block_size] = block[param_length:block_size].reshape(
-                (len(self.channels), self.pts_per_chan))
+            grid[i // block_size] = block[param_length:block_size].reshape(
+                (len(self.channels), self.pts_per_chan)
+            )
 
         return params, grid
+
+    @property
+    def pixels(self) -> tuple:
+        """Get the pixel dimensions of the scan data.
+
+        Returns:
+            tuple: A tuple of two integers representing the pixel dimensions
+            (width, height). For 'sxm' files, reads from 'SCAN_PIXELS' in
+            the header. For 'dat' files, returns (1, 0). For '3ds' files,
+            parses 'Grid dim' from the header. If parsing fails or the file
+            type is unknown, returns (0, 0).
+        """
+        if self._pixels is None:
+            if self.file_type == "sxm":
+                self._pixels = tuple(
+                    map(int, self.header["SCAN_PIXELS"].split()))
+            elif self.file_type == "dat":
+                self._pixels = (1, 0)
+            elif self.file_type == "3ds":
+                self._pixels = tuple(
+                    int(item)
+                    for item in self.header.get("Grid dim", "0x0")
+                    .replace(" ", "")
+                    .split("x")
+                )
+        if not isinstance(self._pixels, tuple):
+            self._pixels = (0, 0)
+        return self._pixels
+
+    @property
+    def header(self) -> dict:
+        """Return the header dictionary.
+
+        Returns:
+            dict: The stored header information.
+        """
+        return self._header
+
+    @property
+    def data(self) -> np.ndarray | pd.DataFrame | None:
+        """Return the stored data.
+
+        Returns:
+            np.ndarray | pd.DataFrame | None:
+                The stored data, which can be a NumPy array,
+                a pandas DataFrame, or None if no data is loaded.
+        """
+        return self._data
