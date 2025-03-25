@@ -102,3 +102,6 @@ ENV/
 *.sxm
 *.3ds
 *.dat
+
+# Folder
+trash_bin/
