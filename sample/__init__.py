@@ -21,8 +21,9 @@ Dependencies:
     Requires numpy (for array operations) and pandas (for tabular data).
 """
 
-__all__ = ['np', 'pd', 'NanonisFileLoader']
+__all__ = ['np', 'pd', 'NanonisFileLoader', 'vortex_num']
 
 import numpy as np
 import pandas as pd
 from .nanonis_loader import NanonisFileLoader
+from .utility import vortex_num
