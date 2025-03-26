@@ -66,12 +66,12 @@ Dependencies
   - ``pandas`` (tabular data handling)
   - ``matplotlib`` (preview plotting, optional)
 
-Examples
---------
-See the ``examples/`` directory for:
-- Basic file loading scripts
-- Data visualization samples
-- Advanced parameter extraction
+.. Examples
+.. --------
+.. See the ``examples/`` directory for:
+.. - Basic file loading scripts
+.. - Data visualization samples
+.. - Advanced parameter extraction
 
 License
 -------
