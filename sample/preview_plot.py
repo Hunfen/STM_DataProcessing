@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
-__all__ = []
+__all__ = ['np', 'pd', 'plot_topo']
 
 
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.pyplot as plt
+from . import np, pd
 
 
 # color map
@@ -40,5 +42,78 @@ cdict_gwyddion: dict = {
 }
 
 # 创建颜色映射
-custom_cmap = LinearSegmentedColormap(
-    "custom_cmap", segmentdata=cdict_gwyddion, N=4096)
+gwyddion = LinearSegmentedColormap(
+    "gwyddion", segmentdata=cdict_gwyddion, N=4096)
+
+
+def plot_topo(input_file,
+              output,
+              v_min,
+              sigma,
+              color_map=gwyddion) -> None:
+    """Plot topography data from a file or NumPy array.
+
+    Args:
+        input_file (str or np.ndarray): Path to the input file or a NumPy
+            array containing the topography data.
+        output (str, optional): Path to save the output image.
+            If None, attempts to save with the input filename
+            (if input is a str) or prompts the user.
+        v_min (float, optional): Minimum value for the color scale.
+            If provided, overrides sigma-based scaling.
+        sigma (float, optional): Number of standard deviations to
+            set the color scale range around the median.
+            Ignored if v_min is provided.
+        color_map (str or Colormap, optional): Colormap for the plot.
+            Defaults to 'gwyddion'.
+
+    Raises:
+        ValueError:
+            If input_file is neither a string nor a NumPy array.
+        FileNotFoundError:
+            If input_file is a string but the file does not exist.
+    """
+    # Load or validate input data
+    if isinstance(input_file, str):
+        try:
+            topo = np.loadtxt(input_file)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Input file not found: {input_file}") from exc
+    elif isinstance(input_file, np.ndarray):
+        topo = input_file
+    else:
+        raise ValueError("输入必须是文件路径(str)或NumPy数组(np.ndarray)")
+    # Set figure size based on aspect ratio
+    ratio = topo.shape[0] / topo.shape[1]
+    size = (3.375 / ratio, 3.375) if ratio <= 1 else (3.375, 3.375 * ratio)
+    # Calculate statistics for color scaling
+    topo_median, topo_std = float(np.median(topo)), float(np.std(topo))
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=size)
+
+    if v_min:
+        ax.imshow(topo, cmap=color_map, vmin=v_min)
+    elif sigma is not None:
+        ax.imshow(topo,
+                  cmap=color_map,
+                  vmin=topo_median - sigma * topo_std,
+                  vmax=topo_median + sigma * topo_std
+                  )
+    else:
+        ax.imshow(topo, cmap=color_map)
+    ax.axis('off')
+
+    fig.tight_layout(pad=0, w_pad=0, h_pad=0)
+
+    # Determine output path
+    if output is None:
+        if isinstance(input_file, str):
+            save_path = input_file.rsplit('.', 1)[0] + '.png'
+        else:
+            save_path = input("请指定输出文件路径: ")
+    else:
+        save_path = output
+    fig.savefig(save_path, dpi=300)
+    plt.close(fig)
