@@ -34,7 +34,8 @@ class NanonisFileLoader:
             # downward --> false, upward --> true
             self.dir = self.header["SCAN_DIR"] == "up"
             self.bias = float(self.header["BIAS"])
-            self.setpoint = float(self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
+            self.setpoint = float(
+                self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
             self.channels: list = self.header["DATA_INFO"]["Name"].tolist()
             # --------------------------------------------------------------------------
             self._data = self.__reform_sxm_data__()
@@ -51,7 +52,8 @@ class NanonisFileLoader:
             # --------------------------------------------------------------------------
             # General scanning information quick access
 
-            self.param_length = int(self.header.get("# Parameters (4 byte)", 0))
+            self.param_length = int(
+                self.header.get("# Parameters (4 byte)", 0))
             self.data_length = int(
                 int(self.header.get("Experiment size (bytes)", 0)) / 4
             )
@@ -166,7 +168,8 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self.raw_header.items():
                     if key.strip("Ext. VI 1>").startswith(module):
-                        header[module].update({key.split(">")[-1]: value.strip("\n")})
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\n")})
                         # temp_dict[key.split(">")[-1]] = [value.strip("\n")]
                     else:
                         continue
@@ -242,7 +245,8 @@ class NanonisFileLoader:
                 if decoded_line.endswith("\t\r\n"):
                     # Update key and value when encounter '\t\r\n'
                     if "\t" in decoded_line.rstrip("\t\r\n"):
-                        key, value_buffer = decoded_line.rstrip("\t\r\n").split("\t", 1)
+                        key, value_buffer = decoded_line.rstrip(
+                            "\t\r\n").split("\t", 1)
                     else:
                         value_buffer += decoded_line.rstrip("\t\r\n")
                     raw_header.update({key: value_buffer})
@@ -288,7 +292,8 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
                         header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')
+                             }
                         )
                     else:
                         continue
@@ -345,7 +350,8 @@ class NanonisFileLoader:
                 if decoded_line.endswith("\r\n"):
                     # Update key and value when encounter '\r\n'
                     if "=" in decoded_line.strip("\r\n"):
-                        key, value_buffer = decoded_line.strip("\r\n").split("=", 1)
+                        key, value_buffer = decoded_line.strip(
+                            "\r\n").split("=", 1)
                     else:
                         value_buffer += decoded_line.rstrip("\t\r\n")
                     raw_header.update({key: value_buffer})
@@ -393,7 +399,8 @@ class NanonisFileLoader:
                 for key, value in self.raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
                         header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')
+                             }
                         )
                     else:
                         continue
@@ -444,7 +451,8 @@ class NanonisFileLoader:
         block_size = param_length + data_length
         total_pts = block_size * self.pixels[0] * self.pixels[1]
         grid = np.empty(
-            (self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan)
+            (self.pixels[0] * self.pixels[1],
+             len(self.channels), self.pts_per_chan)
         )
         params = pd.DataFrame(
             index=range(self.pixels[0] * self.pixels[1]),
@@ -465,9 +473,10 @@ class NanonisFileLoader:
             data = self.__data_1d
 
         for i in range(0, len(data), block_size):
-            block = data[i : i + block_size]
-            params.loc[len(params)] = block[:param_length]
-            grid[i // block_size] = block[param_length:block_size].reshape(
+            n = i // block_size
+            block = data[i: i + block_size]
+            params.loc[n] = block[:param_length]
+            grid[n] = block[param_length:block_size].reshape(
                 (len(self.channels), self.pts_per_chan)
             )
 
@@ -524,8 +533,9 @@ class NanonisFileLoader:
 
     @property
     def parameters(self):
-        """Return the experiment parameters.
+        """Return the stored parameters dictionary.
+
         Returns:
-            pd.DataFrame: A DataFrame containing the experiment parameters.
+            dict: The dictionary containing all measurement parameters.
         """
         return self._parameters
