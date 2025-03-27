@@ -14,6 +14,10 @@ from . import np, pd
 
 class NanonisFileLoader:
     """_summary_"""
+# TODO：
+# 1. NanonisFileLoader类初始化后不直接对header和data进行处理，
+# 而是在需要的时候对header和data进行reformat。
+# 2. I(V), dI/dV(V) 插值平均
 
     def __init__(self, f_path: str) -> None:
         self.file_path, self.fname = os.path.split(f_path)
@@ -404,7 +408,7 @@ class NanonisFileLoader:
                         )
                     else:
                         continue
-                    
+
         if 'Bias Spectroscopy' in self.raw_header.keys():
             for key, value in header["Bias Spectroscopy"].items():
                 if "MultiLine Settings" in key:
