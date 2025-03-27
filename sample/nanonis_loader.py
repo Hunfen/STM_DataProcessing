@@ -404,24 +404,25 @@ class NanonisFileLoader:
                         )
                     else:
                         continue
-
-        for key, value in header["Bias Spectroscopy"].items():
-            if "MultiLine Settings" in key:
-                header["Bias Spectroscopy"].update(
-                    {
-                        "MultiLine Settings": pd.DataFrame(
-                            np.array(
-                                [
-                                    list(map(float, row.split(",")))
-                                    for row in value.split(";")
-                                ]
-                            ),
-                            columns=key.split(":")[-1].split(","),
-                        )
-                    }
-                )
-                header["Bias Spectroscopy"].pop(key)
-                break
+                    
+        if 'Bias Spectroscopy' in self.raw_header.keys():
+            for key, value in header["Bias Spectroscopy"].items():
+                if "MultiLine Settings" in key:
+                    header["Bias Spectroscopy"].update(
+                        {
+                            "MultiLine Settings": pd.DataFrame(
+                                np.array(
+                                    [
+                                        list(map(float, row.split(",")))
+                                        for row in value.split(";")
+                                    ]
+                                ),
+                                columns=key.split(":")[-1].split(","),
+                            )
+                        }
+                    )
+                    header["Bias Spectroscopy"].pop(key)
+                    break
         return header
 
     def __reform_3ds_data__(self):
