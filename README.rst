@@ -21,7 +21,7 @@ Installation
 .. code-block:: bash
 
    pip install numpy pandas matplotlib  # Required dependencies
-   git clone https://github.com/your-repo/nanonis-loader.git
+   git clone https://github.com/Hunfen/STM_DataProcessing.git
    cd nanonis-loader
    pip install -e .
 
