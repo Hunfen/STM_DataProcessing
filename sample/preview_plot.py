@@ -1,4 +1,25 @@
 # -*- coding: utf-8 -*-
+"""Topography data visualization module.
+
+This module provides functionality for plotting and visualizing topography data
+from files or NumPy arrays. It includes a custom colormap (gwyddion) optimized
+for topography visualization and supports flexible color scaling options.
+
+Features:
+    - Custom gwyddion colormap for topography visualization
+    - Support for both file input and NumPy array input
+    - Automatic figure sizing based on data aspect ratio
+    - Flexible color scaling using sigma-based ranges or fixed values
+    - High-resolution output with configurable DPI
+
+Example:
+    >>> plot_topo('topography_data.txt', 'output.png', sigma=2)
+    >>> plot_topo(topo_array, v_min=0, color_map='viridis')
+
+Raises:
+    FileNotFoundError: When the specified input file does not exist
+    ValueError: When input is neither a string path nor a NumPy array
+"""
 
 __all__ = ['np', 'pd', 'plot_topo']
 
@@ -22,10 +43,10 @@ from . import np, pd
 #                                    N=256)
 cdict_gwyddion: dict = {
     "red": [
-        (0.0, 0.0, 0.0),  # 位置 0: R=0
-        (0.344671, 0.658824, 0.658824),  # 位置 0.344671: R=0.658824
-        (0.687075, 0.953506, 0.953506),  # 位置 0.687075: R=0.953506
-        (1.0, 1.0, 1.0),  # 位置 1.0: R=1.0
+        (0.0, 0.0, 0.0),
+        (0.344671, 0.658824, 0.658824),
+        (0.687075, 0.953506, 0.953506),
+        (1.0, 1.0, 1.0),
     ],
     "green": [
         (0.0, 0.0, 0.0),  # G=0

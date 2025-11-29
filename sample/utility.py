@@ -1,4 +1,21 @@
 # -*- coding: utf-8 -*-
+"""Utility functions for physics calculations.
+
+This module provides utility functions for various
+physics-related calculations, particularly focused
+on superconducting and vortex physics applications.
+
+Functions:
+    vortex_num: Calculate the number of magnetic flux quanta (vortices)
+    based on magnetic field and area.
+
+Constants:
+    phi_0: Magnetic flux quantum (2.067833848e-15 Wb)
+
+Example:
+    >>> vortex_num(field=0.1, area=1e-12)
+    4.835978e+13
+"""
 
 __all__ = ['np', 'pd', 'vortex_num']
 

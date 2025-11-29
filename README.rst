@@ -14,12 +14,13 @@ Features
 - **Multi-channel data** support with directional scan correction
 - **Header parsing** with module-specific organization
 - **Data reformatting** for backward/upward scan correction
+- **Topography visualization** with custom colormaps
 
 Installation
 ------------
 .. code-block:: bash
 
-   pip install numpy pandas  # Required dependencies
+   pip install numpy pandas matplotlib  # Required dependencies
    git clone https://github.com/your-repo/nanonis-loader.git
    cd nanonis-loader
    pip install -e .
@@ -29,10 +30,21 @@ Usage
 Basic Example:
 .. code-block:: python
 
-   from sample import NanonisFileLoader
-   loader = NanonisFileLoader("scan.3ds")
-   print(loader.header["Grid dim"])  # Get grid dimensions
-   spectrum = loader.data  # Get 3D spectroscopy data
+   from sample.nanonis_loader import NanonisFileLoader
+   from sample.preview_plot import plot_topo
+   
+   # Load Nanonis file
+   loader = NanonisFileLoader("scan.sxm")
+   print(loader.header["SCAN_PIXELS"])  # Get pixel dimensions
+   print(loader.pixels)  # Get formatted pixel dimensions
+   
+   # Access scan parameters
+   print(f"Scan range: {loader.range}")
+   print(f"Bias: {loader.bias} V")
+   print(f"Channels: {loader.channels}")
+   
+   # Plot topography data
+   plot_topo(loader.data[0], "topography.png", sigma=2)
 
 Supported File Types
 -------------------
@@ -54,9 +66,22 @@ Main Class:
     - ``.header``: Dictionary of parsed metadata
     - ``.data``: Numpy array or DataFrame of measurement data
     - ``.pixels``: Tuple of (width, height) dimensions
+    - ``.parameters``: DataFrame of measurement parameters (3DS files)
+    - ``.range``: Scan range tuple
+    - ``.bias``: Bias voltage
+    - ``.setpoint``: Z-controller setpoint
+    - ``.channels``: List of data channel names
 
 Utility Functions:
 - ``vortex_num(field: float, area: float)``: Calculates superconducting flux quanta
+- ``plot_topo(input_file, output, v_min, sigma, color_map)``: Plot topography data
+
+Visualization Features
+----------------------
+- **Custom colormap**: Gwyddion-style colormap optimized for topography
+- **Flexible scaling**: Sigma-based or fixed value color scaling
+- **High-resolution output**: 300 DPI image export
+- **Aspect ratio preservation**: Automatic figure sizing
 
 Dependencies
 ------------
@@ -64,7 +89,17 @@ Dependencies
 - Required Packages:
   - ``numpy`` (array operations)
   - ``pandas`` (tabular data handling)
-  - ``matplotlib`` (preview plotting, optional)
+  - ``matplotlib`` (visualization)
+
+Module Structure
+----------------
+::
+
+   sample/
+   ├── __init__.py      # Package initialization
+   ├── nanonis_loader.py # Main file loader class
+   ├── preview_plot.py   # Visualization utilities
+   └── utility.py        # Physics calculation utilities
 
 .. Examples
 .. --------
