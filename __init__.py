@@ -13,7 +13,7 @@ from .dft_codes.wannier90 import (
     _save_band_contourmap,
     GPUContext,
 )
-from .STM import LATTICE2D, QPICalculator, LatticeOperations, create_polygon_mask
+from .STM import LATTICE2D, QPICalculator, LatticeOperations, create_polygon_mask, NanonisFileLoader
 
 __all__ = [
     "OpenMX",
@@ -31,4 +31,5 @@ __all__ = [
     "read_unfold_orbup",
     "compute_spectral_function",
     "create_polygon_mask",
+    "NanonisFileLoader",
 ]

@@ -2,13 +2,11 @@
 Python module that helps read the Nanonis files.
 """
 
-__all__ = []
-
-
 import os
 import re
 from collections import Counter
-from . import np, pd
+import numpy as np
+import pandas as pd
 
 
 class NanonisFileLoader:
