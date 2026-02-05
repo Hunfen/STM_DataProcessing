@@ -105,8 +105,3 @@ ENV/
 
 # Folder
 trash_bin/
-
-# uv
-*.lock
-
-.gitignore
