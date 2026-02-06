@@ -1,12 +1,8 @@
 # -*- coding: utf-8 -*-
 
-__all__ = ["np", "pd", "plot_topo"]
-
-
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
-
-from . import np, pd
 
 # color map
 # cdict_gwyddion: dict = {

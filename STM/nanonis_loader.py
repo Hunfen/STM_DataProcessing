@@ -5,6 +5,7 @@ Python module that helps read the Nanonis files.
 import os
 import re
 from collections import Counter
+
 import numpy as np
 import pandas as pd
 
