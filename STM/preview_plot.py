@@ -22,10 +22,10 @@ from . import np, pd
 #                                    N=256)
 cdict_gwyddion: dict = {
     "red": [
-        (0.0, 0.0, 0.0),  # 位置 0: R=0
+        (0.0, 0.0, 0.0),  # Position 0: R=0
         (0.344671, 0.658824, 0.658824),
         (0.687075, 0.953506, 0.953506),
-        (1.0, 1.0, 1.0),  # 位置 1.0: R=1.0
+        (1.0, 1.0, 1.0),  # Position 1.0: R=1.0
     ],
     "green": [
         (0.0, 0.0, 0.0),  # G=0
@@ -41,7 +41,7 @@ cdict_gwyddion: dict = {
     ],
 }
 
-# 创建颜色映射
+# Create color map
 gwyddion = LinearSegmentedColormap("gwyddion", segmentdata=cdict_gwyddion, N=4096)
 
 
@@ -77,7 +77,9 @@ def plot_topo(input_file, output, v_min, sigma, color_map=gwyddion) -> None:
     elif isinstance(input_file, np.ndarray):
         topo = input_file
     else:
-        raise ValueError("输入必须是文件路径(str)或NumPy数组(np.ndarray)")
+        raise ValueError(
+            "Input must be either a file path (str) or a NumPy array (np.ndarray)"
+        )
     # Set figure size based on aspect ratio
     ratio = topo.shape[0] / topo.shape[1]
     size = (3.375 / ratio, 3.375) if ratio <= 1 else (3.375, 3.375 * ratio)
@@ -107,7 +109,7 @@ def plot_topo(input_file, output, v_min, sigma, color_map=gwyddion) -> None:
         if isinstance(input_file, str):
             save_path = input_file.rsplit(".", 1)[0] + ".png"
         else:
-            save_path = input("请指定输出文件路径: ")
+            save_path = input("Please specify output file path: ")
     else:
         save_path = output
     fig.savefig(save_path, dpi=300)
