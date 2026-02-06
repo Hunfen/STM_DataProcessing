@@ -149,6 +149,11 @@ class LATTICE2D:
         """
         return self.bvecs
 
+    @staticmethod
+    def _wrap_centered(x: float) -> float:
+        """Map x to [-0.5, 0.5)."""
+        return x - np.floor(x + 0.5)
+
     def _reciprocal_to_real(self):
         """
         Convert reciprocal lattice vectors to real space lattice vectors.
@@ -285,6 +290,131 @@ class LATTICE2D:
 
         # Create new LATTICE2D instance with supercell vectors
         return LATTICE2D(avecs=avecs_super)
+
+    def get_bragg_points_supercell_in_1x1_fftshift(
+        self,
+        transformation_matrix,
+        include_origin: bool = False,
+        return_uv: bool = False,
+        return_mn: bool = False,
+        tol: float = 1e-10,
+    ):
+        """
+        Generate ALL supercell Bragg points folded into the 1x1 FFTshifted window
+        (primitive reciprocal cell centered at Gamma): u,v in [-0.5, 0.5).
+
+        Convention consistent with this class:
+            supercell(): [a1', a2'] = [a1, a2] @ T
+        Therefore reciprocal transforms as:
+            [b1', b2'] = [b1, b2] @ (T^{-1})^T
+
+        Parameters
+        ----------
+        transformation_matrix : array-like (2,2)
+            Real-space supercell transform T.
+        include_origin : bool
+            Include Gamma (0,0).
+        return_uv : bool
+            Also return folded reduced coords (u,v) in primitive reciprocal basis.
+        return_mn : bool
+            Also return the integer coefficients (m,n) in supercell reciprocal basis b1',b2'
+            that generated each (folded) point.
+        tol : float
+            Numerical tolerance for boundary & dedup.
+
+        Returns
+        -------
+        points : np.ndarray, shape (2,N)
+            (qx,qy) Cartesian positions of Bragg points inside fftshifted 1x1 window.
+        (optional) uv : np.ndarray, shape (2,N)
+            Folded reduced coords in primitive reciprocal basis (inside [-0.5,0.5)).
+        (optional) mn : np.ndarray, shape (2,N)
+            Integers (m,n) in supercell reciprocal basis used to generate the point.
+
+        Notes
+        -----
+        In exact arithmetic, the number of unique points inside the 1x1 window is |det(T)|.
+        """
+        if self.bvecs is None:
+            raise ValueError("Reciprocal vectors (bvecs) not initialized")
+
+        t = np.asarray(transformation_matrix, dtype=float)
+        if t.shape != (2, 2):
+            raise ValueError("transformation_matrix must be a 2x2 array")
+        det_t = np.linalg.det(t)
+        if abs(det_t) < 1e-14:
+            raise ValueError("transformation_matrix is singular")
+
+        # primitive reciprocal basis in xy (columns)
+        b1_xy = np.asarray(self.b1[:2], dtype=float)
+        b2_xy = np.asarray(self.b2[:2], dtype=float)
+        b = np.column_stack([b1_xy, b2_xy])  # (2,2)
+        if abs(np.linalg.det(b)) < 1e-14:
+            raise ValueError("Primitive reciprocal basis (b1,b2) is singular in xy")
+        b_inv = np.linalg.inv(b)
+
+        # supercell reciprocal basis in xy:
+        # B' = B @ (T^{-1})^T
+        b_p = b @ np.linalg.inv(t).T
+
+        # enumerate candidate (m,n) in a safe finite range, then fold+dedup
+        m_max = int(np.ceil(np.max(np.abs(t)))) + 1
+        m_range = range(-4 * m_max, 4 * m_max + 1)
+        n_range = range(-4 * m_max, 4 * m_max + 1)
+
+        # unique by quantized folded reduced coords
+        kept = {}  # key -> (u,v,qx,qy,m,n)
+
+        for m in m_range:
+            for n in n_range:
+                if (not include_origin) and (m == 0 and n == 0):
+                    continue
+
+                g_xy = b_p @ np.array([m, n], dtype=float)  # Cartesian qx,qy
+
+                # reduced coords in primitive basis
+                u, v = (b_inv @ g_xy).tolist()
+
+                # fold into fftshifted window [-0.5,0.5)
+                u_f = self._wrap_centered(u)
+                v_f = self._wrap_centered(v)
+
+                # strict half-open window check (numerical safe)
+                if not (-0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol):
+                    continue
+
+                # reconstruct folded Cartesian point consistently
+                g_fold = b @ np.array([u_f, v_f], dtype=float)
+
+                key = (int(np.round(u_f / tol)), int(np.round(v_f / tol)))
+                if key not in kept:
+                    kept[key] = (u_f, v_f, g_fold[0], g_fold[1], m, n)
+                else:
+                    old = kept[key]
+                    if (abs(m) + abs(n)) < (abs(old[4]) + abs(old[5])):
+                        kept[key] = (u_f, v_f, g_fold[0], g_fold[1], m, n)
+
+        if not kept:
+            points = np.empty((2, 0))
+            outs = [points]
+            if return_uv:
+                outs.append(np.empty((2, 0)))
+            if return_mn:
+                outs.append(np.empty((2, 0), dtype=int))
+            return tuple(outs) if len(outs) > 1 else points
+
+        # stable ordering
+        items = sorted(kept.values(), key=lambda x: (x[0], x[1]))
+        uv = np.array([[it[0], it[1]] for it in items], dtype=float).T  # (2,N)
+        pts = np.array([[it[2], it[3]] for it in items], dtype=float).T  # (2,N)
+        mn = np.array([[it[4], it[5]] for it in items], dtype=int).T  # (2,N)
+
+        outs = [pts]
+        if return_uv:
+            outs.append(uv)
+        if return_mn:
+            outs.append(mn)
+        return tuple(outs) if len(outs) > 1 else pts
 
 
 class LatticeOperations:
