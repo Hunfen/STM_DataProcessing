@@ -107,7 +107,13 @@ class LATTICE2D:
         """
         # Create 2D rotation matrix
         theta = self.radian
-        rot_matrix = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+        rot_matrix = np.array(
+            [
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta), np.cos(theta), 0],
+                [0, 0, 1],
+            ]
+        )
 
         # Rotate real space vectors
         if self.avecs is not None:
@@ -380,7 +386,9 @@ class LATTICE2D:
                 v_f = self._wrap_centered(v)
 
                 # strict half-open window check (numerical safe)
-                if not (-0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol):
+                if not (
+                    -0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol
+                ):
                     continue
 
                 # reconstruct folded Cartesian point consistently
@@ -614,7 +622,9 @@ class LatticeOperations:
                 k = np.linalg.solve(a, b)
                 vertices.append(k)
             except np.linalg.LinAlgError as e:
-                raise RuntimeError(f"Failed to solve for BZ vertex between g{i} and g{(i + 1) % n}") from e
+                raise RuntimeError(
+                    f"Failed to solve for BZ vertex between g{i} and g{(i + 1) % n}"
+                ) from e
 
         vertices = np.array(vertices).T  # shape (2, 6)
 

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 
-__all__ = ['np', 'pd', 'plot_topo']
+__all__ = ["np", "pd", "plot_topo"]
 
 
-from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
-from . import np, pd
+from matplotlib.colors import LinearSegmentedColormap
 
+from . import np, pd
 
 # color map
 # cdict_gwyddion: dict = {
@@ -23,8 +23,8 @@ from . import np, pd
 cdict_gwyddion: dict = {
     "red": [
         (0.0, 0.0, 0.0),  # 位置 0: R=0
-        (0.344671, 0.658824, 0.658824),  # 位置 0.344671: R=0.658824
-        (0.687075, 0.953506, 0.953506),  # 位置 0.687075: R=0.953506
+        (0.344671, 0.658824, 0.658824),
+        (0.687075, 0.953506, 0.953506),
         (1.0, 1.0, 1.0),  # 位置 1.0: R=1.0
     ],
     "green": [
@@ -42,15 +42,10 @@ cdict_gwyddion: dict = {
 }
 
 # 创建颜色映射
-gwyddion = LinearSegmentedColormap(
-    "gwyddion", segmentdata=cdict_gwyddion, N=4096)
+gwyddion = LinearSegmentedColormap("gwyddion", segmentdata=cdict_gwyddion, N=4096)
 
 
-def plot_topo(input_file,
-              output,
-              v_min,
-              sigma,
-              color_map=gwyddion) -> None:
+def plot_topo(input_file, output, v_min, sigma, color_map=gwyddion) -> None:
     """Plot topography data from a file or NumPy array.
 
     Args:
@@ -78,8 +73,7 @@ def plot_topo(input_file,
         try:
             topo = np.loadtxt(input_file)
         except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"Input file not found: {input_file}") from exc
+            raise FileNotFoundError(f"Input file not found: {input_file}") from exc
     elif isinstance(input_file, np.ndarray):
         topo = input_file
     else:
@@ -96,21 +90,22 @@ def plot_topo(input_file,
     if v_min:
         ax.imshow(topo, cmap=color_map, vmin=v_min)
     elif sigma is not None:
-        ax.imshow(topo,
-                  cmap=color_map,
-                  vmin=topo_median - sigma * topo_std,
-                  vmax=topo_median + sigma * topo_std
-                  )
+        ax.imshow(
+            topo,
+            cmap=color_map,
+            vmin=topo_median - sigma * topo_std,
+            vmax=topo_median + sigma * topo_std,
+        )
     else:
         ax.imshow(topo, cmap=color_map)
-    ax.axis('off')
+    ax.axis("off")
 
     fig.tight_layout(pad=0, w_pad=0, h_pad=0)
 
     # Determine output path
     if output is None:
         if isinstance(input_file, str):
-            save_path = input_file.rsplit('.', 1)[0] + '.png'
+            save_path = input_file.rsplit(".", 1)[0] + ".png"
         else:
             save_path = input("请指定输出文件路径: ")
     else:

@@ -136,7 +136,9 @@ class NanonisFileLoader:
         modules = Counter(modules)
 
         for key in ["Z-CONTROLLER", "DATA_INFO"]:
-            df = pd.DataFrame([row.split("\t") for row in self._raw_header[key].split("\n")])
+            df = pd.DataFrame(
+                [row.split("\t") for row in self._raw_header[key].split("\n")]
+            )
             df.columns = df.iloc[0]
             header[key] = df[1:].reset_index(drop=True).dropna(how="any")
 
@@ -162,7 +164,9 @@ class NanonisFileLoader:
         raw_data = self._raw_data
 
         if total_pts > raw_data.size:
-            raw_data = np.concatenate([raw_data, np.full(total_pts - raw_data.size, np.nan)])
+            raw_data = np.concatenate(
+                [raw_data, np.full(total_pts - raw_data.size, np.nan)]
+            )
 
         data = raw_data[:total_pts].reshape((len(self.channels) * 2, *pixels))
         for i in range(data.shape[0]):
@@ -201,7 +205,12 @@ class NanonisFileLoader:
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if "[DATA]" in decoded_line:  # End of header
-                    columns = next(f).decode("utf-8", errors="replace").strip("\r\n").split("\t")
+                    columns = (
+                        next(f)
+                        .decode("utf-8", errors="replace")
+                        .strip("\r\n")
+                        .split("\t")
+                    )
                     break
                 if decoded_line.endswith("\t\r\n"):
                     # Update key and value when encounter '\t\r\n'
@@ -220,7 +229,9 @@ class NanonisFileLoader:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if decoded_line.rstrip("\r\n"):
                     data_lines.append(decoded_line.rstrip("\r\n").split("\t"))
-        data = pd.DataFrame(data_lines, columns=columns).apply(pd.to_numeric, errors="coerce")
+        data = pd.DataFrame(data_lines, columns=columns).apply(
+            pd.to_numeric, errors="coerce"
+        )
         return raw_header, data
 
     def _reform_dat_header(self):
@@ -249,7 +260,9 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self._raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
-                        header[module].update({key.split(">")[-1]: value.strip("\r\n").strip('"')})
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                        )
                     else:
                         continue
 
@@ -258,7 +271,12 @@ class NanonisFileLoader:
                 header["Bias Spectroscopy"].update(
                     {
                         "MultiLine Settings": pd.DataFrame(
-                            np.array([list(map(float, row.split(","))) for row in value.split(";")]),
+                            np.array(
+                                [
+                                    list(map(float, row.split(",")))
+                                    for row in value.split(";")
+                                ]
+                            ),
                             columns=key.split(":")[-1].split(","),
                         )
                     }
@@ -347,7 +365,9 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self._raw_header.items():
                     if module == key.strip("Ext. VI 1>").split(">")[0]:
-                        header[module].update({key.split(">")[-1]: value.strip("\r\n").strip('"')})
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
+                        )
                     else:
                         continue
 
@@ -357,7 +377,12 @@ class NanonisFileLoader:
                     header["Bias Spectroscopy"].update(
                         {
                             "MultiLine Settings": pd.DataFrame(
-                                np.array([list(map(float, row.split(","))) for row in value.split(";")]),
+                                np.array(
+                                    [
+                                        list(map(float, row.split(",")))
+                                        for row in value.split(";")
+                                    ]
+                                ),
                                 columns=key.split(":")[-1].split(","),
                             )
                         }
@@ -393,10 +418,15 @@ class NanonisFileLoader:
 
         block_size = param_length + data_length
         total_pts = block_size * self.pixels[0] * self.pixels[1]
-        grid = np.empty((self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan))
+        grid = np.empty(
+            (self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan)
+        )
         params = pd.DataFrame(
             index=range(self.pixels[0] * self.pixels[1]),
-            columns=(self.header["Fixed parameters"].split(";") + self.header["Experiment parameters"].split(";")),
+            columns=(
+                self.header["Fixed parameters"].split(";")
+                + self.header["Experiment parameters"].split(";")
+            ),
         )
 
         if total_pts > self._raw_data.shape[0]:
@@ -413,7 +443,9 @@ class NanonisFileLoader:
             n = i // block_size
             block = data[i : i + block_size]
             params.loc[n] = block[:param_length]
-            grid[n] = block[param_length:block_size].reshape((len(self.channels), self.pts_per_chan))
+            grid[n] = block[param_length:block_size].reshape(
+                (len(self.channels), self.pts_per_chan)
+            )
 
         return params, grid
 
@@ -496,7 +528,9 @@ class NanonisFileLoader:
         """
         if self._pixels is None:
             if self.file_type == "sxm":
-                self._pixels = tuple(map(int, self.header.get("SCAN_PIXELS", "0 0").split()))
+                self._pixels = tuple(
+                    map(int, self.header.get("SCAN_PIXELS", "0 0").split())
+                )
             elif self.file_type == "dat":
                 self._pixels = (1, 0)
             elif self.file_type == "3ds":

@@ -66,7 +66,11 @@ class QPICalculator:
             a_k_per_band = (1 / np.pi) * (self.eta / denominator)
 
             # Handle band selection with ternary operator
-            a_k = np.sum(a_k_per_band, axis=0) if bands == "all" else np.sum(a_k_per_band[bands], axis=0)
+            a_k = (
+                np.sum(a_k_per_band, axis=0)
+                if bands == "all"
+                else np.sum(a_k_per_band[bands], axis=0)
+            )
 
         # Apply mask if provided
         if mask is not None:
@@ -74,7 +78,9 @@ class QPICalculator:
 
             # Ensure mask matches the spatial dimensions of the output
             if a_k.shape[-2:] != mask.shape:
-                raise ValueError(f"Mask shape {mask.shape} does not match spatial dimensions of a_k {a_k.shape[-2:]}")
+                raise ValueError(
+                    f"Mask shape {mask.shape} does not match spatial dimensions of a_k {a_k.shape[-2:]}"
+                )
 
             # Apply mask (set masked values to zero)
             a_k = a_k * mask
@@ -118,7 +124,9 @@ class QPICalculator:
 
         # Validate input shapes
         if k1_grid.shape != (nkx, nky) or k2_grid.shape != (nkx, nky):
-            raise ValueError(f"Shape mismatch: a_k {a_k.shape}, k1_grid {k1_grid.shape}, k2_grid {k2_grid.shape}")
+            raise ValueError(
+                f"Shape mismatch: a_k {a_k.shape}, k1_grid {k1_grid.shape}, k2_grid {k2_grid.shape}"
+            )
 
         # Calculate autocorrelation using convolution theorem
         a_r = fft2(a_k)
@@ -154,7 +162,15 @@ class QPICalculator:
             return jdos_q, q1_grid, q2_grid, q1_grid, q2_grid
 
     def calculate_qpi_from_contour(
-        self, k1_grid, k2_grid, e_k, energy, bvecs=None, bands="all", normalize=True, mask=None
+        self,
+        k1_grid,
+        k2_grid,
+        e_k,
+        energy,
+        bvecs=None,
+        bands="all",
+        normalize=True,
+        mask=None,
     ):
         """
         Complete QPI calculation from band contour data.
@@ -208,12 +224,22 @@ class QPICalculator:
                 a_k, k1_grid, k2_grid, bvecs, normalize
             )
         else:
-            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid = self.calculate_qpi_jdos(a_k, k1_grid, k2_grid, None, normalize)
+            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid = self.calculate_qpi_jdos(
+                a_k, k1_grid, k2_grid, None, normalize
+            )
 
         return jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, a_k
 
     def calculate_qpi_energy_scan(
-        self, kx_mesh, ky_mesh, e_k, energy_range, bvecs=None, bands="all", normalize=True, mask=None
+        self,
+        kx_mesh,
+        ky_mesh,
+        e_k,
+        energy_range,
+        bvecs=None,
+        bands="all",
+        normalize=True,
+        mask=None,
     ):
         """
         Calculate QPI for a range of energies.
@@ -260,15 +286,26 @@ class QPICalculator:
 
         # Calculate QPI for each energy
         for i, energy in enumerate(energy_range):
-            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, _ = self.calculate_qpi_from_contour(
-                kx_mesh, ky_mesh, e_k, energy, bvecs, bands, normalize, mask
+            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, _ = (
+                self.calculate_qpi_from_contour(
+                    kx_mesh, ky_mesh, e_k, energy, bvecs, bands, normalize, mask
+                )
             )
             jdos_scan[i] = jdos_q
 
         return jdos_scan, qx_grid, qy_grid, q1_grid, q2_grid
 
     def calculate_qpi_energy_scan_cuda(
-        self, k1_grid, k2_grid, e_k, energy_range, bvecs=None, bands="all", normalize=True, batch_size=None, mask=None
+        self,
+        k1_grid,
+        k2_grid,
+        e_k,
+        energy_range,
+        bvecs=None,
+        bands="all",
+        normalize=True,
+        batch_size=None,
+        mask=None,
     ):
         """
         Calculate QPI for a range of energies using CUDA acceleration.
@@ -348,7 +385,9 @@ class QPICalculator:
 
             # Ensure reasonable batch size
             batch_size = min(max(1, max_batch_size), n_energies)
-            batch_size = max(batch_size, min(5, n_energies))  # Smaller minimum batch size
+            batch_size = max(
+                batch_size, min(5, n_energies)
+            )  # Smaller minimum batch size
 
         num_batches = (n_energies + batch_size - 1) // batch_size
 
