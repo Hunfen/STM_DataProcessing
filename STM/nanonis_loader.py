@@ -28,6 +28,12 @@ class NanonisFileLoader:
     """
 
     def __init__(self, f_path: str) -> None:
+        if not os.path.exists(f_path):
+            raise FileNotFoundError(f"File not found: {f_path}")
+        file_size = os.path.getsize(f_path)
+        if file_size == 0:
+            raise ValueError(f"File is empty: {f_path}")
+
         self.file_path, self.fname = os.path.split(f_path)
         self._raw_header = None
         self._raw_data = None
@@ -48,7 +54,7 @@ class NanonisFileLoader:
         else:
             raise ValueError(f"Unsupported file type: {f_path}")
 
-    def _sxm_loader(self, f_path: str):
+    def _sxm_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
         """
         Load and parse .sxm file, extracting header and binary data.
 
@@ -71,37 +77,41 @@ class NanonisFileLoader:
             - Uses UTF-8 decoding with error replacement
         """
         raw_header = {}
-        entry, contents, contents_updated = "", "", False
+        entry, contents = "", ""
+
         with open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
                 if ":SCANIT_END:" in decoded_line:
-                    raw_header.update({entry: contents})
+                    # Add the last entry if it exists
+                    if entry:
+                        raw_header[entry] = contents.rstrip("\n")
                     break
-                if re.fullmatch(r":.*:\n", decoded_line):
-                    # in the key line
-                    if contents_updated:
-                        # encounter the next key,
-                        # update last {key: contents}
-                        # & initialize key and contents
-                        raw_header.update({entry: contents.rstrip("\n")})
-                    entry = decoded_line.rstrip("\n").strip(":")
-                    contents, contents_updated = "", False
-                else:  # in the contents line, update contents
-                    contents += decoded_line
-                    contents_updated = True
 
-            # Skip two lines and move the file pointer
+                if re.fullmatch(r":.*:\n", decoded_line):
+                    # This is a key line
+                    if entry:
+                        # Add previous entry
+                        raw_header[entry] = contents.rstrip("\n")
+                    # Start new entry
+                    entry = decoded_line.rstrip("\n").strip(":")
+                    contents = ""
+                else:
+                    # This is a content line
+                    contents += decoded_line
+
+            # Skip two lines after header and move file pointer
             for _ in range(2):
                 f.readline()
             f.seek(2, 1)
 
             # Read the binary data
             data = np.fromfile(f, dtype=">f")
+
         return raw_header, data
 
-    def _reform_sxm_header(self):
+    def _reform_sxm_header(self) -> dict:
         """
         Reformats the raw header data from a .sxm file
         into a structured dictionary.
@@ -159,9 +169,27 @@ class NanonisFileLoader:
 
         return header
 
-    def _reform_sxm_data(self):
-        pixels = self.pixels
-        total_pts = len(self.channels) * 2 * pixels[0] * pixels[1]
+    def _reform_sxm_data(self) -> np.ndarray:
+        """
+        Reformats raw SXM data into structured array.
+
+        Note: This method should only be called after header is parsed.
+        """
+        self._ensure_header_parsed()
+
+        if "SCAN_PIXELS" in self._header:
+            pixels = tuple(map(int, self._header["SCAN_PIXELS"].split()))
+        else:
+            pixels = (0, 0)
+
+        if "DATA_INFO" in self._header:
+            channels = self._header["DATA_INFO"]["Name"].tolist()
+        else:
+            channels = []
+
+        dir_flag = self._header.get("SCAN_DIR") == "up"
+
+        total_pts = len(channels) * 2 * pixels[0] * pixels[1]
         raw_data = self._raw_data
 
         if total_pts > raw_data.size:
@@ -169,11 +197,11 @@ class NanonisFileLoader:
                 [raw_data, np.full(total_pts - raw_data.size, np.nan)]
             )
 
-        data = raw_data[:total_pts].reshape((len(self.channels) * 2, *pixels))
+        data = raw_data[:total_pts].reshape((len(channels) * 2, *pixels))
         for i in range(data.shape[0]):
             if i % 2 != 0:
                 data[i] = np.fliplr(data[i])
-            if self.dir:
+            if dir_flag:
                 data[i] = np.flipud(data[i])
         return data
 
@@ -235,7 +263,7 @@ class NanonisFileLoader:
         )
         return raw_header, data
 
-    def _reform_dat_header(self):
+    def _reform_dat_header(self) -> dict:
         header = {}
         modules = []
 
@@ -286,7 +314,7 @@ class NanonisFileLoader:
                 break
         return header
 
-    def _3ds_loader(self, f_path: str):
+    def _3ds_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
         """
         Loads Nanonis .3ds file, parsing header and binary data.
 
@@ -332,7 +360,7 @@ class NanonisFileLoader:
             data_1d = np.fromfile(f, dtype=">f")
         return raw_header, data_1d
 
-    def _reform_3ds_header(self):
+    def _reform_3ds_header(self) -> dict:
         """
         Reformats the raw header data into a structured dictionary.
 
@@ -392,42 +420,45 @@ class NanonisFileLoader:
                     break
         return header
 
-    def _reform_3ds_data(self):
+    def _reform_3ds_data(self) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Reformats raw 3D spectroscopy (3DS) data into structured parameters
         and grid.
-
-        Processes raw 1D data into structured format by:
-        1. Calculating total data size from header metadata.
-        2. Reshaping into grid (pixels × channels × points per channel).
-        3. Extracting experiment parameters into DataFrame.
-
-        Returns:
-            tuple: Contains:
-                - params (pd.DataFrame): DataFrame with pixel parameters.
-                    Columns from 'Fixed parameters' and 'Experiment parameters'
-                - grid (np.ndarray): 3D array of shape
-                    (pixels[0]*pixels[1], len(channels), pts_per_chan).
-
-        Note:
-            - Pads raw data with NaN if shorter than expected.
-            - Assumes raw data in self._raw_data and metadata in self.header.
         """
         self._ensure_header_parsed()
-        param_length = int(self.header["# Parameters (4 byte)"])
-        data_length = int(int(self.header["Experiment size (bytes)"]) / 4)
+
+        if "Points" in self._header:
+            pts_per_chan = int(self._header["Points"])
+        else:
+            pts_per_chan = 0
+
+        param_length = int(self._header.get("# Parameters (4 byte)", 0))
+        data_length = int(int(self._header.get("Experiment size (bytes)", 0)) / 4)
 
         block_size = param_length + data_length
-        total_pts = block_size * self.pixels[0] * self.pixels[1]
-        grid = np.empty(
-            (self.pixels[0] * self.pixels[1], len(self.channels), self.pts_per_chan)
-        )
+
+        if "Grid dim" in self._header:
+            grid_dim = self._parse_grid_dim(self._header["Grid dim"])
+        else:
+            grid_dim = (0, 0)
+
+        if "Channels" in self._header:
+            channels = self._header["Channels"].split(";")
+        else:
+            channels = []
+
+        total_pixels = grid_dim[0] * grid_dim[1]
+        total_pts = block_size * total_pixels
+
+        grid = np.empty((total_pixels, len(channels), pts_per_chan))
+
+        fixed_params = self._header.get("Fixed parameters", "").split(";")
+        exp_params = self._header.get("Experiment parameters", "").split(";")
+        param_columns = fixed_params + exp_params
+
         params = pd.DataFrame(
-            index=range(self.pixels[0] * self.pixels[1]),
-            columns=(
-                self.header["Fixed parameters"].split(";")
-                + self.header["Experiment parameters"].split(";")
-            ),
+            index=range(total_pixels),
+            columns=param_columns,
         )
 
         if total_pts > self._raw_data.shape[0]:
@@ -445,12 +476,12 @@ class NanonisFileLoader:
             block = data[i : i + block_size]
             params.loc[n] = block[:param_length]
             grid[n] = block[param_length:block_size].reshape(
-                (len(self.channels), self.pts_per_chan)
+                (len(channels), pts_per_chan)
             )
 
         return params, grid
 
-    def _ensure_header_parsed(self):
+    def _ensure_header_parsed(self) -> None:
         """Ensure the header is parsed and cached.
 
         This method triggers parsing of the raw header into a structured
@@ -465,7 +496,7 @@ class NanonisFileLoader:
             elif self.file_type == "3ds":
                 self._header = self._reform_3ds_header()
 
-    def _ensure_data_parsed(self):
+    def _ensure_data_parsed(self) -> None:
         """Ensure the data is parsed and cached.
 
         This method triggers parsing of the raw data into its final structured
@@ -496,14 +527,18 @@ class NanonisFileLoader:
     def parameters(self) -> pd.DataFrame | None:
         self._ensure_data_parsed()
         return self._parameters
-    
+
     @property
     def pts_per_chan(self) -> int:
         """Number of data points per channel in .3ds files."""
         if self.file_type != "3ds":
             raise AttributeError("pts_per_chan only available for .3ds files")
-        self._ensure_header_parsed()
-        return int(self.header.get("Points", 0))
+        if self._header is not None and "Points" in self._header:
+            return int(self._header["Points"])
+        elif self._raw_header and "Points" in self._raw_header:
+            return int(self._raw_header["Points"])
+        else:
+            return 0
 
     @staticmethod
     def _parse_grid_dim(grid_str: str) -> tuple[int, int]:
@@ -526,24 +561,29 @@ class NanonisFileLoader:
 
     @property
     def pixels(self) -> tuple:
-        """Get the pixel dimensions of the scan data.
-
-        Returns:
-            tuple: A tuple of two integers representing the pixel dimensions
-            (width, height). For 'sxm' files, reads from 'SCAN_PIXELS' in
-            the header. For 'dat' files, returns (1, 0). For '3ds' files,
-            parses 'Grid dim' from the header. If parsing fails or the file
-            type is unknown, returns (0, 0).
-        """
+        """Get the pixel dimensions of the scan data."""
         if self._pixels is None:
             if self.file_type == "sxm":
-                self._pixels = tuple(
-                    map(int, self.header.get("SCAN_PIXELS", "0 0").split())
-                )
+                if self._header is not None:
+                    self._pixels = tuple(
+                        map(int, self._header.get("SCAN_PIXELS", "0 0").split())
+                    )
+                elif self._raw_header and "SCAN_PIXELS" in self._raw_header:
+                    self._pixels = tuple(
+                        map(int, self._raw_header["SCAN_PIXELS"].split())
+                    )
+                else:
+                    self._pixels = (0, 0)
             elif self.file_type == "dat":
                 self._pixels = (1, 0)
             elif self.file_type == "3ds":
-                self._pixels = self._parse_grid_dim(self.header.get("Grid dim", "0x0"))
+                if self._header is not None:
+                    grid_str = self._header.get("Grid dim", "0x0")
+                elif self._raw_header and "Grid dim" in self._raw_header:
+                    grid_str = self._raw_header["Grid dim"]
+                else:
+                    grid_str = "0x0"
+                self._pixels = self._parse_grid_dim(grid_str)
             else:
                 self._pixels = (0, 0)
         return self._pixels
@@ -552,46 +592,80 @@ class NanonisFileLoader:
     def range(self) -> tuple[float, float]:
         if self.file_type != "sxm":
             raise AttributeError("range only available for .sxm files")
-        return tuple(map(float, self.header["SCAN_RANGE"].split()))
+        self._ensure_header_parsed()
+        return tuple(map(float, self._header.get("SCAN_RANGE", "0 0").split()))
 
     @property
     def center(self) -> tuple[float, float]:
         if self.file_type != "sxm":
             raise AttributeError("center only available for .sxm files")
-        return tuple(map(float, self.header["SCAN_OFFSET"].split()))
+        self._ensure_header_parsed()
+        return tuple(map(float, self._header.get("SCAN_OFFSET", "0 0").split()))
 
     @property
     def frame_angle(self) -> float:
         if self.file_type != "sxm":
             raise AttributeError("frame_angle only available for .sxm files")
-        return float(self.header["SCAN_ANGLE"])
+        self._ensure_header_parsed()
+        return float(self._header.get("SCAN_ANGLE", 0))
 
     @property
     def dir(self) -> bool:
         """downward --> False, upward --> True"""
         if self.file_type != "sxm":
             raise AttributeError("dir only available for .sxm files")
-        return self.header["SCAN_DIR"] == "up"
+        self._ensure_header_parsed()
+        return self._header.get("SCAN_DIR") == "up"
 
     @property
     def bias(self) -> float:
         if self.file_type != "sxm":
             raise AttributeError("bias only available for .sxm files")
-        return float(self.header["BIAS"])
+        self._ensure_header_parsed()
+        return float(self._header.get("BIAS", 0))
 
     @property
     def setpoint(self) -> float:
         if self.file_type != "sxm":
             raise AttributeError("setpoint only available for .sxm files")
-        return float(self.header["Z-CONTROLLER"]["Setpoint"][0].split()[0])
+        self._ensure_header_parsed()
+        z_controller = self._header.get("Z-CONTROLLER")
+        if z_controller is not None and "Setpoint" in z_controller.columns:
+            return float(z_controller["Setpoint"].iloc[0].split()[0])
+        return 0.0
 
     @property
     def channels(self) -> list[str]:
         if self.file_type == "sxm":
-            return self.header["DATA_INFO"]["Name"].tolist()
+            if self._header is not None and "DATA_INFO" in self._header:
+                return self._header["DATA_INFO"]["Name"].tolist()
+            elif self._raw_header and "DATA_INFO" in self._raw_header:
+                try:
+                    df = pd.DataFrame(
+                        [
+                            row.split("\t")
+                            for row in self._raw_header["DATA_INFO"].split("\n")
+                        ]
+                    )
+                    df.columns = df.iloc[0]
+                    return df[1:]["Name"].tolist()
+                except Exception:
+                    return []
+            else:
+                return []
         elif self.file_type == "3ds":
-            return self.header["Channels"].split(";")
+            if self._header is not None and "Channels" in self._header:
+                return self._header["Channels"].split(";")
+            elif self._raw_header and "Channels" in self._raw_header:
+                return self._raw_header["Channels"].split(";")
+            else:
+                return []
         elif self.file_type == "dat":
-            return self.data.columns.tolist()
+            if self._data is not None:
+                return self._data.columns.tolist()
+            elif self._raw_data is not None:
+                return self._raw_data.columns.tolist()
+            else:
+                return []
         else:
             return []
