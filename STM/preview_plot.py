@@ -1,21 +1,7 @@
-# -*- coding: utf-8 -*-
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-# color map
-# cdict_gwyddion: dict = {
-#     'red': [(0.0, 0.0, 0.0), (0.34, 168 / 256, 168 / 256),
-#             (0.67, 243 / 256, 243 / 256), (1.0, 1.0, 1.0)],
-#     'green': [(0.0, 0.0, 0.0), (0.34, 40 / 256, 40 / 256),
-#               (0.67, 194 / 256, 194 / 256), (1.0, 1.0, 1.0)],
-#     'blue': [(0.0, 0.0, 0.0), (0.34, 15 / 256, 15 / 256),
-#              (0.67, 93 / 256, 93 / 256), (1.0, 1.0, 1.0)]
-# }
-# gwyddion = LinearSegmentedColormap('gwyddion',
-#                                    segmentdata=cdict_gwyddion,
-#                                    N=256)
 cdict_gwyddion: dict = {
     "red": [
         (0.0, 0.0, 0.0),  # Position 0: R=0
@@ -63,6 +49,7 @@ def plot_topo(input_file, output, v_min, sigma, color_map=gwyddion) -> None:
             If input_file is neither a string nor a NumPy array.
         FileNotFoundError:
             If input_file is a string but the file does not exist.
+
     """
     # Load or validate input data
     if isinstance(input_file, str):
@@ -74,7 +61,7 @@ def plot_topo(input_file, output, v_min, sigma, color_map=gwyddion) -> None:
         topo = input_file
     else:
         raise ValueError(
-            "Input must be either a file path (str) or a NumPy array (np.ndarray)"
+            "Input must be either a file path (str) or a NumPy array (np.ndarray)",
         )
     # Set figure size based on aspect ratio
     ratio = topo.shape[0] / topo.shape[1]

@@ -20,6 +20,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["STM", "dft_codes"]
-
-[tool.ruff.lint]
-select = ["E", "W", "F", "I", "SIM", "ALL"] 

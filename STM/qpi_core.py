@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.fft import fft2, ifft2, fftshift
+from scipy.fft import fft2, fftshift, ifft2
 
 try:
     import cupy as cp
@@ -12,30 +12,28 @@ except ImportError:
 
 
 class QPICalculator:
-    """
-    Class for calculating QPI (Quasiparticle Interference) from band contours.
+    """Class for calculating QPI (Quasiparticle Interference) from band contours.
 
     This class combines spectral function calculation with QPI-JDOS computation
     to analyze quasiparticle interference patterns from band structure data.
     """
 
     def __init__(self, eta=0.01):
-        """
-        Initialize QPI calculator.
+        """Initialize QPI calculator.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         eta : float, optional
             Spectral broadening parameter, default is 0.01
+
         """
         self.eta = eta
 
     def calculate_spectral_function(self, e_k, energy, bands="all", mask=None):
-        """
-        Calculate the spectral function A(k, E).
+        """Calculate the spectral function A(k, E).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         e_k : array-like
             Energy values for each k-point (shape: [nkx, nky] or [num_wann, nkx, nky])
         energy : float
@@ -48,10 +46,11 @@ class QPICalculator:
             Boolean mask to apply to k-points (True = include, False = exclude)
             Shape should match the spatial dimensions of e_k
 
-        Returns:
-        --------
+        Returns
+        -------
         a_k : numpy.ndarray
             Spectral function values (shape: [nkx, nky])
+
         """
         # Ensure input is a numpy array for consistent operations
         e_k = np.asarray(e_k)
@@ -79,7 +78,7 @@ class QPICalculator:
             # Ensure mask matches the spatial dimensions of the output
             if a_k.shape[-2:] != mask.shape:
                 raise ValueError(
-                    f"Mask shape {mask.shape} does not match spatial dimensions of a_k {a_k.shape[-2:]}"
+                    f"Mask shape {mask.shape} does not match spatial dimensions of a_k {a_k.shape[-2:]}",
                 )
 
             # Apply mask (set masked values to zero)
@@ -88,13 +87,12 @@ class QPICalculator:
         return a_k
 
     def calculate_qpi_jdos(self, a_k, k1_grid, k2_grid, bvecs=None, normalize=True):
-        """
-        Calculate QPI-JDOS in fractional coordinates, then optionally transform to real coordinates.
+        """Calculate QPI-JDOS in fractional coordinates, then optionally transform to real coordinates.
 
         Using convolution theorem: JDOS(q) = FFT^{-1}[ |FFT[A(k)]|^2 ]
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         a_k : numpy.ndarray
             Spectral function A(k, E) calculated on fractional k-grid (shape: [nkx, nky])
         k1_grid : array-like
@@ -107,8 +105,8 @@ class QPICalculator:
         normalize : bool, optional
             If True, normalize JDOS to have maximum value of 1 (default: True)
 
-        Returns:
-        --------
+        Returns
+        -------
         jdos_q : numpy.ndarray
             JDOS(q, E), normalized if normalize=True (shape: [nkx, nky])
         qx_grid : numpy.ndarray
@@ -119,13 +117,14 @@ class QPICalculator:
             q in fractional coordinate 1 (shape: [nkx, nky])
         q2_grid : numpy.ndarray
             q in fractional coordinate 2 (shape: [nkx, nky])
+
         """
         nkx, nky = a_k.shape
 
         # Validate input shapes
         if k1_grid.shape != (nkx, nky) or k2_grid.shape != (nkx, nky):
             raise ValueError(
-                f"Shape mismatch: a_k {a_k.shape}, k1_grid {k1_grid.shape}, k2_grid {k2_grid.shape}"
+                f"Shape mismatch: a_k {a_k.shape}, k1_grid {k1_grid.shape}, k2_grid {k2_grid.shape}",
             )
 
         # Calculate autocorrelation using convolution theorem
@@ -158,8 +157,7 @@ class QPICalculator:
             qx_real = q1_grid * bvecs[0, 0] + q2_grid * bvecs[1, 0]
             qy_real = q1_grid * bvecs[0, 1] + q2_grid * bvecs[1, 1]
             return jdos_q, qx_real, qy_real, q1_grid, q2_grid
-        else:
-            return jdos_q, q1_grid, q2_grid, q1_grid, q2_grid
+        return jdos_q, q1_grid, q2_grid, q1_grid, q2_grid
 
     def calculate_qpi_from_contour(
         self,
@@ -172,14 +170,13 @@ class QPICalculator:
         normalize=True,
         mask=None,
     ):
-        """
-        Complete QPI calculation from band contour data.
+        """Complete QPI calculation from band contour data.
 
         This method combines spectral function calculation and QPI-JDOS computation
         into a single workflow.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         k1_grid : array-like
             Fractional k1 coordinate mesh grid points (shape: [nkx, nky])
             This should be the k1_grid returned by calculate_contourmap()
@@ -200,8 +197,8 @@ class QPICalculator:
             Boolean mask to apply to k-points (True = include, False = exclude)
             Shape should match the spatial dimensions of e_k
 
-        Returns:
-        --------
+        Returns
+        -------
         jdos_q : numpy.ndarray
             JDOS(q, E), normalized if normalize=True
         qx_grid : numpy.ndarray
@@ -214,6 +211,7 @@ class QPICalculator:
             q in fractional coordinate 2
         a_k : numpy.ndarray
             Spectral function A(k, E) used in the calculation
+
         """
         # Calculate spectral function
         a_k = self.calculate_spectral_function(e_k, energy, bands, mask)
@@ -221,11 +219,19 @@ class QPICalculator:
         # Calculate QPI-JDOS
         if bvecs is not None:
             jdos_q, qx_grid, qy_grid, q1_grid, q2_grid = self.calculate_qpi_jdos(
-                a_k, k1_grid, k2_grid, bvecs, normalize
+                a_k,
+                k1_grid,
+                k2_grid,
+                bvecs,
+                normalize,
             )
         else:
             jdos_q, qx_grid, qy_grid, q1_grid, q2_grid = self.calculate_qpi_jdos(
-                a_k, k1_grid, k2_grid, None, normalize
+                a_k,
+                k1_grid,
+                k2_grid,
+                None,
+                normalize,
             )
 
         return jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, a_k
@@ -241,11 +247,10 @@ class QPICalculator:
         normalize=True,
         mask=None,
     ):
-        """
-        Calculate QPI for a range of energies.
+        """Calculate QPI for a range of energies.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         kx_mesh : array-like
             K-space x-coordinate mesh grid points (shape: [nkx, nky])
         ky_mesh : array-like
@@ -264,8 +269,8 @@ class QPICalculator:
             Boolean mask to apply to k-points (True = include, False = exclude)
             Shape should match the spatial dimensions of e_k
 
-        Returns:
-        --------
+        Returns
+        -------
         jdos_scan : numpy.ndarray
             JDOS(q, E) for each energy (shape: [len(energy_range), nkx, nky])
         qx_grid : numpy.ndarray
@@ -276,6 +281,7 @@ class QPICalculator:
             q in fractional coordinate 1 (same for all energies)
         q2_grid : numpy.ndarray
             q in fractional coordinate 2 (same for all energies)
+
         """
         # Get grid shape from first calculation
         test_a_k = self.calculate_spectral_function(e_k, energy_range[0], bands, mask)
@@ -288,7 +294,14 @@ class QPICalculator:
         for i, energy in enumerate(energy_range):
             jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, _ = (
                 self.calculate_qpi_from_contour(
-                    kx_mesh, ky_mesh, e_k, energy, bvecs, bands, normalize, mask
+                    kx_mesh,
+                    ky_mesh,
+                    e_k,
+                    energy,
+                    bvecs,
+                    bands,
+                    normalize,
+                    mask,
                 )
             )
             jdos_scan[i] = jdos_q
@@ -307,11 +320,10 @@ class QPICalculator:
         batch_size=None,
         mask=None,
     ):
-        """
-        Calculate QPI for a range of energies using CUDA acceleration.
+        """Calculate QPI for a range of energies using CUDA acceleration.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         k1_grid : array-like
             Fractional k1 coordinate mesh grid points (shape: [nkx, nky])
         k2_grid : array-like
@@ -332,8 +344,8 @@ class QPICalculator:
             Boolean mask to apply to k-points (True = include, False = exclude)
             Shape should match the spatial dimensions of e_k
 
-        Returns:
-        --------
+        Returns
+        -------
         jdos_scan : numpy.ndarray
             JDOS(q, E) for each energy (shape: [len(energy_range), nkx, nky])
         qx_grid : numpy.ndarray
@@ -345,10 +357,11 @@ class QPICalculator:
         q2_grid : numpy.ndarray
             q in fractional coordinate 2 (same for all energies)
 
-        Raises:
-        -------
+        Raises
+        ------
         RuntimeError
             If CuPy is not available for GPU acceleration.
+
         """
         if not CUPY_AVAILABLE:
             raise RuntimeError("CuPy is not available. Cannot use GPU acceleration.")
@@ -386,7 +399,8 @@ class QPICalculator:
             # Ensure reasonable batch size
             batch_size = min(max(1, max_batch_size), n_energies)
             batch_size = max(
-                batch_size, min(5, n_energies)
+                batch_size,
+                min(5, n_energies),
             )  # Smaller minimum batch size
 
         num_batches = (n_energies + batch_size - 1) // batch_size
@@ -419,13 +433,12 @@ class QPICalculator:
                     # Sum over bands using ternary operator
                     if bands == "all":
                         a_k = cp.sum(a_k_per_band, axis=0)
+                    # Convert bands to cupy array if it's a list
+                    elif isinstance(bands, list):
+                        bands_gpu = cp.array(bands)
+                        a_k = cp.sum(a_k_per_band[bands_gpu, :, :], axis=0)
                     else:
-                        # Convert bands to cupy array if it's a list
-                        if isinstance(bands, list):
-                            bands_gpu = cp.array(bands)
-                            a_k = cp.sum(a_k_per_band[bands_gpu, :, :], axis=0)
-                        else:
-                            a_k = cp.sum(a_k_per_band[bands, :, :], axis=0)
+                        a_k = cp.sum(a_k_per_band[bands, :, :], axis=0)
                 else:
                     # Single band case: e_k_gpu shape is (nkx, nky)
                     # Calculate denominator: (E - E_k)^2 + η^2
@@ -467,7 +480,7 @@ class QPICalculator:
             memory_total = cp.cuda.Device().mem_info[0] / 1e9  # Total memory in GB
             print(
                 f"  Progress: {progress:.1f}%, Batch {batch_idx + 1}/{num_batches}, "
-                f"GPU memory: {memory_used:.2f}/{memory_total:.2f} GB"
+                f"GPU memory: {memory_used:.2f}/{memory_total:.2f} GB",
             )
 
         # Calculate q-grids (same for all energies)
