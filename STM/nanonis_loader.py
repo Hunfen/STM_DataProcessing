@@ -496,6 +496,14 @@ class NanonisFileLoader:
     def parameters(self) -> pd.DataFrame | None:
         self._ensure_data_parsed()
         return self._parameters
+    
+    @property
+    def pts_per_chan(self) -> int:
+        """Number of data points per channel in .3ds files."""
+        if self.file_type != "3ds":
+            raise AttributeError("pts_per_chan only available for .3ds files")
+        self._ensure_header_parsed()
+        return int(self.header.get("Points", 0))
 
     @staticmethod
     def _parse_grid_dim(grid_str: str) -> tuple[int, int]:
