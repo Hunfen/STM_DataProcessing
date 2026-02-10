@@ -1,6 +1,4 @@
-"""
-Python module that helps read the Nanonis files.
-"""
+"""Python module that helps read the Nanonis files."""
 
 import os
 import re
@@ -8,6 +6,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
+import Path
 
 
 class NanonisFileLoader:
@@ -25,14 +24,28 @@ class NanonisFileLoader:
         >>> loader = NanonisFileLoader("data.sxm")
         >>> print(loader.header["SCAN_RANGE"])  # Triggers header parsing
         >>> img = loader.data  # Triggers data parsing
+
     """
 
     def __init__(self, f_path: str) -> None:
-        if not os.path.exists(f_path):
-            raise FileNotFoundError(f"File not found: {f_path}")
-        file_size = os.path.getsize(f_path)
+        """Initialize NanonisLoader with a file path.
+
+        Args:
+            f_path (str): Path to the Nanonis file (.sxm, .dat, or .3ds)
+
+        Raises:
+            FileNotFoundError: If the file does not exist
+            ValueError: If the file is empty or has an unsupported file type
+
+        """
+        file_path_obj = Path(f_path)
+        if not file_path_obj.exists():
+            error_msg = f"File not found: {f_path}"
+            raise FileNotFoundError(error_msg)
+        file_size = file_path_obj.stat().st_size
         if file_size == 0:
-            raise ValueError(f"File is empty: {f_path}")
+            error_msg = f"File is empty: {f_path}"
+            raise ValueError(error_msg)
 
         self.file_path, self.fname = os.path.split(f_path)
         self._raw_header = None
@@ -51,12 +64,11 @@ class NanonisFileLoader:
         elif f_path.endswith(".3ds"):
             self.file_type = "3ds"
             self._raw_header, self._raw_data = self._3ds_loader(f_path)
-        else:
-            raise ValueError(f"Unsupported file type: {f_path}")
+            error_msg = f"Unsupported file type: {f_path}"
+            raise ValueError(error_msg)
 
     def _sxm_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
-        """
-        Load and parse .sxm file, extracting header and binary data.
+        """Load and parse .sxm file, extracting header and binary data.
 
         Reads header until ":SCANIT_END:" marker, then extracts binary
         data as big-endian floats. Header entries start with ":[key]:"
@@ -75,11 +87,12 @@ class NanonisFileLoader:
             - Skips 2 lines after header before reading binary data
             - Binary data read as big-endian 32-bit floats
             - Uses UTF-8 decoding with error replacement
+
         """
         raw_header = {}
         entry, contents = "", ""
 
-        with open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
@@ -112,9 +125,7 @@ class NanonisFileLoader:
         return raw_header, data
 
     def _reform_sxm_header(self) -> dict:
-        """
-        Reformats the raw header data from a .sxm file
-        into a structured dictionary.
+        """Reformats the raw header data from a .sxm file into a structured dictionary.
 
         This method processes the raw header data, which is initially stored
         as a dictionary of key-value pairs, and organizes it into a more
@@ -129,6 +140,7 @@ class NanonisFileLoader:
                 - DataFrames for sections like "Z-CONTROLLER" and "DATA_INFO".
                 - Nested dictionaries or DataFrames for module-specific
                 attributes, depending on the number of attributes per module.
+
         """
         header = {}
         modules = []
@@ -137,7 +149,12 @@ class NanonisFileLoader:
             if re.search(">", key):  # initial dicts for modules
                 if key.startswith("Ext. VI 1>"):
                     # deal with external VI attributes
-                    modules.append(key.strip("Ext. VI 1>").split(">")[0])
+                    # Use lstrip instead of strip for multi-character prefix
+                    module_name = key[len("Ext. VI 1>") :]
+                    if ">" in module_name:
+                        modules.append(module_name.split(">")[0])
+                    else:
+                        modules.append(module_name)
                 else:  # deal with the internal modules
                     modules.append(key.split(">")[0])
             else:
@@ -148,7 +165,7 @@ class NanonisFileLoader:
 
         for key in ["Z-CONTROLLER", "DATA_INFO"]:
             df = pd.DataFrame(
-                [row.split("\t") for row in self._raw_header[key].split("\n")]
+                [row.split("\t") for row in self._raw_header[key].split("\n")],
             )
             df.columns = df.iloc[0]
             header[key] = df[1:].reset_index(drop=True).dropna(how="any")
@@ -156,22 +173,32 @@ class NanonisFileLoader:
         for module, count in modules.items():
             if count == 1:
                 for key, value in self._raw_header.items():
-                    if key.strip("Ext. VI 1>").startswith(module):
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
+                    else:
+                        check_key = key
+
+                    if check_key.startswith(module):
                         header.update({module: value.strip("\n")})
             else:
                 header[module] = {}
                 for key, value in self._raw_header.items():
-                    if key.strip("Ext. VI 1>").startswith(module):
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
+                    else:
+                        check_key = key
+
+                    if check_key.startswith(module):
                         header[module].update({key.split(">")[-1]: value.strip("\n")})
-                        # temp_dict[key.split(">")[-1]] = [value.strip("\n")]
                     else:
                         continue
 
         return header
 
     def _reform_sxm_data(self) -> np.ndarray:
-        """
-        Reformats raw SXM data into structured array.
+        """Reformats raw SXM data into structured array.
 
         Note: This method should only be called after header is parsed.
         """
@@ -194,7 +221,7 @@ class NanonisFileLoader:
 
         if total_pts > raw_data.size:
             raw_data = np.concatenate(
-                [raw_data, np.full(total_pts - raw_data.size, np.nan)]
+                [raw_data, np.full(total_pts - raw_data.size, np.nan)],
             )
 
         data = raw_data[:total_pts].reshape((len(channels) * 2, *pixels))
@@ -206,11 +233,10 @@ class NanonisFileLoader:
         return data
 
     def _dat_loader(self, f_path: str) -> tuple[dict, pd.DataFrame]:
-        """
-        Loads Nanonis .dat file, parsing header and data sections.
+        r"""Load Nanonis .dat file, parsing header and data sections.
 
         Reads binary file to handle line endings precisely. Header entries
-        use format: key<tab>value<tab>\\r\\n. Data section starts after
+        use format: key<tab>value<tab>\r\n. Data section starts after
         [DATA] marker with tab-delimited columns.
 
         Args:
@@ -225,12 +251,13 @@ class NanonisFileLoader:
             - Preserves original line endings during header parsing
             - Converts numeric columns automatically
             - Handles malformed data with error replacement
+
         """
         raw_header = {}
         key, value_buffer = "", ""
         columns, data_lines = [], []
 
-        with open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if "[DATA]" in decoded_line:  # End of header
@@ -249,21 +276,37 @@ class NanonisFileLoader:
                         value_buffer += decoded_line.rstrip("\t\r\n")
                     raw_header.update({key: value_buffer})
                     value_buffer = ""
+                elif "\t" in decoded_line:
+                    key, value_buffer = decoded_line.split("\t", 1)
                 else:
-                    if "\t" in decoded_line:
-                        key, value_buffer = decoded_line.split("\t", 1)
-                    else:
-                        value_buffer += decoded_line
+                    value_buffer += decoded_line
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if decoded_line.rstrip("\r\n"):
                     data_lines.append(decoded_line.rstrip("\r\n").split("\t"))
         data = pd.DataFrame(data_lines, columns=columns).apply(
-            pd.to_numeric, errors="coerce"
+            pd.to_numeric,
+            errors="coerce",
         )
         return raw_header, data
 
     def _reform_dat_header(self) -> dict:
+        """Reformat the raw header data from a .dat file into a structured dictionary.
+
+        This method processes the raw header data, which is initially stored
+        as a dictionary of key-value pairs, and organizes it into a more
+        structured format. It handles both external VI attributes and internal
+        modules, and converts specific sections (e.g., "Bias Spectroscopy")
+        into pandas DataFrames for easier manipulation.
+
+        Returns:
+            dict: A dictionary containing the reformatted header data.
+            The dictionary includes:
+                - Key-value pairs for non-module-specific attributes.
+                - Nested dictionaries or DataFrames for module-specific
+                attributes, depending on the number of attributes per module.
+
+        """
         header = {}
         modules = []
 
@@ -271,7 +314,11 @@ class NanonisFileLoader:
             if re.search(">", key):  # initial dicts for modules
                 if key.startswith("Ext. VI 1>"):
                     # deal with external VI attributes
-                    modules.append(key.strip("Ext. VI 1>").split(">")[0])
+                    module_name = key[len("Ext. VI 1>") :]
+                    if ">" in module_name:
+                        modules.append(module_name.split(">")[0])
+                    else:
+                        modules.append(module_name)
                 else:  # deal with the internal modules
                     modules.append(key.split(">")[0])
             else:
@@ -282,18 +329,27 @@ class NanonisFileLoader:
         for module, count in modules.items():
             if count == 1:
                 for key, value in self._raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split(">")[0]:
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
+                    else:
+                        check_key = key
+
+                    if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
             else:
-                # continue
                 header[module] = {}
                 for key, value in self._raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split(">")[0]:
-                        header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
-                        )
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
                     else:
-                        continue
+                        check_key = key
+
+                    if module == check_key.split(">")[0]:
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')},
+                        )
 
         for key, value in header["Bias Spectroscopy"].items():
             if "MultiLine Settings" in key:
@@ -304,19 +360,18 @@ class NanonisFileLoader:
                                 [
                                     list(map(float, row.split(",")))
                                     for row in value.split(";")
-                                ]
+                                ],
                             ),
                             columns=key.split(":")[-1].split(","),
-                        )
-                    }
+                        ),
+                    },
                 )
                 header["Bias Spectroscopy"].pop(key)
                 break
         return header
 
     def _3ds_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
-        """
-        Loads Nanonis .3ds file, parsing header and binary data.
+        """Load Nanonis .3ds file, parsing header and binary data.
 
         Reads file in binary mode to handle header and data precisely.
         Header ends at ':HEADER_END:' marker. Data is read as big-endian
@@ -334,10 +389,11 @@ class NanonisFileLoader:
             - Uses UTF-8 decoding with error replacement
             - Handles multi-line header values
             - Skips CRLF after header end marker
+
         """
         raw_header = {}
         key, value_buffer = "", ""
-        with open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
                 if ":HEADER_END:" in decoded_line:
@@ -352,23 +408,22 @@ class NanonisFileLoader:
                         value_buffer += decoded_line.rstrip("\t\r\n")
                     raw_header.update({key: value_buffer})
                     value_buffer = ""
+                elif "=" in decoded_line:
+                    key, value_buffer = decoded_line.split("=", 1)
                 else:
-                    if "=" in decoded_line:
-                        key, value_buffer = decoded_line.split("=", 1)
-                    else:
-                        value_buffer += decoded_line
+                    value_buffer += decoded_line
             data_1d = np.fromfile(f, dtype=">f")
         return raw_header, data_1d
 
     def _reform_3ds_header(self) -> dict:
-        """
-        Reformats the raw header data into a structured dictionary.
+        """Reformats the raw header data into a structured dictionary.
 
         Parses the raw header, organizes module-specific data, and converts
         specific fields (e.g., 'MultiLine Settings') into appropriate formats.
 
         Returns:
             dict: Structured header with module-specific data.
+
         """
         header = {}
         modules = []
@@ -376,7 +431,12 @@ class NanonisFileLoader:
             if re.search(">", key):  # initial dicts for modules
                 if key.startswith("Ext. VI 1>"):
                     # deal with external VI attributes
-                    modules.append(key.strip("Ext. VI 1>").split(">")[0])
+                    # Use proper string slicing instead of strip
+                    module_name = key[len("Ext. VI 1>") :]
+                    if ">" in module_name:
+                        modules.append(module_name.split(">")[0])
+                    else:
+                        modules.append(module_name)
                 else:  # deal with the internal modules
                     modules.append(key.split(">")[0])
             else:
@@ -387,20 +447,29 @@ class NanonisFileLoader:
         for module, count in modules.items():
             if count == 1:
                 for key, value in self._raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split(">")[0]:
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
+                    else:
+                        check_key = key
+
+                    if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
             else:
-                # continue
                 header[module] = {}
                 for key, value in self._raw_header.items():
-                    if module == key.strip("Ext. VI 1>").split(">")[0]:
-                        header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')}
-                        )
+                    # Handle the strip issue properly
+                    if key.startswith("Ext. VI 1>"):
+                        check_key = key[len("Ext. VI 1>") :]
                     else:
-                        continue
+                        check_key = key
 
-        if "Bias Spectroscopy" in self._raw_header.keys():
+                    if module == check_key.split(">")[0]:
+                        header[module].update(
+                            {key.split(">")[-1]: value.strip("\r\n").strip('"')},
+                        )
+
+        if "Bias Spectroscopy" in self._raw_header:
             for key, value in header["Bias Spectroscopy"].items():
                 if "MultiLine Settings" in key:
                     header["Bias Spectroscopy"].update(
@@ -410,27 +479,25 @@ class NanonisFileLoader:
                                     [
                                         list(map(float, row.split(",")))
                                         for row in value.split(";")
-                                    ]
+                                    ],
                                 ),
                                 columns=key.split(":")[-1].split(","),
-                            )
-                        }
+                            ),
+                        },
                     )
                     header["Bias Spectroscopy"].pop(key)
                     break
         return header
 
     def _reform_3ds_data(self) -> tuple[pd.DataFrame, np.ndarray]:
-        """
-        Reformats raw 3D spectroscopy (3DS) data into structured parameters
-        and grid.
+        """Reformats raw 3D spectroscopy (3DS) data into structured parameters and grid.
+
+        This method processes the raw 3DS data by extracting parameters and
+        spectroscopic data into separate structured formats for easier analysis.
         """
         self._ensure_header_parsed()
 
-        if "Points" in self._header:
-            pts_per_chan = int(self._header["Points"])
-        else:
-            pts_per_chan = 0
+        pts_per_chan = int(self._header["Points"]) if "Points" in self._header else 0
 
         param_length = int(self._header.get("# Parameters (4 byte)", 0))
         data_length = int(int(self._header.get("Experiment size (bytes)", 0)) / 4)
@@ -466,7 +533,7 @@ class NanonisFileLoader:
                 [
                     self._raw_data,
                     np.full(max(0, total_pts - len(self._raw_data)), np.nan),
-                ]
+                ],
             )
         else:
             data = self._raw_data
@@ -476,7 +543,7 @@ class NanonisFileLoader:
             block = data[i : i + block_size]
             params.loc[n] = block[:param_length]
             grid[n] = block[param_length:block_size].reshape(
-                (len(channels), pts_per_chan)
+                (len(channels), pts_per_chan),
             )
 
         return params, grid
@@ -515,16 +582,40 @@ class NanonisFileLoader:
 
     @property
     def header(self) -> dict:
+        """Get the processed header dictionary from the loaded file.
+
+        Returns:
+            dict: The reformatted header data containing metadata and parameters
+            extracted from the original file header.
+
+        """
         self._ensure_header_parsed()
         return self._header
 
     @property
     def data(self) -> np.ndarray | pd.DataFrame | None:
+        """Get the processed data from the loaded file.
+
+        Returns:
+            np.ndarray | pd.DataFrame | None: The processed data depending on file type:
+                - For .sxm files: 2D numpy array of scan data
+                - For .dat files: pandas DataFrame of tabular data
+                - For .3ds files: 3D numpy array of spectroscopy data
+                - None if not yet parsed or unavailable
+
+        """
         self._ensure_data_parsed()
         return self._data
 
     @property
     def parameters(self) -> pd.DataFrame | None:
+        """Get the processed parameters DataFrame from the loaded file.
+
+        Returns:
+            pd.DataFrame | None: The parameters DataFrame for 3DS files,
+            or None if not applicable or not yet parsed.
+
+        """
         self._ensure_data_parsed()
         return self._parameters
 
@@ -532,13 +623,14 @@ class NanonisFileLoader:
     def pts_per_chan(self) -> int:
         """Number of data points per channel in .3ds files."""
         if self.file_type != "3ds":
-            raise AttributeError("pts_per_chan only available for .3ds files")
+            error_msg = "pts_per_chan only available for .3ds files"
+            raise AttributeError(error_msg)
+
         if self._header is not None and "Points" in self._header:
             return int(self._header["Points"])
-        elif self._raw_header and "Points" in self._raw_header:
+        if self._raw_header and "Points" in self._raw_header:
             return int(self._raw_header["Points"])
-        else:
-            return 0
+        return 0
 
     @staticmethod
     def _parse_grid_dim(grid_str: str) -> tuple[int, int]:
@@ -552,10 +644,14 @@ class NanonisFileLoader:
 
         Returns:
             Tuple of two integers (width, height). Returns (0, 0) on failure.
+
         """
+        expected_parts = 2
         try:
             parts = grid_str.replace(" ", "").split("x")
-            return tuple(int(x) for x in parts) if len(parts) == 2 else (0, 0)
+            return (
+                tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
+            )
         except (ValueError, AttributeError):
             return (0, 0)
 
@@ -566,11 +662,11 @@ class NanonisFileLoader:
             if self.file_type == "sxm":
                 if self._header is not None:
                     self._pixels = tuple(
-                        map(int, self._header.get("SCAN_PIXELS", "0 0").split())
+                        map(int, self._header.get("SCAN_PIXELS", "0 0").split()),
                     )
                 elif self._raw_header and "SCAN_PIXELS" in self._raw_header:
                     self._pixels = tuple(
-                        map(int, self._raw_header["SCAN_PIXELS"].split())
+                        map(int, self._raw_header["SCAN_PIXELS"].split()),
                     )
                 else:
                     self._pixels = (0, 0)
@@ -590,44 +686,95 @@ class NanonisFileLoader:
 
     @property
     def range(self) -> tuple[float, float]:
+        """Get the scan range (width, height) from .sxm files.
+
+        Returns:
+            tuple[float, float]: The scan range in nanometers as (width, height).
+
+        Raises:
+            AttributeError: If called on non-.sxm files.
+
+        """
         if self.file_type != "sxm":
-            raise AttributeError("range only available for .sxm files")
+            error_msg = "range only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         return tuple(map(float, self._header.get("SCAN_RANGE", "0 0").split()))
 
     @property
     def center(self) -> tuple[float, float]:
+        """Get the scan center offset from .sxm files.
+
+        Returns:
+            tuple[float, float]: The scan center offset in nanometers as (x, y).
+
+        Raises:
+            AttributeError: If called on non-.sxm files.
+
+        """
         if self.file_type != "sxm":
-            raise AttributeError("center only available for .sxm files")
+            error_msg = "center only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         return tuple(map(float, self._header.get("SCAN_OFFSET", "0 0").split()))
 
     @property
     def frame_angle(self) -> float:
+        """Get the scan frame angle from .sxm files.
+
+        Returns:
+            float: The scan angle in degrees from the header.
+
+        Raises:
+            AttributeError: If called on non-.sxm files.
+
+        """
         if self.file_type != "sxm":
-            raise AttributeError("frame_angle only available for .sxm files")
+            error_msg = "frame_angle only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         return float(self._header.get("SCAN_ANGLE", 0))
 
     @property
     def dir(self) -> bool:
-        """downward --> False, upward --> True"""
+        """Downward --> False, upward --> True."""
         if self.file_type != "sxm":
-            raise AttributeError("dir only available for .sxm files")
+            error_msg = "dir only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         return self._header.get("SCAN_DIR") == "up"
 
     @property
     def bias(self) -> float:
+        """Get the bias value from .sxm files.
+
+        Returns:
+            float: The bias value from the header.
+
+        Raises:
+            AttributeError: If called on non-.sxm files.
+
+        """
         if self.file_type != "sxm":
-            raise AttributeError("bias only available for .sxm files")
+            error_msg = "bias only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         return float(self._header.get("BIAS", 0))
 
     @property
     def setpoint(self) -> float:
+        """Get the setpoint value from Z-CONTROLLER section in .sxm files.
+
+        Returns:
+            float: The setpoint value from the Z-CONTROLLER section.
+
+        Raises:
+            AttributeError: If called on non-.sxm files.
+
+        """
         if self.file_type != "sxm":
-            raise AttributeError("setpoint only available for .sxm files")
+            error_msg = "setpoint only available for .sxm files"
+            raise AttributeError(error_msg)
         self._ensure_header_parsed()
         z_controller = self._header.get("Z-CONTROLLER")
         if z_controller is not None and "Setpoint" in z_controller.columns:
@@ -636,36 +783,57 @@ class NanonisFileLoader:
 
     @property
     def channels(self) -> list[str]:
-        if self.file_type == "sxm":
-            if self._header is not None and "DATA_INFO" in self._header:
-                return self._header["DATA_INFO"]["Name"].tolist()
-            elif self._raw_header and "DATA_INFO" in self._raw_header:
-                try:
-                    df = pd.DataFrame(
-                        [
-                            row.split("\t")
-                            for row in self._raw_header["DATA_INFO"].split("\n")
-                        ]
-                    )
-                    df.columns = df.iloc[0]
-                    return df[1:]["Name"].tolist()
-                except Exception:
-                    return []
-            else:
+        """Get the list of channel names from the loaded file.
+
+        Returns:
+            list[str]: List of channel names based on file type:
+                - For .sxm files: Extracts from DATA_INFO section
+                - For .3ds files: Splits Channels header by semicolon
+                - For .dat files: Returns DataFrame column names
+                - For unsupported types: Returns empty list
+
+        """
+        channel_getters = {
+            "sxm": self._get_sxm_channels,
+            "3ds": self._get_3ds_channels,
+            "dat": self._get_dat_channels,
+        }
+
+        getter = channel_getters.get(self.file_type)
+        if getter:
+            return getter()
+        return []
+
+    def _get_sxm_channels(self) -> list[str]:
+        """Extract channel names from SXM file format."""
+        if self._header is not None and "DATA_INFO" in self._header:
+            return self._header["DATA_INFO"]["Name"].tolist()
+        if self._raw_header and "DATA_INFO" in self._raw_header:
+            try:
+                df = pd.DataFrame(
+                    [
+                        row.split("\t")
+                        for row in self._raw_header["DATA_INFO"].split("\n")
+                    ],
+                )
+                df.columns = df.iloc[0]
+                return df[1:]["Name"].tolist()
+            except (KeyError, IndexError, ValueError):
                 return []
-        elif self.file_type == "3ds":
-            if self._header is not None and "Channels" in self._header:
-                return self._header["Channels"].split(";")
-            elif self._raw_header and "Channels" in self._raw_header:
-                return self._raw_header["Channels"].split(";")
-            else:
-                return []
-        elif self.file_type == "dat":
-            if self._data is not None:
-                return self._data.columns.tolist()
-            elif self._raw_data is not None:
-                return self._raw_data.columns.tolist()
-            else:
-                return []
-        else:
-            return []
+        return []
+
+    def _get_3ds_channels(self) -> list[str]:
+        """Extract channel names from 3DS file format."""
+        if self._header is not None and "Channels" in self._header:
+            return self._header["Channels"].split(";")
+        if self._raw_header and "Channels" in self._raw_header:
+            return self._raw_header["Channels"].split(";")
+        return []
+
+    def _get_dat_channels(self) -> list[str]:
+        """Extract channel names from DAT file format."""
+        if self._data is not None:
+            return self._data.columns.tolist()
+        if self._raw_data is not None:
+            return self._raw_data.columns.tolist()
+        return []
