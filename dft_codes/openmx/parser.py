@@ -324,7 +324,9 @@ class OpenMX:
                 try:
                     species_number = int(line_stripped.split()[1])
                 except (IndexError, ValueError) as err:
-                    raise RuntimeError(f"Invalid Species.Number line: {line_stripped}") from err
+                    raise RuntimeError(
+                        f"Invalid Species.Number line: {line_stripped}"
+                    ) from err
 
             if "<Definition.of.Atomic.Species" in line_stripped:
                 start_idx = i + 1
@@ -346,7 +348,9 @@ class OpenMX:
 
         # Validate that we have the expected number of lines
         if len(species_lines) != species_number:
-            print(f"Warning: Species.Number={species_number} but found {len(species_lines)} species lines")
+            print(
+                f"Warning: Species.Number={species_number} but found {len(species_lines)} species lines"
+            )
 
         # Parse each species line
         valid_species = []
@@ -373,7 +377,9 @@ class OpenMX:
             orbitals = OpenMX._parse_orbital_basis_static(basis_info, label)
 
             if orbitals is None:
-                print(f"Warning: Could not parse orbital basis for {label}: {basis_info}")
+                print(
+                    f"Warning: Could not parse orbital basis for {label}: {basis_info}"
+                )
                 continue
 
             species_dict = {
@@ -386,9 +392,15 @@ class OpenMX:
             valid_species.append(species_dict)
 
         n_valid_species = len(valid_species)
-        print(f"Found {n_valid_species} valid atomic species out of {len(species_lines)} total lines")
+        print(
+            f"Found {n_valid_species} valid atomic species out of {len(species_lines)} total lines"
+        )
 
-        result = {"species_list": valid_species, "n_species": n_valid_species, "raw_lines": raw_lines}
+        result = {
+            "species_list": valid_species,
+            "n_species": n_valid_species,
+            "raw_lines": raw_lines,
+        }
         return result
 
     @staticmethod
@@ -443,7 +455,9 @@ class OpenMX:
             return orbitals
 
         except Exception as e:
-            print(f"Error parsing orbital basis '{basis_info}' for element {element}: {e}")
+            print(
+                f"Error parsing orbital basis '{basis_info}' for element {element}: {e}"
+            )
             return None
 
     def _create_positions_dict(self, positions_frac, elements, spin_weights, source):
@@ -736,10 +750,14 @@ class OpenMX:
         result = self.read_openmx_file(fname)
 
         # Try to get positions from final structure (priority 1)
-        final_positions_result = self._parse_final_structure_positions(result.get("lines", []))
+        final_positions_result = self._parse_final_structure_positions(
+            result.get("lines", [])
+        )
         if final_positions_result["positions_frac"] is not None:
             # We have final structure positions, now try to get spin weights from species coordinates
-            species_result = self._parse_species_and_coordinates(result.get("lines", []))
+            species_result = self._parse_species_and_coordinates(
+                result.get("lines", [])
+            )
             spin_weights = species_result["spin_weights"] if species_result else None
 
             positions_dict = self._create_positions_dict(
@@ -768,12 +786,19 @@ class OpenMX:
             return positions_dict
 
         # If we have a .dat file and haven't tried it yet, try reading from .dat
-        if fname is None and self.dat_file is not None and os.path.exists(self.dat_file):
+        if (
+            fname is None
+            and self.dat_file is not None
+            and os.path.exists(self.dat_file)
+        ):
             try:
                 with open(self.dat_file) as f:
                     dat_lines = f.readlines()
                 dat_species_result = self._parse_species_and_coordinates(dat_lines)
-                if dat_species_result and dat_species_result["positions_frac"] is not None:
+                if (
+                    dat_species_result
+                    and dat_species_result["positions_frac"] is not None
+                ):
                     positions_dict = self._create_positions_dict(
                         dat_species_result["positions_frac"],
                         dat_species_result["elements"],

@@ -187,7 +187,9 @@ def parse_dft_band_data(
 
     # Verify that tick_pos and tick_labels have the same length
     if len(tick_pos) != len(tick_labels):
-        raise RuntimeError(f"Mismatch between tick positions ({len(tick_pos)}) and labels ({len(tick_labels)})")
+        raise RuntimeError(
+            f"Mismatch between tick positions ({len(tick_pos)}) and labels ({len(tick_labels)})"
+        )
 
     return {
         "dist": dist,
@@ -243,4 +245,6 @@ def openmx_band_analysis(
         # Use folder and systemname
         return parse_dft_band_data(folder=folder, systemname=systemname)
     else:
-        raise ValueError("Either provide band_file, or provide both folder and systemname.")
+        raise ValueError(
+            "Either provide band_file, or provide both folder and systemname."
+        )

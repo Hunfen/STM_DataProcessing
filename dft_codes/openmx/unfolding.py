@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+
 from .parser import OpenMX
 
 try:
@@ -26,7 +27,9 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
     """
     # Ensure atomic positions data is available
     if openmx_parser.atomic_positions_data is None:
-        raise RuntimeError("Atomic positions data not available. Call read_atomic_positions() first.")
+        raise RuntimeError(
+            "Atomic positions data not available. Call read_atomic_positions() first."
+        )
 
     elements = openmx_parser.atomic_positions_data["elements"]
 
@@ -36,7 +39,9 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
         for species in openmx_parser.atomic_species:
             element_to_orbitals[species["element"]] = species["orbitals"]
     else:
-        raise RuntimeError("Atomic species data not available. Call read_atomic_species_from_out() first.")
+        raise RuntimeError(
+            "Atomic species data not available. Call read_atomic_species_from_out() first."
+        )
 
     # D orbital names in order
     d_orbital_names = ["d3z^2-r^2", "dx^2-y^2", "dxy", "dxz", "dyz"]
@@ -96,7 +101,9 @@ def _get_target_weights_from_df(
             # Use all orbital columns
             weight_cols = [col for col in df.columns if col not in ("kpath", "energy")]
         else:
-            raise ValueError(f"No columns match element={element}, atom_index={atom_index}")
+            raise ValueError(
+                f"No columns match element={element}, atom_index={atom_index}"
+            )
 
     return df[weight_cols].sum(axis=1).values
 
@@ -153,7 +160,9 @@ def compute_spectral_function(
     """
     # --- Validate temperature ---
     if not (0.1 <= delta_e_input_k <= 300.0):
-        raise ValueError(f"delta_e_input_k (temperature) must be between 0.1 K and 300 K. Got {delta_e_input_k} K.")
+        raise ValueError(
+            f"delta_e_input_k (temperature) must be between 0.1 K and 300 K. Got {delta_e_input_k} K."
+        )
 
     # --- Compute weights based on selection ---
     w_array = _get_target_weights_from_df(df, element=element, atom_index=atom_index)
@@ -192,7 +201,9 @@ def compute_spectral_function(
             e0 = energy_gpu[i]
             w = w_array_gpu[i]
             # This operation is vectorized over the entire (ne, nk) grid
-            a_gpu += w * lorentzian_2d(k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev)
+            a_gpu += w * lorentzian_2d(
+                k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev
+            )
 
         k, e, a = cp.asnumpy(k_grid), cp.asnumpy(e_grid), cp.asnumpy(a_gpu)
 
@@ -205,7 +216,9 @@ def compute_spectral_function(
             k0 = df["kpath"].iloc[i]
             e0 = df["energy"].iloc[i]
             w = w_array[i]
-            a += w * lorentzian_2d(k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev)
+            a += w * lorentzian_2d(
+                k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev
+            )
 
     return k, e, a
 
