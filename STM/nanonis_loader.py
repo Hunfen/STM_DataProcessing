@@ -6,7 +6,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-import Path
+import path
 
 
 class NanonisFileLoader:
@@ -31,14 +31,14 @@ class NanonisFileLoader:
         """Initialize NanonisLoader with a file path.
 
         Args:
-            f_path (str): Path to the Nanonis file (.sxm, .dat, or .3ds)
+            f_path (str): path to the Nanonis file (.sxm, .dat, or .3ds)
 
         Raises:
             FileNotFoundError: If the file does not exist
             ValueError: If the file is empty or has an unsupported file type
 
         """
-        file_path_obj = Path(f_path)
+        file_path_obj = path(f_path)
         if not file_path_obj.exists():
             error_msg = f"File not found: {f_path}"
             raise FileNotFoundError(error_msg)
@@ -75,7 +75,7 @@ class NanonisFileLoader:
         followed by content lines.
 
         Args:
-            f_path: Path to .sxm file as string.
+            f_path: path to .sxm file as string.
 
         Returns:
             Tuple containing:
@@ -92,7 +92,7 @@ class NanonisFileLoader:
         raw_header = {}
         entry, contents = "", ""
 
-        with Path.open(f_path, "rb") as f:
+        with path.open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
@@ -124,6 +124,79 @@ class NanonisFileLoader:
 
         return raw_header, data
 
+    # def _reform_sxm_header(self) -> dict:
+    #     """Reformats the raw header data from a .sxm file into a structured dictionary.
+
+    #     This method processes the raw header data, which is initially stored
+    #     as a dictionary of key-value pairs, and organizes it into a more
+    #     structured format. It handles both external VI attributes and internal
+    #     modules, and converts specific sections (e.g., "Z-CONTROLLER" and
+    #     "DATA_INFO") into pandas DataFrames for easier manipulation.
+
+    #     Returns:
+    #         dict: A dictionary containing the reformatted header data.
+    #         The dictionary includes:
+    #             - Key-value pairs for non-module-specific attributes.
+    #             - DataFrames for sections like "Z-CONTROLLER" and "DATA_INFO".
+    #             - Nested dictionaries or DataFrames for module-specific
+    #             attributes, depending on the number of attributes per module.
+
+    #     """
+    #     header = {}
+    #     modules = []
+
+    #     for key, value in self._raw_header.items():
+    #         if re.search(">", key):  # initial dicts for modules
+    #             if key.startswith("Ext. VI 1>"):
+    #                 # deal with external VI attributes
+    #                 # Use lstrip instead of strip for multi-character prefix
+    #                 module_name = key[len("Ext. VI 1>") :]
+    #                 if ">" in module_name:
+    #                     modules.append(module_name.split(">")[0])
+    #                 else:
+    #                     modules.append(module_name)
+    #             else:  # deal with the internal modules
+    #                 modules.append(key.split(">")[0])
+    #         else:
+    #             header.update({key: value})
+
+    #     # count the number of attributes in every module
+    #     modules = Counter(modules)
+
+    #     for key in ["Z-CONTROLLER", "DATA_INFO"]:
+    #         df = pd.DataFrame(
+    #             [row.split("\t") for row in self._raw_header[key].split("\n")],
+    #         )
+    #         df.columns = df.iloc[0]
+    #         header[key] = df[1:].reset_index(drop=True).dropna(how="any")
+
+    #     for module, count in modules.items():
+    #         if count == 1:
+    #             for key, value in self._raw_header.items():
+    #                 # Handle the strip issue properly
+    #                 if key.startswith("Ext. VI 1>"):
+    #                     check_key = key[len("Ext. VI 1>") :]
+    #                 else:
+    #                     check_key = key
+
+    #                 if check_key.startswith(module):
+    #                     header.update({module: value.strip("\n")})
+    #         else:
+    #             header[module] = {}
+    #             for key, value in self._raw_header.items():
+    #                 # Handle the strip issue properly
+    #                 if key.startswith("Ext. VI 1>"):
+    #                     check_key = key[len("Ext. VI 1>") :]
+    #                 else:
+    #                     check_key = key
+
+    #                 if check_key.startswith(module):
+    #                     header[module].update({key.split(">")[-1]: value.strip("\n")})
+    #                 else:
+    #                     continue
+
+    #     return header
+
     def _reform_sxm_header(self) -> dict:
         """Reformats the raw header data from a .sxm file into a structured dictionary.
 
@@ -145,55 +218,26 @@ class NanonisFileLoader:
         header = {}
         modules = []
 
+        # Extract modules and non-module entries
         for key, value in self._raw_header.items():
-            if re.search(">", key):  # initial dicts for modules
-                if key.startswith("Ext. VI 1>"):
-                    # deal with external VI attributes
-                    # Use lstrip instead of strip for multi-character prefix
-                    module_name = key[len("Ext. VI 1>") :]
-                    if ">" in module_name:
-                        modules.append(module_name.split(">")[0])
-                    else:
-                        modules.append(module_name)
-                else:  # deal with the internal modules
-                    modules.append(key.split(">")[0])
+            if re.search(">", key):
+                module_name = self._extract_ext_vi(key)
+                modules.append(module_name)
             else:
                 header.update({key: value})
 
-        # count the number of attributes in every module
-        modules = Counter(modules)
-
+        # Process special DataFrame sections
         for key in ["Z-CONTROLLER", "DATA_INFO"]:
-            df = pd.DataFrame(
-                [row.split("\t") for row in self._raw_header[key].split("\n")],
-            )
-            df.columns = df.iloc[0]
-            header[key] = df[1:].reset_index(drop=True).dropna(how="any")
+            if key in self._raw_header:
+                df = pd.DataFrame(
+                    [row.split("\t") for row in self._raw_header[key].split("\n")],
+                )
+                df.columns = df.iloc[0]
+                header[key] = df[1:].reset_index(drop=True).dropna(how="any")
 
-        for module, count in modules.items():
-            if count == 1:
-                for key, value in self._raw_header.items():
-                    # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
-
-                    if check_key.startswith(module):
-                        header.update({module: value.strip("\n")})
-            else:
-                header[module] = {}
-                for key, value in self._raw_header.items():
-                    # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
-
-                    if check_key.startswith(module):
-                        header[module].update({key.split(">")[-1]: value.strip("\n")})
-                    else:
-                        continue
+        # Process modules
+        modules = Counter(modules)
+        self._process_modules(header, modules)
 
         return header
 
@@ -240,7 +284,7 @@ class NanonisFileLoader:
         [DATA] marker with tab-delimited columns.
 
         Args:
-            f_path (str): Path to .dat file
+            f_path (str): path to .dat file
 
         Returns:
             tuple: (raw_header, df) where:
@@ -257,7 +301,7 @@ class NanonisFileLoader:
         key, value_buffer = "", ""
         columns, data_lines = [], []
 
-        with Path.open(f_path, "rb") as f:
+        with path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if "[DATA]" in decoded_line:  # End of header
@@ -378,7 +422,7 @@ class NanonisFileLoader:
         floats after header.
 
         Args:
-            f_path (str): Path to .3ds file
+            f_path (str): path to .3ds file
 
         Returns:
             tuple: (raw_header, data_1d) where:
@@ -393,7 +437,7 @@ class NanonisFileLoader:
         """
         raw_header = {}
         key, value_buffer = "", ""
-        with Path.open(f_path, "rb") as f:
+        with path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
                 if ":HEADER_END:" in decoded_line:
@@ -579,6 +623,42 @@ class NanonisFileLoader:
             elif self.file_type == "3ds":
                 self._ensure_header_parsed()
                 self._parameters, self._data = self._reform_3ds_data()
+
+    def _extract_ext_vi(self, key: str) -> str:
+        """Extract module name from a key that may contain 'Ext. VI 1>' prefix."""
+        if key.startswith("Ext. VI 1>"):
+            module_part = key[len("Ext. VI 1>") :]
+            return module_part.split(">")[0] if ">" in module_part else module_part
+        else:
+            return key.split(">")[0]
+
+    def _process_modules(self, header: dict, modules: Counter) -> None:
+        """Process modules based on their count (single vs multiple attributes)."""
+        for module, count in modules.items():
+            if count == 1:
+                self._process_single_module(header, module)
+            else:
+                self._process_multi_module(header, module)
+
+    def _process_single_module(self, header: dict, module: str) -> None:
+        """Process a module with only one attribute."""
+        for key, value in self._raw_header.items():
+            check_key = (
+                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            )
+            if check_key.startswith(module):
+                header.update({module: value.strip("\n")})
+                break
+
+    def _process_multi_module(self, header: dict, module: str) -> None:
+        """Process a module with multiple attributes."""
+        header[module] = {}
+        for key, value in self._raw_header.items():
+            check_key = (
+                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            )
+            if check_key.startswith(module):
+                header[module].update({key.split(">")[-1]: value.strip("\n")})
 
     @property
     def header(self) -> dict:

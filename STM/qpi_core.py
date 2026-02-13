@@ -18,13 +18,13 @@ class QPICalculator:
     to analyze quasiparticle interference patterns from band structure data.
     """
 
-    def __init__(self, eta=0.01):
+    def __init__(self, eta=0.001):
         """Initialize QPI calculator.
 
         Parameters
         ----------
         eta : float, optional
-            Spectral broadening parameter, default is 0.01
+            Spectral broadening parameter, default is 0.001
 
         """
         self.eta = eta
