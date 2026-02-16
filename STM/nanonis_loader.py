@@ -3,10 +3,10 @@
 import os
 import re
 from collections import Counter
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import path
 
 
 class NanonisFileLoader:
@@ -28,17 +28,17 @@ class NanonisFileLoader:
     """
 
     def __init__(self, f_path: str) -> None:
-        """Initialize NanonisLoader with a file path.
+        """Initialize NanonisLoader with a file Path.
 
         Args:
-            f_path (str): path to the Nanonis file (.sxm, .dat, or .3ds)
+            f_path (str): Path to the Nanonis file (.sxm, .dat, or .3ds)
 
         Raises:
             FileNotFoundError: If the file does not exist
             ValueError: If the file is empty or has an unsupported file type
 
         """
-        file_path_obj = path(f_path)
+        file_path_obj = Path(f_path)
         if not file_path_obj.exists():
             error_msg = f"File not found: {f_path}"
             raise FileNotFoundError(error_msg)
@@ -47,7 +47,7 @@ class NanonisFileLoader:
             error_msg = f"File is empty: {f_path}"
             raise ValueError(error_msg)
 
-        self.file_path, self.fname = os.path.split(f_path)
+        self.file_path, self.fname = os.Path.split(f_path)
         self._raw_header = None
         self._raw_data = None
         self._header = None
@@ -75,7 +75,7 @@ class NanonisFileLoader:
         followed by content lines.
 
         Args:
-            f_path: path to .sxm file as string.
+            f_path: Path to .sxm file as string.
 
         Returns:
             Tuple containing:
@@ -92,7 +92,7 @@ class NanonisFileLoader:
         raw_header = {}
         entry, contents = "", ""
 
-        with path.open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             # Read and parse the header
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
@@ -284,7 +284,7 @@ class NanonisFileLoader:
         [DATA] marker with tab-delimited columns.
 
         Args:
-            f_path (str): path to .dat file
+            f_path (str): Path to .dat file
 
         Returns:
             tuple: (raw_header, df) where:
@@ -301,16 +301,11 @@ class NanonisFileLoader:
         key, value_buffer = "", ""
         columns, data_lines = [], []
 
-        with path.open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if "[DATA]" in decoded_line:  # End of header
-                    columns = (
-                        next(f)
-                        .decode("utf-8", errors="replace")
-                        .strip("\r\n")
-                        .split("\t")
-                    )
+                    columns = next(f).decode("utf-8", errors="replace").strip("\r\n").split("\t")
                     break
                 if decoded_line.endswith("\t\r\n"):
                     # Update key and value when encounter '\t\r\n'
@@ -401,10 +396,7 @@ class NanonisFileLoader:
                     {
                         "MultiLine Settings": pd.DataFrame(
                             np.array(
-                                [
-                                    list(map(float, row.split(",")))
-                                    for row in value.split(";")
-                                ],
+                                [list(map(float, row.split(","))) for row in value.split(";")],
                             ),
                             columns=key.split(":")[-1].split(","),
                         ),
@@ -422,7 +414,7 @@ class NanonisFileLoader:
         floats after header.
 
         Args:
-            f_path (str): path to .3ds file
+            f_path (str): Path to .3ds file
 
         Returns:
             tuple: (raw_header, data_1d) where:
@@ -437,7 +429,7 @@ class NanonisFileLoader:
         """
         raw_header = {}
         key, value_buffer = "", ""
-        with path.open(f_path, "rb") as f:
+        with Path.open(f_path, "rb") as f:
             for line in f:
                 decoded_line = line.decode(encoding="utf-8", errors="replace")
                 if ":HEADER_END:" in decoded_line:
@@ -520,10 +512,7 @@ class NanonisFileLoader:
                         {
                             "MultiLine Settings": pd.DataFrame(
                                 np.array(
-                                    [
-                                        list(map(float, row.split(",")))
-                                        for row in value.split(";")
-                                    ],
+                                    [list(map(float, row.split(","))) for row in value.split(";")],
                                 ),
                                 columns=key.split(":")[-1].split(","),
                             ),
@@ -643,9 +632,7 @@ class NanonisFileLoader:
     def _process_single_module(self, header: dict, module: str) -> None:
         """Process a module with only one attribute."""
         for key, value in self._raw_header.items():
-            check_key = (
-                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
-            )
+            check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
             if check_key.startswith(module):
                 header.update({module: value.strip("\n")})
                 break
@@ -654,9 +641,7 @@ class NanonisFileLoader:
         """Process a module with multiple attributes."""
         header[module] = {}
         for key, value in self._raw_header.items():
-            check_key = (
-                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
-            )
+            check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
             if check_key.startswith(module):
                 header[module].update({key.split(">")[-1]: value.strip("\n")})
 
@@ -729,9 +714,7 @@ class NanonisFileLoader:
         expected_parts = 2
         try:
             parts = grid_str.replace(" ", "").split("x")
-            return (
-                tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
-            )
+            return tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
         except (ValueError, AttributeError):
             return (0, 0)
 
@@ -891,10 +874,7 @@ class NanonisFileLoader:
         if self._raw_header and "DATA_INFO" in self._raw_header:
             try:
                 df = pd.DataFrame(
-                    [
-                        row.split("\t")
-                        for row in self._raw_header["DATA_INFO"].split("\n")
-                    ],
+                    [row.split("\t") for row in self._raw_header["DATA_INFO"].split("\n")],
                 )
                 df.columns = df.iloc[0]
                 return df[1:]["Name"].tolist()

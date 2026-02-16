@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Union
 
 import numpy as np
 
@@ -9,9 +10,12 @@ try:
 
     CUPY_AVAILABLE = True
     print("CuPy is available. GPU acceleration enabled.")
+    ArrayType = Union[np.ndarray, cp.ndarray]
 except ImportError:
     CUPY_AVAILABLE = False
+    cp = None
     print("CuPy not found. Using CPU-only mode.")
+    ArrayType = np.ndarray
 
 
 class MLWFHamiltonian:
@@ -106,12 +110,8 @@ class MLWFHamiltonian:
             wlog_file = out_file
             print(f"  Found out file: {out_file}")
         else:
-            print(
-                f"Warning: Neither {seedname}.wout nor {seedname}.out found in {folder}"
-            )
-            print(
-                "  You may need to provide wlog_file parameter separately for calculate_contourmap()"
-            )
+            print(f"Warning: Neither {seedname}.wout nor {seedname}.out found in {folder}")
+            print("  You may need to provide wlog_file parameter separately for calculate_contourmap()")
 
         self.folder = folder
         self.seedname = seedname
@@ -204,9 +204,7 @@ class MLWFHamiltonian:
 
             # Sanity check: number of R vectors should match header
             if len(r_list) != nrpts:
-                raise RuntimeError(
-                    f"nrpts mismatch: header {nrpts}, parsed {len(r_list)}"
-                )
+                raise RuntimeError(f"nrpts mismatch: header {nrpts}, parsed {len(r_list)}")
 
             self.num_wann = num_wann
             self.r_list = np.array(r_list, dtype=int)
@@ -290,7 +288,7 @@ class MLWFHamiltonian:
 
     def hk_cuda(
         self, k_frac: tuple[float, float, float] | np.ndarray, return_gpu: bool = False
-    ) -> np.ndarray | cp.ndarray:
+    ) -> ArrayType:
         """
         Compute Bloch Hamiltonian H(k) using CUDA acceleration.
 
@@ -405,10 +403,7 @@ class MLWFHamiltonian:
                 line = line.strip()
 
                 # Check for DISENTANGLE header section
-                if (
-                    "*------------------------------- DISENTANGLE --------------------------------*"
-                    in line
-                ):
+                if "*------------------------------- DISENTANGLE --------------------------------*" in line:
                     in_dis_header = True
                 elif in_dis_header:
                     if (
@@ -427,10 +422,7 @@ class MLWFHamiltonian:
                                 disentangle_tar = None
 
                 # Check for WANNIERISE header section
-                if (
-                    "*------------------------------- WANNIERISE ---------------------------------*"
-                    in line
-                ):
+                if "*------------------------------- WANNIERISE ---------------------------------*" in line:
                     in_wannierise_header = True
                 elif in_wannierise_header:
                     if (
@@ -459,19 +451,10 @@ class MLWFHamiltonian:
                         in_dis_section = False
 
                     # Skip header row
-                    if (
-                        not header_found
-                        and line.startswith("|")
-                        and "Iter" in line
-                        and "Time" in line
-                    ):
+                    if not header_found and line.startswith("|") and "Iter" in line and "Time" in line:
                         header_found = True
 
-                    if (
-                        line.startswith("+---")
-                        or line.startswith("+---")
-                        or line.startswith("+---")
-                    ):
+                    if line.startswith("+---") or line.startswith("+---") or line.startswith("+---"):
                         continue
 
                     # Continue reading if convergence marker is found until Final Omega_I
@@ -494,10 +477,7 @@ class MLWFHamiltonian:
 
                 # Wannierise section parsing (existing code)
                 # Look for WANNIERISE section
-                if (
-                    "*------------------------------- WANNIERISE ---------------------------------*"
-                    in line
-                ):
+                if "*------------------------------- WANNIERISE ---------------------------------*" in line:
                     if not found_first_wannierise:
                         # Found the first WANNIERISE section (parameter section), skip it
                         found_first_wannierise = True
@@ -544,9 +524,7 @@ class MLWFHamiltonian:
                     # Read WF centre and spread lines
                     if reading_spreads and line.startswith("WF centre and spread"):
                         # Example: "WF centre and spread    1  (  1.985112,  3.438416,100.291488 )     6.75594284"
-                        match = re.search(
-                            r"WF centre and spread\s+\d+\s+\([^)]+\)\s+([\d.]+)", line
-                        )
+                        match = re.search(r"WF centre and spread\s+\d+\s+\([^)]+\)\s+([\d.]+)", line)
                         if match:
                             spread = float(match.group(1))
                             current_spreads.append(spread)
@@ -567,9 +545,7 @@ class MLWFHamiltonian:
             spreads_data.append(current_spreads)
 
         # Convert disentangle data using ternary operator
-        dis_data = (
-            np.array([data_iter, data_time, data_delta]) if data_iter else np.array([])
-        )
+        dis_data = np.array([data_iter, data_time, data_delta]) if data_iter else np.array([])
 
         # Convert wannierise data
         if spreads_data and num_wann > 0:
@@ -629,10 +605,7 @@ class MLWFHamiltonian:
                 for i, line in enumerate(lines):
                     # For .wout files (Wannier90 format)
                     if file_ext == ".wout":
-                        if (
-                            "Reciprocal-Space Vectors" in line
-                            or "Reciprocal Vectors" in line
-                        ):
+                        if "Reciprocal-Space Vectors" in line or "Reciprocal Vectors" in line:
                             # Read next 3 lines for b1, b2, b3
                             for j in range(1, 4):
                                 if i + j < len(lines):
