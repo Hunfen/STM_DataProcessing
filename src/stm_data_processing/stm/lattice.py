@@ -386,9 +386,7 @@ class LATTICE2D:
                 v_f = self._wrap_centered(v)
 
                 # strict half-open window check (numerical safe)
-                if not (
-                    -0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol
-                ):
+                if not (-0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol):
                     continue
 
                 # reconstruct folded Cartesian point consistently
@@ -622,9 +620,7 @@ class LatticeOperations:
                 k = np.linalg.solve(a, b)
                 vertices.append(k)
             except np.linalg.LinAlgError as e:
-                raise RuntimeError(
-                    f"Failed to solve for BZ vertex between g{i} and g{(i + 1) % n}"
-                ) from e
+                raise RuntimeError(f"Failed to solve for BZ vertex between g{i} and g{(i + 1) % n}") from e
 
         vertices = np.array(vertices).T  # shape (2, 6)
 

@@ -1,5 +1,5 @@
-import os
 import time
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -108,34 +108,23 @@ def calculate_contourmap(
     Use set_use_gpu() to control GPU usage.
     """
     if mlwf_hamiltonian.h_list is None:
-        raise ValueError(
-            "Hamiltonian data not loaded. Call load_hr_file() or load_from_seedname() first."
-        )
+        raise ValueError("Hamiltonian data not loaded. Call load_hr_file() or load_from_seedname() first.")
 
     # Determine wlog_file if not provided
     if wlog_file is None:
-        if (
-            hasattr(mlwf_hamiltonian, "wlog_file")
-            and mlwf_hamiltonian.wlog_file is not None
-        ):
+        if hasattr(mlwf_hamiltonian, "wlog_file") and mlwf_hamiltonian.wlog_file is not None:
             wlog_file = mlwf_hamiltonian.wlog_file
             print(f"  Using auto-detected wlog_file: {wlog_file}")
-        elif (
-            mlwf_hamiltonian.folder is not None
-            and mlwf_hamiltonian.seedname is not None
-        ):
+        elif mlwf_hamiltonian.folder is not None and mlwf_hamiltonian.seedname is not None:
             # Try to find wlog_file in folder
-            wout_file = os.path.join(
-                mlwf_hamiltonian.folder, f"{mlwf_hamiltonian.seedname}.wout"
-            )
-            out_file = os.path.join(
-                mlwf_hamiltonian.folder, f"{mlwf_hamiltonian.seedname}.out"
-            )
+            folder_path = Path(mlwf_hamiltonian.folder)
+            wout_file = folder_path / f"{mlwf_hamiltonian.seedname}.wout"
+            out_file = folder_path / f"{mlwf_hamiltonian.seedname}.out"
 
-            if os.path.exists(wout_file):
+            if wout_file.exists():
                 wlog_file = wout_file
                 print(f"  Found and using wout file: {wout_file}")
-            elif os.path.exists(out_file):
+            elif out_file.exists():
                 wlog_file = out_file
                 print(f"  Found and using out file: {out_file}")
             else:
@@ -231,37 +220,26 @@ def calculate_contourmap_cuda(
         If GPU acceleration is not available.
     """
     if mlwf_hamiltonian.h_list is None:
-        raise ValueError(
-            "Hamiltonian data not loaded. Call load_hr_file() or load_from_seedname() first."
-        )
+        raise ValueError("Hamiltonian data not loaded. Call load_hr_file() or load_from_seedname() first.")
 
     if not CUPY_AVAILABLE:
         raise RuntimeError("CuPy is not available. Cannot use GPU acceleration.")
 
     # Determine wlog_file if not provided
     if wlog_file is None:
-        if (
-            hasattr(mlwf_hamiltonian, "wlog_file")
-            and mlwf_hamiltonian.wlog_file is not None
-        ):
+        if hasattr(mlwf_hamiltonian, "wlog_file") and mlwf_hamiltonian.wlog_file is not None:
             wlog_file = mlwf_hamiltonian.wlog_file
             print(f"  Using auto-detected wlog_file: {wlog_file}")
-        elif (
-            mlwf_hamiltonian.folder is not None
-            and mlwf_hamiltonian.seedname is not None
-        ):
+        elif mlwf_hamiltonian.folder is not None and mlwf_hamiltonian.seedname is not None:
             # Try to find wlog_file in folder
-            wout_file = os.path.join(
-                mlwf_hamiltonian.folder, f"{mlwf_hamiltonian.seedname}.wout"
-            )
-            out_file = os.path.join(
-                mlwf_hamiltonian.folder, f"{mlwf_hamiltonian.seedname}.out"
-            )
+            folder_path = Path(mlwf_hamiltonian.folder)
+            wout_file = folder_path / f"{mlwf_hamiltonian.seedname}.wout"
+            out_file = folder_path / f"{mlwf_hamiltonian.seedname}.out"
 
-            if os.path.exists(wout_file):
+            if wout_file.exists():
                 wlog_file = wout_file
                 print(f"  Found and using wout file: {wout_file}")
-            elif os.path.exists(out_file):
+            elif out_file.exists():
                 wlog_file = out_file
                 print(f"  Found and using out file: {out_file}")
             else:
@@ -345,9 +323,7 @@ def calculate_contourmap_cuda(
 
     print(f"  Using batch size: {batch_size} (total batches: {num_batches})")
     print(f"  Memory per k-point: {mem_per_kpoint / 1024:.1f} KB")
-    print(
-        f"  Estimated memory for batch: {batch_size * mem_per_kpoint / (1024**3):.2f} GB"
-    )
+    print(f"  Estimated memory for batch: {batch_size * mem_per_kpoint / (1024**3):.2f} GB")
 
     # Pre-compute constants
     two_pi_i = 2j * cp.pi
@@ -370,23 +346,17 @@ def calculate_contourmap_cuda(
         # OPTIMIZATION 1: Use einsum for efficient matrix multiplication
         # Compute all dot products at once: k_batch (B,3) @ r_list_gpu.T (3,R) -> (B,R)
         hk_start = time.time()
-        dot_products = cp.dot(
-            k_batch, mlwf_hamiltonian.r_list_gpu.T
-        )  # shape: (batch_size_current, nrpts)
+        dot_products = cp.dot(k_batch, mlwf_hamiltonian.r_list_gpu.T)  # shape: (batch_size_current, nrpts)
 
         # Compute phase factors for all k-points and R vectors
         phases = cp.exp(two_pi_i * dot_products)  # shape: (batch_size_current, nrpts)
 
         # Apply degeneracy weighting
-        weights = (
-            phases / mlwf_hamiltonian.ndegen_gpu
-        )  # broadcasting: (batch_size_current, nrpts)
+        weights = phases / mlwf_hamiltonian.ndegen_gpu  # broadcasting: (batch_size_current, nrpts)
 
         # OPTIMIZATION 2: Memory-efficient summation without creating large intermediate arrays
         # Sum over R vectors: Σ_R H(R) * weight(R)
-        hk_batch = cp.zeros(
-            (batch_size_current, num_wann, num_wann), dtype=cp.complex128
-        )
+        hk_batch = cp.zeros((batch_size_current, num_wann, num_wann), dtype=cp.complex128)
 
         # Process R vectors one by one to avoid memory issues
         for ir in range(nrpts):
@@ -405,18 +375,14 @@ def calculate_contourmap_cuda(
         # OPTIMIZATION 3: Batch diagonalization
         eig_start = time.time()
         # Process matrices in smaller sub-batches for better memory management
-        sub_batch_size = min(
-            64, batch_size_current
-        )  # Smaller batches for diagonalization
+        sub_batch_size = min(64, batch_size_current)  # Smaller batches for diagonalization
 
         for sub_start in range(0, batch_size_current, sub_batch_size):
             sub_end = min(sub_start + sub_batch_size, batch_size_current)
             sub_size = sub_end - sub_start
 
             # Extract sub-batch of Hamiltonian matrices
-            hk_sub = hk_batch[
-                sub_start:sub_end
-            ]  # shape: (sub_size, num_wann, num_wann)
+            hk_sub = hk_batch[sub_start:sub_end]  # shape: (sub_size, num_wann, num_wann)
 
             # Process each matrix in the sub-batch
             for i in range(sub_size):
@@ -429,9 +395,7 @@ def calculate_contourmap_cuda(
 
         # Print progress with memory usage information
         batch_time = time.time() - batch_start_time
-        if (batch_idx + 1) % max(
-            1, num_batches // 10
-        ) == 0 or batch_idx == num_batches - 1:
+        if (batch_idx + 1) % max(1, num_batches // 10) == 0 or batch_idx == num_batches - 1:
             progress = (batch_idx + 1) / num_batches * 100
             memory_used = cp.cuda.Device().mem_info[1] / 1e9  # Used memory in GB
             memory_total = cp.cuda.Device().mem_info[0] / 1e9  # Total memory in GB
@@ -446,9 +410,7 @@ def calculate_contourmap_cuda(
     print("\nPerformance summary:")
     print(f"  Total HK computation time: {total_hk_time:.2f}s")
     print(f"  Total diagonalization time: {total_eig_time:.2f}s")
-    print(
-        f"  Average time per k-point: {(total_hk_time + total_eig_time) / total_kpoints * 1000:.2f}ms"
-    )
+    print(f"  Average time per k-point: {(total_hk_time + total_eig_time) / total_kpoints * 1000:.2f}ms")
 
     # Reshape results to 3D array
     e_gpu = e_gpu.reshape((num_wann, nk, nk))
@@ -548,21 +510,15 @@ def _save_band_contourmap(
     # Create HDF5 file
     with h5py.File(filename, "w") as f:
         # Store raw data (preserve original dimensions)
-        f.create_dataset(
-            "energies", data=energies, compression="gzip", compression_opts=4
-        )
+        f.create_dataset("energies", data=energies, compression="gzip", compression_opts=4)
         f.create_dataset("kx", data=kx, compression="gzip", compression_opts=4)
         f.create_dataset("ky", data=ky, compression="gzip", compression_opts=4)
 
         # Store fractional coordinates if provided
         if k1_grid is not None:
-            f.create_dataset(
-                "k1_grid", data=k1_grid, compression="gzip", compression_opts=4
-            )
+            f.create_dataset("k1_grid", data=k1_grid, compression="gzip", compression_opts=4)
         if k2_grid is not None:
-            f.create_dataset(
-                "k2_grid", data=k2_grid, compression="gzip", compression_opts=4
-            )
+            f.create_dataset("k2_grid", data=k2_grid, compression="gzip", compression_opts=4)
 
         # Store metadata as attributes
         f.attrs["num_wann"] = num_wann
@@ -593,7 +549,7 @@ def _save_band_contourmap(
     elapsed_time = time.time() - start_time
     print(f"Band structure data saved to {filename}")
     print("  Format: HDF5 (compressed with gzip)")
-    print(f"  File size: {os.path.getsize(filename) / (1024 * 1024):.2f} MB")
+    print(f"  File size: {Path(filename).stat().st_size / (1024 * 1024):.2f} MB")
     print(f"  Save time: {elapsed_time:.2f} seconds")
 
 
@@ -662,9 +618,7 @@ def wannier90_contourmap(
             print("Note: wlog_file not provided, will use seedname.wout from folder")
     elif hr_file is not None:
         # Legacy method using hr_file directly
-        print(
-            "Warning: Using deprecated hr_file parameter. Consider using folder and seedname instead."
-        )
+        print("Warning: Using deprecated hr_file parameter. Consider using folder and seedname instead.")
         wh = MLWFHamiltonian(use_gpu=use_gpu)
         wh.load_hr_file(hr_file)
 
@@ -677,9 +631,7 @@ def wannier90_contourmap(
         raise ValueError("Either provide folder and seedname, or hr_file (deprecated).")
 
     # Calculate contour map
-    e, kx, ky, k1_grid, k2_grid, bvecs = calculate_contourmap(
-        wh, wlog_file, nk, kmin, kmax
-    )
+    e, kx, ky, k1_grid, k2_grid, bvecs = calculate_contourmap(wh, wlog_file, nk, kmin, kmax)
 
     # Save to HDF5 file if requested
     if save_to_file:
@@ -736,7 +688,7 @@ def load_band_contourmap(
     start_time = time.time()
 
     # Check if file exists
-    if not os.path.exists(filename):
+    if not Path(filename).exists():
         raise FileNotFoundError(f"HDF5 file not found: {filename}")
 
     # Ensure file is HDF5 format
@@ -749,9 +701,7 @@ def load_band_contourmap(
             required_datasets = ["energies", "kx", "ky"]
             for dataset in required_datasets:
                 if dataset not in f:
-                    raise ValueError(
-                        f"Required dataset '{dataset}' not found in HDF5 file"
-                    )
+                    raise ValueError(f"Required dataset '{dataset}' not found in HDF5 file")
 
             # Load required data
             energies = f["energies"][:]
@@ -776,21 +726,13 @@ def load_band_contourmap(
             # Validate data shape consistency
             num_wann, nk1, nk2 = energies.shape
             if kx.shape != (nk1, nk2):
-                raise ValueError(
-                    f"Inconsistent shapes: energies {energies.shape}, kx {kx.shape}"
-                )
+                raise ValueError(f"Inconsistent shapes: energies {energies.shape}, kx {kx.shape}")
             if ky.shape != (nk1, nk2):
-                raise ValueError(
-                    f"Inconsistent shapes: energies {energies.shape}, ky {ky.shape}"
-                )
+                raise ValueError(f"Inconsistent shapes: energies {energies.shape}, ky {ky.shape}")
             if k1_grid is not None and k1_grid.shape != (nk1, nk2):
-                raise ValueError(
-                    f"Inconsistent shapes: energies {energies.shape}, k1_grid {k1_grid.shape}"
-                )
+                raise ValueError(f"Inconsistent shapes: energies {energies.shape}, k1_grid {k1_grid.shape}")
             if k2_grid is not None and k2_grid.shape != (nk1, nk2):
-                raise ValueError(
-                    f"Inconsistent shapes: energies {energies.shape}, k2_grid {k2_grid.shape}"
-                )
+                raise ValueError(f"Inconsistent shapes: energies {energies.shape}, k2_grid {k2_grid.shape}")
 
             # Optional: Load metadata
             metadata = {}
@@ -830,7 +772,7 @@ def load_band_contourmap(
             print(f"  Energy range: {energies.min():.4f} → {energies.max():.4f} eV")
 
     except Exception as e:
-        raise ValueError(f"Failed to load HDF5 file '{filename}': {str(e)}") from e
+        raise ValueError(f"Failed to load HDF5 file '{filename}': {e!s}") from e
 
     elapsed_time = time.time() - start_time
     print(f"  Load time: {elapsed_time:.2f} seconds")

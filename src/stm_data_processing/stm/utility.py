@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-
-__all__ = ['np', 'pd', 'vortex_num']
-
-from . import np, pd
-
-
 def vortex_num(field: float = 0, area: float = 0):
     """Calculate the vortex number using the given filed and area.
 

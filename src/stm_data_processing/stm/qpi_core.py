@@ -65,11 +65,7 @@ class QPICalculator:
             a_k_per_band = (1 / np.pi) * (self.eta / denominator)
 
             # Handle band selection with ternary operator
-            a_k = (
-                np.sum(a_k_per_band, axis=0)
-                if bands == "all"
-                else np.sum(a_k_per_band[bands], axis=0)
-            )
+            a_k = np.sum(a_k_per_band, axis=0) if bands == "all" else np.sum(a_k_per_band[bands], axis=0)
 
         # Apply mask if provided
         if mask is not None:
@@ -292,17 +288,15 @@ class QPICalculator:
 
         # Calculate QPI for each energy
         for i, energy in enumerate(energy_range):
-            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, _ = (
-                self.calculate_qpi_from_contour(
-                    kx_mesh,
-                    ky_mesh,
-                    e_k,
-                    energy,
-                    bvecs,
-                    bands,
-                    normalize,
-                    mask,
-                )
+            jdos_q, qx_grid, qy_grid, q1_grid, q2_grid, _ = self.calculate_qpi_from_contour(
+                kx_mesh,
+                ky_mesh,
+                e_k,
+                energy,
+                bvecs,
+                bands,
+                normalize,
+                mask,
             )
             jdos_scan[i] = jdos_q
 

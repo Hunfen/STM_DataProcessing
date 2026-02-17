@@ -1,6 +1,7 @@
-import numpy as np
-import os
 import re
+from pathlib import Path
+
+import numpy as np
 
 # List of valid chemical element symbols for validation
 VALID_ELEMENTS = {
@@ -324,9 +325,7 @@ class OpenMX:
                 try:
                     species_number = int(line_stripped.split()[1])
                 except (IndexError, ValueError) as err:
-                    raise RuntimeError(
-                        f"Invalid Species.Number line: {line_stripped}"
-                    ) from err
+                    raise RuntimeError(f"Invalid Species.Number line: {line_stripped}") from err
 
             if "<Definition.of.Atomic.Species" in line_stripped:
                 start_idx = i + 1
@@ -348,9 +347,7 @@ class OpenMX:
 
         # Validate that we have the expected number of lines
         if len(species_lines) != species_number:
-            print(
-                f"Warning: Species.Number={species_number} but found {len(species_lines)} species lines"
-            )
+            print(f"Warning: Species.Number={species_number} but found {len(species_lines)} species lines")
 
         # Parse each species line
         valid_species = []
@@ -377,9 +374,7 @@ class OpenMX:
             orbitals = OpenMX._parse_orbital_basis_static(basis_info, label)
 
             if orbitals is None:
-                print(
-                    f"Warning: Could not parse orbital basis for {label}: {basis_info}"
-                )
+                print(f"Warning: Could not parse orbital basis for {label}: {basis_info}")
                 continue
 
             species_dict = {
@@ -392,9 +387,7 @@ class OpenMX:
             valid_species.append(species_dict)
 
         n_valid_species = len(valid_species)
-        print(
-            f"Found {n_valid_species} valid atomic species out of {len(species_lines)} total lines"
-        )
+        print(f"Found {n_valid_species} valid atomic species out of {len(species_lines)} total lines")
 
         result = {
             "species_list": valid_species,
@@ -455,9 +448,7 @@ class OpenMX:
             return orbitals
 
         except Exception as e:
-            print(
-                f"Error parsing orbital basis '{basis_info}' for element {element}: {e}"
-            )
+            print(f"Error parsing orbital basis '{basis_info}' for element {element}: {e}")
             return None
 
     def _create_positions_dict(self, positions_frac, elements, spin_weights, source):
@@ -750,14 +741,10 @@ class OpenMX:
         result = self.read_openmx_file(fname)
 
         # Try to get positions from final structure (priority 1)
-        final_positions_result = self._parse_final_structure_positions(
-            result.get("lines", [])
-        )
+        final_positions_result = self._parse_final_structure_positions(result.get("lines", []))
         if final_positions_result["positions_frac"] is not None:
             # We have final structure positions, now try to get spin weights from species coordinates
-            species_result = self._parse_species_and_coordinates(
-                result.get("lines", [])
-            )
+            species_result = self._parse_species_and_coordinates(result.get("lines", []))
             spin_weights = species_result["spin_weights"] if species_result else None
 
             positions_dict = self._create_positions_dict(
@@ -786,19 +773,12 @@ class OpenMX:
             return positions_dict
 
         # If we have a .dat file and haven't tried it yet, try reading from .dat
-        if (
-            fname is None
-            and self.dat_file is not None
-            and os.path.exists(self.dat_file)
-        ):
+        if fname is None and self.dat_file is not None and Path(self.dat_file).exists():
             try:
-                with open(self.dat_file) as f:
+                with Path(self.dat_file).open() as f:
                     dat_lines = f.readlines()
                 dat_species_result = self._parse_species_and_coordinates(dat_lines)
-                if (
-                    dat_species_result
-                    and dat_species_result["positions_frac"] is not None
-                ):
+                if dat_species_result and dat_species_result["positions_frac"] is not None:
                     positions_dict = self._create_positions_dict(
                         dat_species_result["positions_frac"],
                         dat_species_result["elements"],
@@ -835,16 +815,17 @@ class OpenMX:
         for all operations.
         """
         # Construct file paths
-        self.out_file = os.path.join(folder, f"{systemname}.out")
-        self.dat_file = os.path.join(folder, f"{systemname}.dat")
+        folder_path = Path(folder)
+        self.out_file = folder_path / f"{systemname}.out"
+        self.dat_file = folder_path / f"{systemname}.dat"
 
         # Check if files exist
-        if not os.path.exists(self.out_file):
+        if not self.out_file.exists():
             print(f"Warning: .out file not found: {self.out_file}")
         else:
             print(f"  Found .out file: {self.out_file}")
 
-        if not os.path.exists(self.dat_file):
+        if not self.dat_file.exists():
             print(f"Warning: .dat file not found: {self.dat_file}")
         else:
             print(f"  Found .dat file: {self.dat_file}")
@@ -878,20 +859,20 @@ class OpenMX:
         """
         # Determine the file path to use
         if fname is None:
-            if self.out_file is not None and os.path.exists(self.out_file):
+            if self.out_file is not None and Path(self.out_file).exists():
                 fname = self.out_file
                 print(f"Using auto-detected .out file: {fname}")
-            elif self.dat_file is not None and os.path.exists(self.dat_file):
+            elif self.dat_file is not None and Path(self.dat_file).exists():
                 fname = self.dat_file
                 print(f"Using auto-detected .dat file: {fname}")
             elif self.folder is not None and self.systemname is not None:
                 # Try to construct paths even if they weren't set before
-                out_path = os.path.join(self.folder, f"{self.systemname}.out")
-                dat_path = os.path.join(self.folder, f"{self.systemname}.dat")
-                if os.path.exists(out_path):
+                out_path = Path(self.folder) / f"{self.systemname}.out"
+                dat_path = Path(self.folder) / f"{self.systemname}.dat"
+                if out_path.exists():
                     fname = out_path
                     print(f"Using constructed .out file: {fname}")
-                elif os.path.exists(dat_path):
+                elif dat_path.exists():
                     fname = dat_path
                     print(f"Using constructed .dat file: {fname}")
                 else:
@@ -909,7 +890,7 @@ class OpenMX:
 
         # Read the file
         try:
-            with open(fname) as f:
+            with Path(fname).open() as f:
                 lines = f.readlines()
         except FileNotFoundError as e:
             raise FileNotFoundError(f"File not found: {fname}") from e

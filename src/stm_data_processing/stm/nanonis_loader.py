@@ -253,10 +253,11 @@ class NanonisFileLoader:
         else:
             pixels = (0, 0)
 
-        if "DATA_INFO" in self._header:
-            channels = self._header["DATA_INFO"]["Name"].tolist()
-        else:
-            channels = []
+        # if "DATA_INFO" in self._header:
+        #     channels = self._header["DATA_INFO"]["Name"].tolist()
+        # else:
+        #     channels = []
+        channels = self._header["DATA_INFO"]["Name"].tolist() if "DATA_INFO" in self._header else []
 
         dir_flag = self._header.get("SCAN_DIR") == "up"
 
@@ -369,10 +370,11 @@ class NanonisFileLoader:
             if count == 1:
                 for key, value in self._raw_header.items():
                     # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
+                    # if key.startswith("Ext. VI 1>"):
+                    #     check_key = key[len("Ext. VI 1>") :]
+                    # else:
+                    #     check_key = key
+                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
 
                     if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
@@ -380,10 +382,11 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self._raw_header.items():
                     # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
+                    # if key.startswith("Ext. VI 1>"):
+                    #     check_key = key[len("Ext. VI 1>") :]
+                    # else:
+                    #     check_key = key
+                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
 
                     if module == check_key.split(">")[0]:
                         header[module].update(
@@ -484,10 +487,11 @@ class NanonisFileLoader:
             if count == 1:
                 for key, value in self._raw_header.items():
                     # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
+                    # if key.startswith("Ext. VI 1>"):
+                    #     check_key = key[len("Ext. VI 1>") :]
+                    # else:
+                    #     check_key = key
+                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
 
                     if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
@@ -495,10 +499,11 @@ class NanonisFileLoader:
                 header[module] = {}
                 for key, value in self._raw_header.items():
                     # Handle the strip issue properly
-                    if key.startswith("Ext. VI 1>"):
-                        check_key = key[len("Ext. VI 1>") :]
-                    else:
-                        check_key = key
+                    # if key.startswith("Ext. VI 1>"):
+                    #     check_key = key[len("Ext. VI 1>") :]
+                    # else:
+                    #     check_key = key
+                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
 
                     if module == check_key.split(">")[0]:
                         header[module].update(
@@ -537,15 +542,17 @@ class NanonisFileLoader:
 
         block_size = param_length + data_length
 
-        if "Grid dim" in self._header:
-            grid_dim = self._parse_grid_dim(self._header["Grid dim"])
-        else:
-            grid_dim = (0, 0)
+        # if "Grid dim" in self._header:
+        #     grid_dim = self._parse_grid_dim(self._header["Grid dim"])
+        # else:
+        #     grid_dim = (0, 0)
+        grid_dim = self._parse_grid_dim(self._header["Grid dim"]) if "Grid dim" in self._header else (0, 0)
 
-        if "Channels" in self._header:
-            channels = self._header["Channels"].split(";")
-        else:
-            channels = []
+        # if "Channels" in self._header:
+        #     channels = self._header["Channels"].split(";")
+        # else:
+        #     channels = []
+        channels = self._header["Channels"].split(";") if "Channels" in self._header else []
 
         total_pixels = grid_dim[0] * grid_dim[1]
         total_pts = block_size * total_pixels

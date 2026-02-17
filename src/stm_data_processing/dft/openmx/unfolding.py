@@ -27,9 +27,7 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
     """
     # Ensure atomic positions data is available
     if openmx_parser.atomic_positions_data is None:
-        raise RuntimeError(
-            "Atomic positions data not available. Call read_atomic_positions() first."
-        )
+        raise RuntimeError("Atomic positions data not available. Call read_atomic_positions() first.")
 
     elements = openmx_parser.atomic_positions_data["elements"]
 
@@ -39,9 +37,7 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
         for species in openmx_parser.atomic_species:
             element_to_orbitals[species["element"]] = species["orbitals"]
     else:
-        raise RuntimeError(
-            "Atomic species data not available. Call read_atomic_species_from_out() first."
-        )
+        raise RuntimeError("Atomic species data not available. Call read_atomic_species_from_out() first.")
 
     # D orbital names in order
     d_orbital_names = ["d3z^2-r^2", "dx^2-y^2", "dxy", "dxz", "dyz"]
@@ -101,9 +97,7 @@ def _get_target_weights_from_df(
             # Use all orbital columns
             weight_cols = [col for col in df.columns if col not in ("kpath", "energy")]
         else:
-            raise ValueError(
-                f"No columns match element={element}, atom_index={atom_index}"
-            )
+            raise ValueError(f"No columns match element={element}, atom_index={atom_index}")
 
     return df[weight_cols].sum(axis=1).values
 
@@ -131,32 +125,54 @@ def compute_spectral_function(
     """
     Compute the spectral function A(k, E) from OpenMX unfolding data.
 
+    The spectral function is computed by summing orbital weights over selected atoms/orbitals,
+    and broadening each (k, E) point with a 2D Lorentzian kernel. The momentum broadening
+    width is derived from a real-space coherence length, and the energy broadening width
+    is set to match the half-width at half-maximum (HWHM) of -∂f/∂E at a given temperature,
+    though a Lorentzian lineshape is used for computational efficiency.
+
     Parameters
     ----------
     df : pd.DataFrame
-        Output from `read_unfold_orbup()`, containing 'kpath', 'energy', and orbital weights.
+        Output from `read_unfold_orbup()`, containing columns 'kpath', 'energy',
+        and orbital weight columns (e.g., 'C1_s', 'O2_px').
     element : str, optional
-        Element symbol (e.g., 'C') to project onto.
+        Element symbol (e.g., 'C') to project onto. If specified, only orbitals
+        belonging to this element are included.
     atom_index : int, optional
-        Specific atom index as labeled in the column header (typically 0-based in OpenMX).
+        Specific atom index as labeled in the OpenMX output column headers (typically 1-based,
+        e.g., the '1' in 'C1_s'). If specified, only orbitals from this atom are included.
         If both `element` and `atom_index` are None, all orbitals are summed.
-    nk, ne : int
-        Number of grid points along k-path and energy axes.
-        The range is automatically set to [min, max] of df['kpath'] and df['energy'].
-    delta_k_input_nm : float
-        Real-space coherence length L (nm). Momentum HWHM: δk = 2π / (L in Å).
-    delta_e_input_k : float
-        Temperature (K) for thermal broadening. Must satisfy 0.1 <= T <= 300.
-        Energy HWHM is derived from the half-width of -∂f/∂E at this temperature.
-    use_gpu : bool, optional
-        Whether to use GPU acceleration if available (default: False).
+    nk : int, default 512
+        Number of grid points along the k-path axis.
+    ne : int, default 512
+        Number of grid points along the energy axis.
+        The k and energy ranges are automatically set to the [min, max] of
+        `df['kpath']` and `df['energy']`, respectively.
+    delta_k_input_nm : float, default 100
+        Real-space coherence length L in nanometers (nm). The momentum HWHM is
+        computed as δk = 2π / (L in Å), where L(Å) = 10 × L(nm).
+    delta_e_input_k : float, default 100
+        Temperature in Kelvin (K) used to determine energy broadening.
+        Must satisfy 0.1 <= T <= 300. The energy HWHM is set to
+        x₀ × k_B × T, where x₀ = ln(3 + 2√2) ≈ 1.7627, matching the HWHM of -∂f/∂E.
+        A Lorentzian kernel is used with this HWHM.
+    use_gpu : bool, default True
+        Whether to use GPU acceleration if CuPy is available.
 
     Returns
     -------
-    k, e : np.ndarray
-        Meshgrid arrays of shape (ne, nk).
+    k : np.ndarray
+        k-path meshgrid array of shape (nk, ne).
+    e : np.ndarray
+        Energy meshgrid array of shape (nk, ne).
     a : np.ndarray
-        Spectral function A(k, E) of shape (ne, nk).
+        Spectral function A(k, E) of shape (nk, ne).
+
+    Raises
+    ------
+    ValueError
+        If `delta_e_input_k` is not in the range [0.1, 300] K.
     """
     # --- Validate temperature ---
     if not (0.1 <= delta_e_input_k <= 300.0):
@@ -201,9 +217,7 @@ def compute_spectral_function(
             e0 = energy_gpu[i]
             w = w_array_gpu[i]
             # This operation is vectorized over the entire (ne, nk) grid
-            a_gpu += w * lorentzian_2d(
-                k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev
-            )
+            a_gpu += w * lorentzian_2d(k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev)
 
         k, e, a = cp.asnumpy(k_grid), cp.asnumpy(e_grid), cp.asnumpy(a_gpu)
 
@@ -216,9 +230,7 @@ def compute_spectral_function(
             k0 = df["kpath"].iloc[i]
             e0 = df["energy"].iloc[i]
             w = w_array[i]
-            a += w * lorentzian_2d(
-                k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev
-            )
+            a += w * lorentzian_2d(k_grid, e_grid, k0, e0, delta_k_angstrom_inv, delta_e_ev)
 
     return k, e, a
 

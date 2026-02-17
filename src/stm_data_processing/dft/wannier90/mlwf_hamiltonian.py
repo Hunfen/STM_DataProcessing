@@ -1,6 +1,5 @@
-import os
 import re
-from typing import Union
+from pathlib import Path
 
 import numpy as np
 
@@ -10,7 +9,7 @@ try:
 
     CUPY_AVAILABLE = True
     print("CuPy is available. GPU acceleration enabled.")
-    ArrayType = Union[np.ndarray, cp.ndarray]
+    ArrayType = np.ndarray | cp.ndarray
 except ImportError:
     CUPY_AVAILABLE = False
     cp = None
@@ -92,21 +91,21 @@ class MLWFHamiltonian:
             If the required files do not exist.
         """
         # Construct file paths
-        hr_file = os.path.join(folder, f"{seedname}_hr.dat")
+        hr_file = Path(folder) / f"{seedname}_hr.dat"
 
         # Check if hr.dat file exists
-        if not os.path.exists(hr_file):
+        if not hr_file.exists():
             raise FileNotFoundError(f"hr.dat file not found: {hr_file}")
 
         # Try to find wlog_file (wout or out file)
-        wout_file = os.path.join(folder, f"{seedname}.wout")
-        out_file = os.path.join(folder, f"{seedname}.out")
+        wout_file = Path(folder) / f"{seedname}.wout"
+        out_file = Path(folder) / f"{seedname}.out"
 
         wlog_file = None
-        if os.path.exists(wout_file):
+        if wout_file.exists():
             wlog_file = wout_file
             print(f"  Found wout file: {wout_file}")
-        elif os.path.exists(out_file):
+        elif out_file.exists():
             wlog_file = out_file
             print(f"  Found out file: {out_file}")
         else:
@@ -143,7 +142,7 @@ class MLWFHamiltonian:
             If file format is invalid or inconsistent.
         """
         try:
-            with open(filename) as f:
+            with Path(filename).open() as f:
                 # Check first line for timestamp header (new format)
                 first_line = f.readline()
                 first_stripped = first_line.strip().lower()
@@ -218,10 +217,11 @@ class MLWFHamiltonian:
             # If folder and seedname are not set, try to infer them from filename
             if self.folder is None or self.seedname is None:
                 # Try to extract seedname from filename (e.g., "system_hr.dat" -> "system")
-                basename = os.path.basename(filename)
+                basename = Path(filename).name
                 if basename.endswith("_hr.dat"):
-                    inferred_seedname = basename[:-7]  # Remove "_hr.dat"
-                    inferred_folder = os.path.dirname(filename)
+                    # Remove "_hr.dat"
+                    inferred_seedname = basename[:-7]
+                    inferred_folder = str(Path(filename).parent)
                     print(f"  Inferred seedname: {inferred_seedname}")
                     print(f"  Inferred folder: {inferred_folder}")
 
@@ -389,7 +389,7 @@ class MLWFHamiltonian:
         current_spreads = []
 
         # First pass: get the number of Wannier functions
-        with open(filename, encoding="utf-8", errors="ignore") as f:
+        with Path(filename).open(encoding="utf-8", errors="ignore") as f:
             for line in f:
                 if "Number of Wannier Functions" in line:
                     match = re.search(r":\s*(\d+)", line)
@@ -398,7 +398,7 @@ class MLWFHamiltonian:
                         break
 
         # Second pass: parse all data in a single file read
-        with open(filename, encoding="utf-8", errors="ignore") as f:
+        with Path(filename).open(encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line = line.strip()
 
@@ -596,10 +596,10 @@ class MLWFHamiltonian:
         b1 = b2 = b3 = None
 
         # Determine file type based on extension
-        file_ext = os.path.splitext(filename)[1].lower()
+        file_ext = Path(filename).suffix.lower()
 
         try:
-            with open(filename, encoding="utf-8", errors="ignore") as f:
+            with Path(filename).open(encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
 
                 for i, line in enumerate(lines):

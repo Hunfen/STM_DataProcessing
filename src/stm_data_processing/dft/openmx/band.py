@@ -1,6 +1,7 @@
 import contextlib
+from pathlib import Path
+
 import numpy as np
-import os
 
 
 def parse_dft_band_data(
@@ -47,7 +48,7 @@ def parse_dft_band_data(
     # Determine the band file path
     if fname_band is None:
         if folder is not None and systemname is not None:
-            fname_band = os.path.join(folder, f"{systemname}.Band")
+            fname_band = Path(folder) / f"{systemname}.Band"
             print(f"Using auto-detected band file: {fname_band}")
         else:
             raise ValueError(
@@ -59,7 +60,7 @@ def parse_dft_band_data(
 
     # Read raw lines from .Band file
     try:
-        with open(fname_band, encoding="ISO-8859-1") as f:
+        with Path(fname_band).open(encoding="ISO-8859-1") as f:
             raw = [line.strip() for line in f if line.strip()]
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Band file not found: {fname_band}") from e
@@ -245,6 +246,4 @@ def openmx_band_analysis(
         # Use folder and systemname
         return parse_dft_band_data(folder=folder, systemname=systemname)
     else:
-        raise ValueError(
-            "Either provide band_file, or provide both folder and systemname."
-        )
+        raise ValueError("Either provide band_file, or provide both folder and systemname.")
