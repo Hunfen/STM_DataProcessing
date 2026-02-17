@@ -35,6 +35,7 @@ htmlcov/
 .project
 .pydevproject
 .settings/
+.ruff_cache/
 
 # Jupyter
 .ipynb_checkpoints/
