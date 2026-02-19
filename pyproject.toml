@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gpu = ["cupy-cuda12x>=14.0.0"]
+gpu = ["cupy-cuda13x>=14.0.0",]
 dev = [
     "ruff>=0.15.1",
     "ipykernel>=7.2.0",

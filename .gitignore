@@ -48,3 +48,7 @@ docs/api/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Cuda
+cuda-keyring_1.1-1_all.deb
+cuda-keyring_1.1-1_all.deb.1
