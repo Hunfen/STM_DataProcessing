@@ -3,7 +3,6 @@ from pathlib import Path
 
 import numpy as np
 
-# Try to import cupy for GPU support
 try:
     import cupy as cp
 

@@ -561,7 +561,7 @@ def wannier90_contourmap(
     nk: int = 256,
     kmin: float = -1,
     kmax: float = 1,
-    use_gpu: bool = True,
+    use_gpu: bool | None = None,
     save_to_file: str | None = None,
 ) -> dict[str, np.ndarray]:
     """
@@ -607,6 +607,14 @@ def wannier90_contourmap(
     Either provide hr_file (deprecated) or folder+seedname.
     If folder and seedname are provided, they take precedence over hr_file.
     """
+    # Auto-detect GPU availability if not specified
+    if use_gpu is None:
+        use_gpu = CUPY_AVAILABLE
+        if use_gpu:
+            print("GPU detected: using CUDA acceleration.")
+        else:
+            print("CuPy not available: falling back to CPU.")
+
     # Determine which initialization method to use
     if folder is not None and seedname is not None:
         # New method using folder and seedname
