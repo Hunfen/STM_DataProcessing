@@ -246,4 +246,6 @@ def openmx_band_analysis(
         # Use folder and systemname
         return parse_dft_band_data(folder=folder, systemname=systemname)
     else:
-        raise ValueError("Either provide band_file, or provide both folder and systemname.")
+        raise ValueError(
+            "Either provide band_file, or provide both folder and systemname."
+        )

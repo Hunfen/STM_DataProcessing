@@ -257,7 +257,11 @@ class NanonisFileLoader:
         #     channels = self._header["DATA_INFO"]["Name"].tolist()
         # else:
         #     channels = []
-        channels = self._header["DATA_INFO"]["Name"].tolist() if "DATA_INFO" in self._header else []
+        channels = (
+            self._header["DATA_INFO"]["Name"].tolist()
+            if "DATA_INFO" in self._header
+            else []
+        )
 
         dir_flag = self._header.get("SCAN_DIR") == "up"
 
@@ -306,7 +310,12 @@ class NanonisFileLoader:
             for line in f:
                 decoded_line = line.decode("utf-8", errors="replace")
                 if "[DATA]" in decoded_line:  # End of header
-                    columns = next(f).decode("utf-8", errors="replace").strip("\r\n").split("\t")
+                    columns = (
+                        next(f)
+                        .decode("utf-8", errors="replace")
+                        .strip("\r\n")
+                        .split("\t")
+                    )
                     break
                 if decoded_line.endswith("\t\r\n"):
                     # Update key and value when encounter '\t\r\n'
@@ -374,7 +383,11 @@ class NanonisFileLoader:
                     #     check_key = key[len("Ext. VI 1>") :]
                     # else:
                     #     check_key = key
-                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+                    check_key = (
+                        key[len("Ext. VI 1>") :]
+                        if key.startswith("Ext. VI 1>")
+                        else key
+                    )
 
                     if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
@@ -386,7 +399,11 @@ class NanonisFileLoader:
                     #     check_key = key[len("Ext. VI 1>") :]
                     # else:
                     #     check_key = key
-                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+                    check_key = (
+                        key[len("Ext. VI 1>") :]
+                        if key.startswith("Ext. VI 1>")
+                        else key
+                    )
 
                     if module == check_key.split(">")[0]:
                         header[module].update(
@@ -399,7 +416,10 @@ class NanonisFileLoader:
                     {
                         "MultiLine Settings": pd.DataFrame(
                             np.array(
-                                [list(map(float, row.split(","))) for row in value.split(";")],
+                                [
+                                    list(map(float, row.split(",")))
+                                    for row in value.split(";")
+                                ],
                             ),
                             columns=key.split(":")[-1].split(","),
                         ),
@@ -491,7 +511,11 @@ class NanonisFileLoader:
                     #     check_key = key[len("Ext. VI 1>") :]
                     # else:
                     #     check_key = key
-                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+                    check_key = (
+                        key[len("Ext. VI 1>") :]
+                        if key.startswith("Ext. VI 1>")
+                        else key
+                    )
 
                     if module == check_key.split(">")[0]:
                         header.update({module: value.strip("\r\n")})
@@ -503,7 +527,11 @@ class NanonisFileLoader:
                     #     check_key = key[len("Ext. VI 1>") :]
                     # else:
                     #     check_key = key
-                    check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+                    check_key = (
+                        key[len("Ext. VI 1>") :]
+                        if key.startswith("Ext. VI 1>")
+                        else key
+                    )
 
                     if module == check_key.split(">")[0]:
                         header[module].update(
@@ -517,7 +545,10 @@ class NanonisFileLoader:
                         {
                             "MultiLine Settings": pd.DataFrame(
                                 np.array(
-                                    [list(map(float, row.split(","))) for row in value.split(";")],
+                                    [
+                                        list(map(float, row.split(",")))
+                                        for row in value.split(";")
+                                    ],
                                 ),
                                 columns=key.split(":")[-1].split(","),
                             ),
@@ -546,13 +577,19 @@ class NanonisFileLoader:
         #     grid_dim = self._parse_grid_dim(self._header["Grid dim"])
         # else:
         #     grid_dim = (0, 0)
-        grid_dim = self._parse_grid_dim(self._header["Grid dim"]) if "Grid dim" in self._header else (0, 0)
+        grid_dim = (
+            self._parse_grid_dim(self._header["Grid dim"])
+            if "Grid dim" in self._header
+            else (0, 0)
+        )
 
         # if "Channels" in self._header:
         #     channels = self._header["Channels"].split(";")
         # else:
         #     channels = []
-        channels = self._header["Channels"].split(";") if "Channels" in self._header else []
+        channels = (
+            self._header["Channels"].split(";") if "Channels" in self._header else []
+        )
 
         total_pixels = grid_dim[0] * grid_dim[1]
         total_pts = block_size * total_pixels
@@ -639,7 +676,9 @@ class NanonisFileLoader:
     def _process_single_module(self, header: dict, module: str) -> None:
         """Process a module with only one attribute."""
         for key, value in self._raw_header.items():
-            check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            check_key = (
+                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            )
             if check_key.startswith(module):
                 header.update({module: value.strip("\n")})
                 break
@@ -648,7 +687,9 @@ class NanonisFileLoader:
         """Process a module with multiple attributes."""
         header[module] = {}
         for key, value in self._raw_header.items():
-            check_key = key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            check_key = (
+                key[len("Ext. VI 1>") :] if key.startswith("Ext. VI 1>") else key
+            )
             if check_key.startswith(module):
                 header[module].update({key.split(">")[-1]: value.strip("\n")})
 
@@ -721,7 +762,9 @@ class NanonisFileLoader:
         expected_parts = 2
         try:
             parts = grid_str.replace(" ", "").split("x")
-            return tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
+            return (
+                tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
+            )
         except (ValueError, AttributeError):
             return (0, 0)
 
@@ -881,7 +924,10 @@ class NanonisFileLoader:
         if self._raw_header and "DATA_INFO" in self._raw_header:
             try:
                 df = pd.DataFrame(
-                    [row.split("\t") for row in self._raw_header["DATA_INFO"].split("\n")],
+                    [
+                        row.split("\t")
+                        for row in self._raw_header["DATA_INFO"].split("\n")
+                    ],
                 )
                 df.columns = df.iloc[0]
                 return df[1:]["Name"].tolist()

@@ -61,10 +61,10 @@ select = [
     "Q",   # flake8-quotes
     "SIM", # flake8-simplify
     "PTH", # flake8-use-pathlib
-    "RUF", # Ruff 特定规则
+    "RUF", # Ruff
 ]
 ignore = [
-    "E501", "B008", "C901", "F841", "RUF002",
+    "E501", "B008", "C901", "F841", "RUF002", "RUF003",
 ]
 per-file-ignores = {"__init__.py" = ["F401"]}
 
