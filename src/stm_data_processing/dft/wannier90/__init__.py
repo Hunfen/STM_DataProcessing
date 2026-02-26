@@ -1,3 +1,3 @@
-from . import contourmap, mlwf_hamiltonian
+from . import mlwf_ek2d, mlwf_hamiltonian, susceptibility
 
-__all__ = ["contourmap", "mlwf_hamiltonian"]
+__all__ = ["mlwf_ek2d", "mlwf_hamiltonian", "susceptibility"]

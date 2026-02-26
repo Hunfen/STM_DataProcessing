@@ -1,7 +1,8 @@
-import re
 from pathlib import Path
 
 import numpy as np
+
+from stm_data_processing.utils.reciprocal_space import BVecs
 
 try:
     import cupy as cp
@@ -69,6 +70,7 @@ class MLWFHamiltonian:
         self.h_list_gpu = None
         self.ndegen_gpu = None
 
+        self.bvecs = None
         # Load files if both folder and seedname are provided
         if folder is not None and seedname is not None:
             self.load_from_seedname(folder, seedname)
@@ -96,28 +98,30 @@ class MLWFHamiltonian:
         if not hr_file.exists():
             raise FileNotFoundError(f"hr.dat file not found: {hr_file}")
 
-        # Try to find wlog_file (wout or out file)
+        # Try to find std_file (wout or out file)
         wout_file = Path(folder) / f"{seedname}.wout"
         out_file = Path(folder) / f"{seedname}.out"
 
-        wlog_file = None
+        std_file = None
+        bvecs_obj = None
         if wout_file.exists():
-            wlog_file = wout_file
+            std_file = wout_file
             print(f"  Found wout file: {wout_file}")
+            bvecs_obj = BVecs(std_file)
+
         elif out_file.exists():
-            wlog_file = out_file
+            std_file = out_file
             print(f"  Found out file: {out_file}")
+            bvecs_obj = BVecs(std_file)
+
         else:
             print(
                 f"Warning: Neither {seedname}.wout nor {seedname}.out found in {folder}"
             )
-            print(
-                "  You may need to provide wlog_file parameter separately for calculate_contourmap()"
-            )
-
+        self.bvecs = bvecs_obj.bvecs if bvecs_obj is not None else None
         self.folder = folder
         self.seedname = seedname
-        self.wlog_file = wlog_file
+        self.std_file = std_file
 
         # Load hr.dat file
         self.load_hr_file(hr_file)
@@ -125,8 +129,8 @@ class MLWFHamiltonian:
         print(f"  Wannier90 seedname: {seedname}")
         print(f"  Folder: {folder}")
         print(f"  hr.dat file: {hr_file}")
-        if wlog_file:
-            print(f"  wlog_file (auto-detected): {wlog_file}")
+        if std_file:
+            print(f"  std_file (auto-detected): {std_file}")
 
     def load_hr_file(self, filename: str) -> None:
         """
@@ -349,380 +353,6 @@ class MLWFHamiltonian:
 
         # Convert back to numpy array
         return cp.asnumpy(hk_matrix_gpu)
-
-    def load_wout_file(self, filename: str) -> dict:
-        """
-        Load and parse data from Wannier90 .wout file.
-
-        Parameters
-        ----------
-        filename : str
-            Path to Wannier90 .wout file
-
-        Returns
-        -------
-        dict
-            Dictionary containing parsed data:
-            - 'disentangle_data': (3, num_iter) array with [iteration, time, delta]
-            - 'wannierise_spreads': (num_cycle, num_wann, 1) array with spreads
-            - 'wannierise_od': (num_cycle, 1) array with O_D values
-            - 'disentangle_tar': float, convergence tolerance for disentanglement
-            - 'wannierise_tar': float, convergence tolerance for wannierisation
-        """
-        data_iter = []
-        data_delta = []
-        data_time = []
-
-        # Wannierise data containers
-        num_wann = 0
-        spreads_data = []  # Each element is a list of spreads for one cycle
-        od_data = []  # O_D value for each cycle
-        current_cycle = -1  # -1 represents Initial State, 0+ represents cycles
-
-        # Convergence tolerance values
-        disentangle_tar = None
-        wannierise_tar = None
-
-        # Flags for parsing state
-        in_dis_section = False
-        in_dis_header = False  # Flag for DISENTANGLE header section
-        in_wannierise_header = False  # Flag for WANNIERISE header section
-        header_found = False
-        found_first_wannierise = False
-        in_wannierise_section = False
-        reading_spreads = False
-        current_spreads = []
-
-        # First pass: get the number of Wannier functions
-        with Path(filename).open(encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                if "Number of Wannier Functions" in line:
-                    match = re.search(r":\s*(\d+)", line)
-                    if match:
-                        num_wann = int(match.group(1))
-                        break
-
-        # Second pass: parse all data in a single file read
-        with Path(filename).open(encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-
-                # Check for DISENTANGLE header section
-                if (
-                    "*------------------------------- DISENTANGLE --------------------------------*"
-                    in line
-                ):
-                    in_dis_header = True
-                elif in_dis_header:
-                    if (
-                        "*----------------------------------------------------------------------------*"
-                        in line
-                    ):
-                        in_dis_header = False
-                    elif "Convergence tolerence" in line:
-                        # Extract tolerance value from line like:
-                        # "|  Convergence tolerence                     :         1.000E-08             |"
-                        match = re.search(r":\s*([\d.E+-]+)", line)
-                        if match:
-                            try:
-                                disentangle_tar = float(match.group(1))
-                            except ValueError:
-                                disentangle_tar = None
-
-                # Check for WANNIERISE header section
-                if (
-                    "*------------------------------- WANNIERISE ---------------------------------*"
-                    in line
-                ):
-                    in_wannierise_header = True
-                elif in_wannierise_header:
-                    if (
-                        "*----------------------------------------------------------------------------*"
-                        in line
-                    ):
-                        in_wannierise_header = False
-                    elif "Convergence tolerence" in line:
-                        # Extract tolerance value from line like:
-                        # "|  Convergence tolerence                     :         0.200E-09             |"
-                        match = re.search(r":\s*([\d.E+-]+)", line)
-                        if match:
-                            try:
-                                wannierise_tar = float(match.group(1))
-                            except ValueError:
-                                wannierise_tar = None
-
-                # Disentangle section parsing (existing code)
-                if not in_dis_section:
-                    # Look for "Extraction of optimally-connected subspace" as start marker
-                    if "Extraction of optimally-connected subspace" in line:
-                        in_dis_section = True
-                elif in_dis_section:
-                    # Stop extraction when "Final Omega_I" is encountered
-                    if "Final Omega_I" in line:
-                        in_dis_section = False
-
-                    # Skip header row
-                    if (
-                        not header_found
-                        and line.startswith("|")
-                        and "Iter" in line
-                        and "Time" in line
-                    ):
-                        header_found = True
-
-                    if (
-                        line.startswith("+---")
-                        or line.startswith("+---")
-                        or line.startswith("+---")
-                    ):
-                        continue
-
-                    # Continue reading if convergence marker is found until Final Omega_I
-                    if line.startswith("<<"):
-                        continue
-
-                    # Parse data rows
-                    # Example format: "      1     413.16891841     405.30583437       1.940E-02      0.00    <-- DIS"
-                    match = re.match(
-                        r"^\s*(\d+)\s+[\d.E+-]+\s+[\d.E+-]+\s+([\d.E+-]+)\s+([\d.E+-]+)",
-                        line,
-                    )
-                    if match:
-                        iter_num = int(match.group(1))
-                        delta = float(match.group(2))
-                        time = float(match.group(3))
-                        data_iter.append(iter_num)
-                        data_delta.append(delta)
-                        data_time.append(time)
-
-                # Wannierise section parsing (existing code)
-                # Look for WANNIERISE section
-                if (
-                    "*------------------------------- WANNIERISE ---------------------------------*"
-                    in line
-                ):
-                    if not found_first_wannierise:
-                        # Found the first WANNIERISE section (parameter section), skip it
-                        found_first_wannierise = True
-                    else:
-                        # Found the second WANNIERISE section (calculation section), start reading
-                        in_wannierise_section = True
-
-                # Old detection method (kept for compatibility)
-                if "*--- WANNIERISE ---*" in line and not found_first_wannierise:
-                    found_first_wannierise = True
-                elif "*--- WANNIERISE ---*" in line and found_first_wannierise:
-                    in_wannierise_section = True
-
-                if in_wannierise_section:
-                    # Check if WANNIERISE section has ended
-                    if (
-                        "*---" in line and "---*" in line and "WANNIERISE" not in line
-                    ) or "All done" in line:
-                        # Save the last cycle's data (if any)
-                        if current_spreads and len(current_spreads) == num_wann:
-                            spreads_data.append(current_spreads)
-                            current_spreads = []
-                        in_wannierise_section = False
-
-                    # Identify cycle start
-                    if line.startswith("Initial State"):
-                        current_cycle = -1
-                        reading_spreads = True
-                        current_spreads = []
-
-                    # Identify cycle number
-                    if line.startswith("Cycle:"):
-                        # Save previous cycle's data
-                        if current_spreads and len(current_spreads) == num_wann:
-                            spreads_data.append(current_spreads)
-                            current_spreads = []
-
-                        # Extract cycle number
-                        match = re.search(r"Cycle:\s+(\d+)", line)
-                        if match:
-                            current_cycle = int(match.group(1))
-                        reading_spreads = True
-
-                    # Read WF centre and spread lines
-                    if reading_spreads and line.startswith("WF centre and spread"):
-                        # Example: "WF centre and spread    1  (  1.985112,  3.438416,100.291488 )     6.75594284"
-                        match = re.search(
-                            r"WF centre and spread\s+\d+\s+\([^)]+\)\s+([\d.]+)", line
-                        )
-                        if match:
-                            spread = float(match.group(1))
-                            current_spreads.append(spread)
-
-                    # End of spread section when encountering "Sum of centres and spreads"
-                    if "Sum of centres and spreads" in line:
-                        reading_spreads = False
-
-                    # Read O_D value - only read O_D from DLTA lines
-                    if "O_D=" in line and "<-- DLTA" in line:
-                        match = re.search(r"O_D=\s*([\d.E+-]+)", line)
-                        if match:
-                            od = float(match.group(1))
-                            od_data.append(od)
-
-        # Process the last cycle's data for wannierise
-        if current_spreads and len(current_spreads) == num_wann:
-            spreads_data.append(current_spreads)
-
-        # Convert disentangle data using ternary operator
-        dis_data = (
-            np.array([data_iter, data_time, data_delta]) if data_iter else np.array([])
-        )
-
-        # Convert wannierise data
-        if spreads_data and num_wann > 0:
-            # Check if there's an Initial State (cycle=-1)
-            # If so, start from the first actual cycle (remove Initial State)
-            if len(spreads_data) > 1 and current_cycle == -1:
-                spreads_data = spreads_data[1:]  # Remove Initial State
-
-            # Similarly process od_data
-            if len(od_data) > 1:
-                od_data = od_data[1:]  # Remove O_D corresponding to Initial State
-
-            # Convert to numpy arrays
-            spreads_array = np.array(spreads_data).reshape(-1, num_wann, 1)
-            od_array = np.array(od_data).reshape(-1, 1)
-        else:
-            spreads_array = np.array([])
-            od_array = np.array([])
-
-        return {
-            "disentangle_data": dis_data,
-            "wannierise_spreads": spreads_array,
-            "wannierise_od": od_array,
-            "disentangle_tar": disentangle_tar,
-            "wannierise_tar": wannierise_tar,
-        }
-
-    def load_reciprocal_vectors(self, filename: str) -> np.ndarray:
-        """
-        Read reciprocal lattice vectors from Wannier90 .wout file or OpenMX .out file.
-
-        Parameters
-        ----------
-        filename : str
-            Path to Wannier90 .wout file or OpenMX .out file.
-
-        Returns
-        -------
-        bvecs : (3,3) ndarray
-            Reciprocal lattice vectors b1, b2, b3 in 1/Ångström.
-            Returns None if not found.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-        """
-        b1 = b2 = b3 = None
-
-        # Determine file type based on extension
-        file_ext = Path(filename).suffix.lower()
-
-        try:
-            with Path(filename).open(encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
-
-                for i, line in enumerate(lines):
-                    # For .wout files (Wannier90 format)
-                    if file_ext == ".wout":
-                        if (
-                            "Reciprocal-Space Vectors" in line
-                            or "Reciprocal Vectors" in line
-                        ):
-                            # Read next 3 lines for b1, b2, b3
-                            for j in range(1, 4):
-                                if i + j < len(lines):
-                                    b_line = lines[i + j]
-                                    if "b_1" in b_line:
-                                        b1 = self._parse_wannier_vector_line(b_line)
-                                    elif "b_2" in b_line:
-                                        b2 = self._parse_wannier_vector_line(b_line)
-                                    elif "b_3" in b_line:
-                                        b3 = self._parse_wannier_vector_line(b_line)
-                            break
-
-                    # For .out files (OpenMX format)
-                    elif file_ext == ".out":
-                        if "Reciprocal vector b1" in line:
-                            b1 = self._parse_openmx_vector_line(line)
-                        elif "Reciprocal vector b2" in line:
-                            b2 = self._parse_openmx_vector_line(line)
-                        elif "Reciprocal vector b3" in line:
-                            b3 = self._parse_openmx_vector_line(line)
-                            # If we found all three vectors, break
-                            if b1 is not None and b2 is not None and b3 is not None:
-                                break
-
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"File not found: {filename}") from e
-
-        if b1 is None or b2 is None or b3 is None:
-            return None
-
-        return np.vstack([b1, b2, b3])
-
-    @staticmethod
-    def _parse_wannier_vector_line(line: str) -> np.ndarray:
-        """Helper to extract a vector from a Wannier90 line like:
-        'b_1     1.474634   0.851380   0.000000'
-        """
-        vals = line.split()
-        return np.array(list(map(float, vals[1:4])))
-
-    @staticmethod
-    def _parse_openmx_vector_line(line: str) -> np.ndarray:
-        """Helper to extract a vector from an OpenMX line like:
-        '#  Reciprocal vector b1 (1/Ang):   2.55414  1.47463  0.00000'
-        """
-        right = line.split(":", 1)[1]
-        vals = right.split()
-        return np.array(list(map(float, vals[:3])))
-
-    def _extract_disentangle_data(self, filename):
-        """
-        Extract Iter, Delta(frac.), Time data from the DISENTANGLE section in seedname.wout.
-
-        Parameters
-        ----------
-        filename : str
-            Path to the Wannier90 output file (.wout)
-
-        Returns
-        -------
-        numpy.ndarray
-            A (3, num_iter) numpy array containing iteration, time, and delta values,
-            or an empty array if no data is found.
-        """
-        # This method is kept for backward compatibility but delegates to load_wout_file
-        result = self.load_wout_file(filename)
-        return result["disentangle_data"]
-
-    def _extract_wannierise_data(self, filename):
-        """
-        Extract data from the WANNIERISE section in seedname.wout.
-
-        Parameters
-        ----------
-        filename : str
-            Path to the Wannier90 output file (.wout)
-
-        Returns
-        -------
-        tuple
-            - spreads_array: numpy array of shape (num_cycle, num_wann, 1) containing
-              spread of each Wannier function in each cycle
-            - od_array: numpy array of shape (num_cycle, 1) containing O_D values for each cycle
-        """
-        # This method is kept for backward compatibility but delegates to load_wout_file
-        result = self.load_wout_file(filename)
-        return result["wannierise_spreads"], result["wannierise_od"]
 
     def set_use_gpu(self, use_gpu: bool) -> None:
         """
