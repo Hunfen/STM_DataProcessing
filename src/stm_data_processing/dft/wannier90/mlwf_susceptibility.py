@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import h5py
@@ -234,65 +235,33 @@ class SusceptibilityCalculator:
         q1_grid: np.ndarray,
         q2_grid: np.ndarray,
         matrix_element: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute the static Lindhard susceptibility chi0(q) on an aligned q-grid using CUDA.
+    ) -> np.ndarray:
+        """Compute chi0(q) on GPU with reduced memory usage and optional matrix element support.
 
-        GPU-accelerated version using CuPy for better performance.
-        Uses cp.roll() similar to the CPU version for consistent behavior.
-
-        Parameters
-        ----------
-        energies : np.ndarray
-            Band energies E_n(k) on a uniform fractional k-grid in [-0.5, 0.5).
-            Shape: (nband, nk, nk).
-        f_k : np.ndarray
-            Fermi-Dirac occupation numbers f_n(k) = f(E_n(k)).
-            Shape: (nband, nk, nk).
-        w_k : np.ndarray
-            Energy window factors W_n(k) = W(|E_n(k)-mu|).
-            Shape: (nband, nk, nk).
-        q1_grid : np.ndarray
-            Precomputed aligned q-grid in fractional coordinates, wrapped to [-0.5, 0.5).
-            Shape: (nk, nk).
-        q2_grid : np.ndarray
-            Precomputed aligned q-grid in fractional coordinates, wrapped to [-0.5, 0.5).
-            Shape: (nk, nk).
-        matrix_element : np.ndarray | None, optional
-            Optional momentum matrix elements M_{mn}(k). If provided, they modulate the susceptibility.
-            Shape: (nband, nband, nk, nk).
-
-        Returns
-        -------
-        tuple[np.ndarray, np.ndarray, np.ndarray]
-            q1_grid, q2_grid : Same as input.
-            chi0 : Static susceptibility chi0(q) computed on GPU.
-                Shape: (nk, nk), dtype: complex128.
+        Uses band-chunking to avoid O(nband^2 * nk^2) memory blowup.
         """
-        _, nk1, nk2 = energies.shape
-
-        print(
-            f"Input shape: energies={energies.shape}, f_k={f_k.shape}, w_k={w_k.shape}"
-        )
-        if matrix_element is not None:
-            print(f"Matrix element shape: {matrix_element.shape}")
-        print(f"Grid size: {nk1} x {nk2}")
-        print(f"Broadening parameter eta: {self.eta}")
-
-        # Validate input data
+        nband, nk1, nk2 = energies.shape
         if nk1 != nk2:
             raise ValueError(f"Expected square k-grid, got ({nk1}, {nk2})")
-
-        if f_k.shape != energies.shape:
+        if f_k.shape != energies.shape or w_k.shape != energies.shape:
+            raise ValueError("Shape mismatch in input arrays.")
+        if matrix_element is not None and matrix_element.shape != (
+            nband,
+            nband,
+            nk1,
+            nk2,
+        ):
             raise ValueError(
-                f"f_k shape {f_k.shape} must match energies shape {energies.shape}"
-            )
-        if w_k.shape != energies.shape:
-            raise ValueError(
-                f"w_k shape {w_k.shape} must match energies shape {energies.shape}"
+                f"matrix_element shape {matrix_element.shape} must be (nband, nband, nk1, nk2)"
             )
 
-        # Transfer data to GPU
-        print("Transferring data to GPU...")
+        print(
+            f"🚀 Starting GPU calculation: nband={nband}, grid={nk1}x{nk2}, eta={self.eta:.3f}, "
+            f"matrix_element={'enabled' if matrix_element is not None else 'disabled'}"
+        )
+        start_time = time.time()
+
+        # Transfer to GPU
         energies_gpu = cp.asarray(energies)
         f_k_gpu = cp.asarray(f_k)
         w_k_gpu = cp.asarray(w_k)
@@ -304,63 +273,75 @@ class SusceptibilityCalculator:
 
         chi0_gpu = cp.zeros((nk1, nk2), dtype=cp.complex128)
 
-        q_chunk_size = min(4, nk1)
-        print(f"Using q-chunk size: {q_chunk_size}")
+        # Chunk size for (m, n) bands — tune based on GPU memory
+        band_chunk_size = min(8, nband)  # e.g., 8 → max 64 band pairs per chunk
 
-        total_q_chunks = (nk1 // q_chunk_size + (1 if nk1 % q_chunk_size else 0)) * (
-            nk2 // q_chunk_size + (1 if nk2 % q_chunk_size else 0)
-        )
-        current_chunk = 0
+        total_q = nk1 * nk2
+        processed_q = 0
 
-        for iq1_start in range(0, nk1, q_chunk_size):
-            iq1_end = min(iq1_start + q_chunk_size, nk1)
+        for iq1 in range(nk1):
+            for iq2 in range(nk2):
+                processed_q += 1
+                if processed_q % max(1, total_q // 10) == 0:
+                    elapsed = time.time() - start_time
+                    est_total = elapsed / processed_q * total_q
+                    print(
+                        f"📦 Processed {processed_q}/{total_q} q-points "
+                        f"(elapsed: {elapsed:.1f}s, est. remaining: {est_total - elapsed:.1f}s)"
+                    )
 
-            for iq2_start in range(0, nk2, q_chunk_size):
-                iq2_end = min(iq2_start + q_chunk_size, nk2)
+                # Shifted quantities at k+q
+                e_kq = cp.roll(energies_gpu, shift=(-iq1, -iq2), axis=(1, 2))
+                f_kq = cp.roll(f_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
+                w_kq = cp.roll(w_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
 
-                current_chunk += 1
-                print(
-                    f"Processing q-chunk {current_chunk}/{total_q_chunks}: "
-                    f"iq1={iq1_start}:{iq1_end}, iq2={iq2_start}:{iq2_end}"
-                )
+                chi0_q_val = cp.array(0.0 + 0.0j, dtype=cp.complex128)
 
-                for iq1 in range(iq1_start, iq1_end):
-                    for iq2 in range(iq2_start, iq2_end):
-                        e_kq = cp.roll(energies_gpu, shift=(-iq1, -iq2), axis=(1, 2))
-                        f_kq = cp.roll(f_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
-                        w_kq = cp.roll(w_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
+                # Process (m, n) in chunks
+                for m_start in range(0, nband, band_chunk_size):
+                    m_end = min(m_start + band_chunk_size, nband)
+                    for n_start in range(0, nband, band_chunk_size):
+                        n_end = min(n_start + band_chunk_size, nband)
 
-                        denom = (e_kq[None, ...] - energies_gpu[:, None, ...]) + (
-                            1j * self.eta
-                        )
-                        numer = f_k_gpu[:, None, ...] - f_kq[None, ...]
-                        win = w_k_gpu[:, None, ...] * w_kq[None, ...]
+                        # Extract slices
+                        e_n = energies_gpu[n_start:n_end, :, :]  # (nb2, nk1, nk2)
+                        f_n = f_k_gpu[n_start:n_end, :, :]
+                        w_n = w_k_gpu[n_start:n_end, :, :]
 
-                        if matrix_element_gpu is None:
-                            chi0_gpu[iq1, iq2] = cp.sum(win * numer / denom)
+                        e_mq = e_kq[m_start:m_end, :, :]  # (nb1, nk1, nk2)
+                        f_mq = f_kq[m_start:m_end, :, :]
+                        w_mq = w_kq[m_start:m_end, :, :]
+
+                        # Broadcast to (nb1, nb2, nk1, nk2)
+                        denom = (
+                            e_n[None, :, :, :] - e_mq[:, None, :, :]
+                        ) + 1j * self.eta
+                        numer = f_n[None, :, :, :] - f_mq[:, None, :, :]
+                        win = w_n[None, :, :, :] * w_mq[:, None, :, :]
+
+                        if matrix_element_gpu is not None:
+                            M_mn = matrix_element_gpu[
+                                m_start:m_end, n_start:n_end, :, :
+                            ]  # (nb1, nb2, nk1, nk2)
+                            term = M_mn * win * numer / denom
                         else:
-                            chi0_gpu[iq1, iq2] = cp.sum(
-                                matrix_element_gpu * win * numer / denom
-                            )
+                            term = win * numer / denom
 
-                mem_pool = cp.get_default_memory_pool()
-                mem_pool.free_all_blocks()
+                        # Sum over all bands and k-points
+                        chi0_q_val += cp.sum(term)
 
-        print("Transferring result back to CPU...")
+                chi0_gpu[iq1, iq2] = chi0_q_val
+
+                # Optional: free memory periodically (helps on small GPUs)
+                if iq1 % 4 == 0 and iq2 == 0:
+                    cp.get_default_memory_pool().free_all_blocks()
+
+        print("💾 Transferring result from GPU...")
         chi0 = cp.asnumpy(chi0_gpu)
-
-        print(f"Computation completed. Result shape: {chi0.shape}")
-        print(f"Result min: {np.min(chi0.real):.6f}, max: {np.max(chi0.real):.6f}")
-        print(
-            f"Result imaginary part min: {np.min(chi0.imag):.6f}, max: {np.max(chi0.imag):.6f}"
-        )
-
-        del energies_gpu, f_k_gpu, w_k_gpu, chi0_gpu
-        if matrix_element_gpu is not None:
-            del matrix_element_gpu
-        cp.get_default_memory_pool().free_all_blocks()
-        print("GPU memory cleaned up")
         chi0 = np.fft.fftshift(chi0, axes=(0, 1))
+
+        total_time = time.time() - start_time
+        print(f"✅ GPU computation completed in {total_time:.2f} seconds.")
         return chi0
 
     def calculate_chi0(

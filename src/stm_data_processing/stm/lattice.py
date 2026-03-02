@@ -424,6 +424,73 @@ class LATTICE2D:
             outs.append(mn)
         return tuple(outs) if len(outs) > 1 else pts
 
+    def get_bragg_points_in_circle(self, q_max: float, include_origin: bool = True):
+        """
+        Generate all Bragg points within a circle of radius q_max in reciprocal space.
+
+        This method enumerates integer combinations (h, k) of the primitive reciprocal
+        lattice vectors b1 and b2, and returns all points G = h*b1 + k*b2 such that
+        ||G|| <= q_max.
+
+        Parameters
+        ----------
+        q_max : float
+            Maximum magnitude (radius) for Bragg points to include.
+        include_origin : bool, optional
+            Whether to include the origin (Gamma point, h=0, k=0). Default is True.
+
+        Returns
+        -------
+        points : np.ndarray, shape (2, N)
+            Cartesian coordinates (qx, qy) of Bragg points within the circle.
+            Points are ordered by increasing |G|.
+
+        Raises
+        ------
+        ValueError
+            If reciprocal vectors are not initialized or q_max is negative.
+        """
+        if self.bvecs is None:
+            raise ValueError("Reciprocal vectors (bvecs) not initialized")
+
+        if q_max < 0:
+            raise ValueError("q_max must be non-negative")
+
+        b1_xy = np.asarray(self.b1[:2], dtype=float)
+        b2_xy = np.asarray(self.b2[:2], dtype=float)
+
+        norm_b1 = np.linalg.norm(b1_xy)
+        norm_b2 = np.linalg.norm(b2_xy)
+        min_norm = min(norm_b1, norm_b2)
+
+        if min_norm < 1e-12:
+            raise ValueError("Reciprocal lattice vectors have near-zero magnitude")
+
+        # Estimate safe range for h, k indices
+        n_max = int(np.ceil(q_max / min_norm)) + 2
+
+        points = []
+        norms = []
+
+        for h in range(-n_max, n_max + 1):
+            for k in range(-n_max, n_max + 1):
+                if not include_origin and h == 0 and k == 0:
+                    continue
+                g = h * b1_xy + k * b2_xy
+                g_norm = np.linalg.norm(g)
+                if g_norm <= q_max + 1e-12:  # Add small tolerance
+                    points.append(g)
+                    norms.append(g_norm)
+
+        if not points:
+            return np.empty((2, 0), dtype=float)
+
+        # Sort by magnitude for consistent ordering
+        sorted_indices = np.argsort(norms)
+        points_sorted = np.array([points[i] for i in sorted_indices], dtype=float)
+
+        return points_sorted.T  # Shape (2, N)
+
 
 class LatticeOperations:
     """

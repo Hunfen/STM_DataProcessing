@@ -163,6 +163,7 @@ def _calculate_ek2d_cuda(
 
     total_hk_time = 0.0
     total_eig_time = 0.0
+    start_total_time = time.time()
 
     for batch_idx in range(num_batches):
         batch_start_time = time.time()
@@ -234,7 +235,6 @@ def _calculate_ek2d_cuda(
         total_eig_time += eig_time
 
         # Print progress with memory usage information
-        batch_time = time.time() - batch_start_time
         if (batch_idx + 1) % max(
             1, num_batches // 10
         ) == 0 or batch_idx == num_batches - 1:
@@ -242,10 +242,18 @@ def _calculate_ek2d_cuda(
             free_mem, total_mem = cp.cuda.Device().mem_info
             memory_used = (total_mem - free_mem) / 1e9  # Used memory in GB
             memory_total = total_mem / 1e9  # Total memory in GB
+
+            elapsed_total = time.time() - start_total_time
+            batches_per_sec = (
+                (batch_idx + 1) / elapsed_total if elapsed_total > 0 else 0
+            )
+
             print(
                 f"  Progress: {progress:.1f}%, "
                 f"Batch {batch_idx + 1}/{num_batches}, "
-                f"Time: {batch_time:.1f}s (HK: {hk_time:.1f}s, Eig: {eig_time:.1f}s), "
+                f"Elapsed: {elapsed_total:.1f}s, "
+                f"Rate: {batches_per_sec:.1f} batches/s, "
+                f"HK: {hk_time:.1f}s, Eig: {eig_time:.1f}s, "
                 f"GPU memory: {memory_used:.2f}/{memory_total:.2f} GB"
             )
 
