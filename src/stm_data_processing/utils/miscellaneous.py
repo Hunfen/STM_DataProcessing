@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def frac_to_real(
+def frac_to_real_2d(
     grid1: np.ndarray,
     grid2: np.ndarray,
     bvecs: np.ndarray | None,

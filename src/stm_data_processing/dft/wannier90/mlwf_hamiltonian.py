@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from stm_data_processing.utils.lattice_loader import BVecs
+from stm_data_processing.utils.lattice_loader import LatticeLoader
 
 try:
     import cupy as cp
@@ -107,12 +107,12 @@ class MLWFHamiltonian:
         if wout_file.exists():
             std_file = wout_file
             print(f"  Found wout file: {wout_file}")
-            bvecs_obj = BVecs(std_file)
+            bvecs_obj = LatticeLoader(std_file)
 
         elif out_file.exists():
             std_file = out_file
             print(f"  Found out file: {out_file}")
-            bvecs_obj = BVecs(std_file)
+            bvecs_obj = LatticeLoader(std_file)
 
         else:
             print(
