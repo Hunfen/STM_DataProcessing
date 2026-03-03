@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 from scipy.fft import fft2, fftshift, ifft2
 
-from stm_data_processing.utils.reciprocal_space import frac_to_real
+from stm_data_processing.utils.lattice_loader import frac_to_real
 
 try:
     import cupy as cp
@@ -287,11 +287,14 @@ class QPICalculator:
         Returns
         -------
         dict[str, np.ndarray]
-            Dictionary containing:
-            - 'intensity': (nq, nq) or (len(energy_range), nq, nq) QPI intensity map(s).
-            - 'qx_grid', 'qy_grid': Physical q-space grids (None if bvecs not provided).
-            - 'q1_grid', 'q2_grid': Dimensionless q-space grids.
-            - 'bvecs': (3, 3) array of reciprocal lattice vectors in 1/Å, or None.
+            Dictionary containing the cropped/extended QPI result:
+            - 'intensity': (nq, nq) or (len(energy_range), nq, nq) QPI intensity map(s),
+              after optional q-range cropping.
+            - 'q1_grid', 'q2_grid': (nq, nq) dimensionless q-space grids corresponding to `intensity`.
+            - 'qx_grid', 'qy_grid': (nq, nq) physical q-space grids in 1/Å;
+              `None` if `bvecs` was not provided in `ek2d`.
+            - 'bvecs': (2, 2) or (3, 3) reciprocal lattice vectors in 1/Å as provided in `ek2d`,
+              or `None` if not present.
 
         """
         e_k = ek2d["energies"]
@@ -306,19 +309,10 @@ class QPICalculator:
 
         q1_grid, q2_grid = self._k_to_q(ek2d["k1_grid"], ek2d["k2_grid"])
 
-        qpi, q1_grid, q2_grid = self._extend_qpi(
-            qpi, q1_grid, q2_grid, q_range[0], q_range[1]
-        )
-
-        qx_grid, qy_grid = frac_to_real(q1_grid, q2_grid, bvecs)
-
         result = {
             "intensity": qpi,
-            "qx_grid": qx_grid,
-            "qy_grid": qy_grid,
             "q1_grid": q1_grid,
             "q2_grid": q2_grid,
-            "bvecs": bvecs,
         }
 
         if output_path is not None:
@@ -332,6 +326,21 @@ class QPICalculator:
                 bvecs=bvecs,
             )
 
+        if q_range is not None:
+            qpi, q1_grid, q2_grid = self._extend_qpi(
+                qpi, q1_grid, q2_grid, q_range[0], q_range[1]
+            )
+
+        qx_grid, qy_grid = frac_to_real(q1_grid, q2_grid, bvecs)
+
+        result = {
+            "intensity": qpi,
+            "qx_grid": qx_grid,
+            "qy_grid": qy_grid,
+            "q1_grid": q1_grid,
+            "q2_grid": q2_grid,
+            "bvecs": bvecs,
+        }
         return result
 
     @staticmethod
@@ -364,6 +373,13 @@ class QPICalculator:
         shifts = np.arange(n_min, n_max + 1)
         nq_big = nq * len(shifts)
 
+        print(
+            f"Extending QPI from [{qmin:.3f}, {qmax:.3f}) with shifts: {shifts.tolist()}"
+        )
+        print(
+            f"Original grid size: {nq} × {nq} → Extended grid size: {nq_big} × {nq_big}"
+        )
+
         qpi_big = np.zeros((nband, nq_big, nq_big))
         q1_big = np.zeros((nq_big, nq_big))
         q2_big = np.zeros((nq_big, nq_big))
@@ -386,6 +402,11 @@ class QPICalculator:
         q1_ext = q1_big[np.ix_(mask_x, mask_y)]
         q2_ext = q2_big[np.ix_(mask_x, mask_y)]
         qpi_ext = qpi_big[:, mask_x, :][:, :, mask_y]
+
+        nq_final = q1_ext.shape[0]
+        print(
+            f"Cropped to final grid: {nq_final} × {nq_final} over [{qmin:.3f}, {qmax:.3f})"
+        )
 
         # Squeeze back to 2D if input was 2D
         if was_2d:
@@ -493,23 +514,30 @@ class QPICalculator:
         print(f"   - Grid shape: ({nkx}, {nky})")
 
     @staticmethod
-    def load_qpi_from_h5(self, file_path: str) -> dict[str, np.ndarray | dict]:
+    def load_qpi_from_h5(
+        file_path: str,
+        q_range: tuple[float, float] | None = None,
+    ) -> dict[str, np.ndarray | dict]:
         """Load QPI results from an HDF5 file saved by `calculate_qpi`.
 
         Reconstructs a dictionary that closely matches the output of `calculate_qpi`.
+        Optionally applies q-range cropping via `_extend_qpi`.
 
         Parameters
         ----------
         file_path : str
             Path to the .h5 file saved by `calculate_qpi`.
+        q_range : tuple[float, float] or None, optional
+            If provided, crop/extend the loaded QPI to this dimensionless q-range [q_min, q_max]
+            using the same logic as in `calculate_qpi`.
 
         Returns
         -------
         result : dict
             Dictionary with keys:
-            - 'intensity': QPI intensity array.
+            - 'intensity': QPI intensity array (optionally cropped).
             - 'qx_grid', 'qy_grid': Physical q-grids (None if bvecs not saved).
-            - 'q1_grid', 'q2_grid': Dimensionless q-grids.
+            - 'q1_grid', 'q2_grid': Dimensionless q-grids (optionally cropped).
             - 'bvecs': Reciprocal lattice vectors or None.
             All other saved attributes (e.g., energy_range, bands, normalize) are included
             as top-level keys for consistency with `calculate_qpi`'s context.
@@ -531,6 +559,11 @@ class QPICalculator:
 
             # Load optional bvecs
             bvecs = f["bvecs"][:] if "bvecs" in f else None
+            # Apply q-range if requested
+            if q_range is not None:
+                intensity, q1_grid, q2_grid = QPICalculator._extend_qpi(
+                    intensity, q1_grid, q2_grid, q_range[0], q_range[1]
+                )
             qx_grid, qy_grid = frac_to_real(q1_grid, q2_grid, bvecs)
 
             # Build result dict matching calculate_qpi output structure

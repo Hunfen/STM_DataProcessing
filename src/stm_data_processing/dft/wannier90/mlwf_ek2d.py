@@ -4,7 +4,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from stm_data_processing.utils.reciprocal_space import BVecs, frac_to_real
+from stm_data_processing.utils.lattice_loader import LatticeLoader
+from stm_data_processing.utils.miscellaneous import frac_to_real
 
 try:
     import cupy as cp
@@ -362,7 +363,7 @@ def wannier90_ek2d(
         wh = MLWFHamiltonian(use_gpu=use_gpu)
         wh.load_hr_file(hr_file)
         if std_file is not None:
-            bvecs_obj = BVecs(filename=std_file)
+            bvecs_obj = LatticeLoader(filename=std_file)
             bvecs = bvecs_obj.get_bvecs()
         else:
             bvecs = None
@@ -377,7 +378,7 @@ def wannier90_ek2d(
     else:
         print("Using CPU calculation...")
         e, k1_grid, k2_grid = _calculate_ek2d(wh, nk, -0.5, 0.5)
-    bvecs_obj = BVecs(bvecs_array=bvecs)
+    bvecs_obj = LatticeLoader(bvecs_array=bvecs)
     kx, ky = bvecs_obj.frac_to_real(k1_grid, k2_grid)
 
     # Save to HDF5 file if requested
@@ -567,7 +568,7 @@ def load_ek2d(
 
             # Load reciprocal lattice vectors if saved
             bvecs = f["bvecs"][:] if "bvecs" in f else None
-            bvecs_obj = BVecs(bvecs_array=bvecs)
+            bvecs_obj = LatticeLoader(bvecs_array=bvecs)
             kx, ky = bvecs_obj.frac_to_real(k1_grid, k2_grid)
 
             # Validate data shape consistency

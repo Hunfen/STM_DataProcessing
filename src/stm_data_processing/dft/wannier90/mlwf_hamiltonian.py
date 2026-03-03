@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from stm_data_processing.utils.reciprocal_space import BVecs
+from stm_data_processing.utils.lattice_loader import BVecs
 
 try:
     import cupy as cp

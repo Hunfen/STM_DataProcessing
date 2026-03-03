@@ -13,10 +13,9 @@ Main components:
 
 __author__ = "hunfen.gpt"
 
-from . import lattice, nanonis_loader, preview_plot, qpi_core, utility
+from . import nanonis_loader, preview_plot, qpi_core, utility
 
 __all__ = [
-    "lattice",
     "nanonis_loader",
     "preview_plot",
     "qpi_core",
