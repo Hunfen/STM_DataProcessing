@@ -1,18 +1,8 @@
 import numpy as np
 
-from .lattice import LATTICE
-
 
 class LatticeOperations:
-    """
-    Class for geometric operations on LATTICE instances.
-
-    This class provides methods for:
-    1. Generating reciprocal lattice vectors with C3 symmetry
-    2. Sorting polygon vertices
-    3. Creating polygon masks for q-space selection
-    4. Checking point-on-segment relationships
-    """
+    """Class for geometric operations on LATTICE instances."""
 
     def __init__(self, lattice):
         """
@@ -20,11 +10,10 @@ class LatticeOperations:
 
         Parameters
         ----------
-        lattice : LATTICE
-            LATTICE instance to operate on.
+        lattice : object
+            An object that provides the expected lattice interface
+            (typically an instance of LATTICE).
         """
-        if not isinstance(lattice, LATTICE):
-            raise TypeError("lattice must be an instance of LATTICE")
         self.lattice = lattice
 
     def extend_vecs_c3(self, include_neg=True, tol=1e-10, sort=False):

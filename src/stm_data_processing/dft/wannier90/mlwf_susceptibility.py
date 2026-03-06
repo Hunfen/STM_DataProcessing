@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 from scipy.special import expit
 
-from stm_data_processing.utils.lattice_loader import BVecs
+from stm_data_processing.utils.lattice_loader import LatticeLoader
 
 try:
     import cupy as cp
@@ -400,7 +400,7 @@ class SusceptibilityCalculator:
         energies = np.asarray(ek2d["energies"])
         k1_grid = ek2d["k1_grid"]
         k2_grid = ek2d["k2_grid"]
-        bvecs_obj = BVecs(bvecs_array=ek2d["bvecs"])
+        lattice_obj = LatticeLoader(bvecs_array=ek2d["bvecs"])
 
         if not (
             np.all(k1_grid >= -0.5)
@@ -453,7 +453,7 @@ class SusceptibilityCalculator:
                 chi0, q1_grid, q2_grid, q_range[0], q_range[1]
             )
 
-        qx, qy = bvecs_obj.frac_to_real(q1_grid, q2_grid)
+        qx, qy = lattice_obj.frac_to_real(q1_grid, q2_grid)
 
         result = {
             "chi0": chi0,
@@ -461,7 +461,7 @@ class SusceptibilityCalculator:
             "q2_grid": q2_grid,
             "qx": qx,
             "qy": qy,
-            "bvecs": bvecs_obj.get_bvecs(),
+            "bvecs": lattice_obj.get_bvecs(),
         }
 
         if save_path is not None:
@@ -601,8 +601,8 @@ class SusceptibilityCalculator:
             q1_grid, q2_grid = np.meshgrid(q1_1d, q2_1d, indexing="ij")
 
             # Convert to real-space coordinates
-            bvecs_obj = BVecs(bvecs_array=bvecs)
-            qx, qy = bvecs_obj.frac_to_real(q1_grid, q2_grid)
+            lattice_obj = LatticeLoader(bvecs_array=bvecs)
+            qx, qy = lattice_obj.frac_to_real(q1_grid, q2_grid)
 
             # Build result dict matching calculate_chi0 output structure
             result = {

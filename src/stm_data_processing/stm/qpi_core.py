@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 from scipy.fft import fft2, fftshift, ifft2
 
-from stm_data_processing.utils.lattice_loader import frac_to_real
+from stm_data_processing.utils.miscellaneous import frac_to_real_2d
 
 try:
     import cupy as cp
@@ -331,7 +331,7 @@ class QPICalculator:
                 qpi, q1_grid, q2_grid, q_range[0], q_range[1]
             )
 
-        qx_grid, qy_grid = frac_to_real(q1_grid, q2_grid, bvecs)
+        qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, bvecs)
 
         result = {
             "intensity": qpi,
@@ -564,7 +564,7 @@ class QPICalculator:
                 intensity, q1_grid, q2_grid = QPICalculator._extend_qpi(
                     intensity, q1_grid, q2_grid, q_range[0], q_range[1]
                 )
-            qx_grid, qy_grid = frac_to_real(q1_grid, q2_grid, bvecs)
+            qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, bvecs)
 
             # Build result dict matching calculate_qpi output structure
             result = {

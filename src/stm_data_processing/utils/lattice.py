@@ -274,3 +274,33 @@ class LATTICE:
 
         new_avecs = self._transform(T_inv)
         return LATTICE(avecs=new_avecs)
+
+    def rotate(self, degree):
+        """
+        Return a new LATTICE instance rotated by the specified angle around the z-axis.
+
+        Parameters
+        ----------
+        degree : float
+            Rotation angle in degrees (positive = counterclockwise).
+
+        Returns
+        -------
+        LATTICE
+            A new LATTICE object with rotated real-space and reciprocal vectors.
+        """
+        if self.avecs is None:
+            raise ValueError(
+                "Real space vectors must be initialized to perform rotation"
+            )
+
+        theta = np.deg2rad(degree)
+        rot_matrix = np.array(
+            [
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta), np.cos(theta), 0],
+                [0, 0, 1],
+            ]
+        )
+        new_avecs = rot_matrix @ self.avecs
+        return LATTICE(avecs=new_avecs)
