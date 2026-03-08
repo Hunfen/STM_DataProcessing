@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 from scipy.special import expit
 
-from stm_data_processing.utils.lattice_loader import LatticeLoader
+from stm_data_processing.io.lattice_loader import LatticeLoader
 
 try:
     import cupy as cp
