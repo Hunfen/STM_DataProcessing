@@ -1,6 +1,5 @@
 from . import (
     mlwf_ek2d,
-    mlwf_ek2d_descrepted,
     mlwf_gk,
     mlwf_hamiltonian,
     mlwf_susceptibility,
@@ -8,7 +7,6 @@ from . import (
 
 __all__ = [
     "mlwf_ek2d",
-    "mlwf_ek2d_descrepted",
     "mlwf_gk",
     "mlwf_hamiltonian",
     "mlwf_susceptibility",
