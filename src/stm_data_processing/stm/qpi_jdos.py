@@ -1,10 +1,7 @@
-from pathlib import Path
-
-import h5py
 import numpy as np
 from scipy.fft import fft2, fftshift, ifft2
 
-from stm_data_processing.utils.miscellaneous import frac_to_real_2d
+from stm_data_processing.utils.miscellaneous import extend_qpi, frac_to_real_2d, k_to_q
 
 try:
     import cupy as cp
@@ -16,11 +13,10 @@ except ImportError:
     print("CuPy not found. Using CPU-only mode for QPI calculations.")
 
 
-class QPICalculator:
-    """Class for calculating QPI (Quasiparticle Interference) from band contours.
+class JDOSQPI:
+    """Class for calculating JDOS QPI (Quasiparticle Interference).
 
-    This class combines spectral function calculation with QPI-JDOS computation
-    to analyze quasiparticle interference patterns from band structure data.
+    This class uses precalculated eigen values for joint-DOS QPI computation.
     """
 
     def __init__(self, eta=0.001):
@@ -34,7 +30,7 @@ class QPICalculator:
         """
         self.eta = eta
 
-    def _calculate_spectral_function(self, e_k, energy, bands="all", mask=None):
+    def _calculate_spectral_function(self, e_k, energy, orbitals="all", mask=None):
         """Calculate the spectral function A(k, E).
 
         Parameters
@@ -43,9 +39,9 @@ class QPICalculator:
             Energy values for each k-point (shape: [nkx, nky] or [num_wann, nkx, nky])
         energy : float
             Energy value at which to evaluate the spectral function
-        bands : 'all' or list of int, optional
+        orbitals : 'all' or list of int, optional
             Band indices to include in the spectral function calculation:
-            - 'all' (default): Sum over all bands
+            - 'all' (default): Sum over all orbitals
             - list of int: Sum over specific band indices
         mask : array-like, optional
             Boolean mask to apply to k-points (True = include, False = exclude)
@@ -72,8 +68,8 @@ class QPICalculator:
             # Handle band selection with ternary operator
             a_k = (
                 np.sum(a_k_per_band, axis=0)
-                if bands == "all"
-                else np.sum(a_k_per_band[bands], axis=0)
+                if orbitals == "all"
+                else np.sum(a_k_per_band[orbitals], axis=0)
             )
 
         # Apply mask if provided
@@ -91,11 +87,11 @@ class QPICalculator:
 
         return a_k
 
-    def _calculate_jdos(
+    def _compute_jdos(
         self,
         ek2d: dict[str, np.ndarray],
         energy_range: float | np.ndarray | list[float],
-        bands: str | list[int] = "all",
+        orbitals: str | list[int] = "all",
         normalize: bool = True,
         mask: np.ndarray | None = None,
     ) -> np.ndarray:
@@ -111,7 +107,9 @@ class QPICalculator:
         jdos_scan = np.empty((len(energy_array), nkx, nky))
 
         for i, energy in enumerate(energy_array):
-            a_k = self._calculate_spectral_function(e_k, energy, bands=bands, mask=mask)
+            a_k = self._calculate_spectral_function(
+                e_k, energy, orbitals=orbitals, mask=mask
+            )
 
             a_r = fft2(a_k)
             jdos_q = np.real(ifft2(np.abs(a_r) ** 2))
@@ -123,11 +121,11 @@ class QPICalculator:
 
         return jdos_scan[0] if is_scalar else jdos_scan
 
-    def _calculate_jdos_cuda(
+    def _compute_jdos_cuda(
         self,
         ek2d: dict[str, np.ndarray],
         energy_range: float | np.ndarray | list[float],
-        bands: str | list[int] = "all",
+        orbitals: str | list[int] = "all",
         normalize: bool = True,
         mask: np.ndarray | None = None,
     ) -> np.ndarray:
@@ -141,8 +139,8 @@ class QPICalculator:
             - 'k1_grid', 'k2_grid': (nk, nk) fractional k-grids (used for shape).
         energy_range : float or array-like
             Energy or energies at which to compute JDOS.
-        bands : str or list[int], default "all"
-            Which bands to include. "all" uses all bands.
+        orbitals : str or list[int], default "all"
+            Which orbital to include. "all" uses all orbitals.
         normalize : bool, default True
             Whether to normalize each JDOS map to its maximum.
         mask : np.ndarray or None
@@ -208,11 +206,13 @@ class QPICalculator:
                     batch_energies[:, None, None, None] - e_k_gpu[None, :, :, :]
                 ) ** 2 + self.eta**2
                 a_k_per_band = (1 / cp.pi) * (self.eta / denom)
-                if bands == "all":
+                if orbitals == "all":
                     a_k_batch = cp.sum(a_k_per_band, axis=1)
                 else:
-                    bands_idx = cp.array(bands) if isinstance(bands, list) else bands
-                    a_k_batch = cp.sum(a_k_per_band[:, bands_idx, :, :], axis=1)
+                    orbitals_idx = (
+                        cp.array(orbitals) if isinstance(orbitals, list) else orbitals
+                    )
+                    a_k_batch = cp.sum(a_k_per_band[:, orbitals_idx, :, :], axis=1)
 
             if mask_gpu is not None:
                 a_k_batch *= mask_gpu
@@ -246,12 +246,12 @@ class QPICalculator:
 
         return jdos_scan[0] if is_scalar else jdos_scan
 
-    def calculate_qpi(
+    def calculate(
         self,
         ek2d: dict[str, np.ndarray],
         energy_range: float | np.ndarray | list[float],
         q_range: tuple[float, float] | None = (-0.5, 0.5),
-        bands: str | list[int] = "all",
+        orbitals: str | list[int] = "all",
         normalize: bool = True,
         mask: np.ndarray | None = None,
         use_gpu: bool = False,
@@ -264,7 +264,7 @@ class QPICalculator:
         ek2d : dict[str, np.ndarray]
             Dictionary containing k-space band structure data, typically from
             `wannier90_ek2d_unit`, with required keys:
-            - 'energies': (nbands, nkx, nky) array of band energies.
+            - 'energies': (norbitals, nkx, nky) array of band energies.
             - 'k1_grid', 'k2_grid': (nkx, nky) fractional k-grids.
             Optional key:
             - 'bvecs': (2, 2) reciprocal lattice vectors for physical q-space conversion.
@@ -273,8 +273,8 @@ class QPICalculator:
         q_range : tuple[float, float] or None, optional (default=(-0.5, 0.5))
             Dimensionless q-range [q_min, q_max] for cropping the QPI result.
             If None, no cropping is applied.
-        bands : str or list[int], default "all"
-            Band indices to include in the calculation. Use "all" for all bands.
+        orbitals : str or list[int], default "all"
+            Band indices to include in the calculation. Use "all" for all orbitals.
         normalize : bool, default True
             Whether to normalize the QPI intensity to unit maximum.
         mask : np.ndarray or None, optional
@@ -301,13 +301,13 @@ class QPICalculator:
         bvecs = ek2d.get("bvecs")
 
         if use_gpu and CUPY_AVAILABLE:
-            qpi = self._calculate_jdos_cuda(ek2d, energy_range, bands, normalize, mask)
+            qpi = self._compute_jdos_cuda(ek2d, energy_range, orbitals, normalize, mask)
         else:
             if use_gpu and not CUPY_AVAILABLE:
                 print("Warning: CuPy not available. Falling back to CPU.")
-            qpi = self._calculate_jdos(ek2d, energy_range, bands, normalize, mask)
+            qpi = self._compute_jdos(ek2d, energy_range, orbitals, normalize, mask)
 
-        q1_grid, q2_grid = self._k_to_q(ek2d["k1_grid"], ek2d["k2_grid"])
+        q1_grid, q2_grid = k_to_q(ek2d["k1_grid"], ek2d["k2_grid"])
 
         result = {
             "intensity": qpi,
@@ -320,14 +320,14 @@ class QPICalculator:
                 qpi=result,
                 output_path=output_path,
                 energy_range=energy_range,
-                bands=bands,
+                orbitals=orbitals,
                 normalize=normalize,
                 mask=mask,
                 bvecs=bvecs,
             )
 
         if q_range is not None:
-            qpi, q1_grid, q2_grid = self._extend_qpi(
+            qpi, q1_grid, q2_grid = extend_qpi(
                 qpi, q1_grid, q2_grid, q_range[0], q_range[1]
             )
 
@@ -341,259 +341,4 @@ class QPICalculator:
             "q2_grid": q2_grid,
             "bvecs": bvecs,
         }
-        return result
-
-    @staticmethod
-    def _extend_qpi(
-        qpi_base: np.ndarray,
-        q1_base: np.ndarray,
-        q2_base: np.ndarray,
-        qmin: float,
-        qmax: float,
-    ):
-        """
-        Extend QPI with strictly preserved q-density
-        and exact [qmin, qmax) cropping.
-        Supports both 2D (nk, nk) and 3D (nband, nk, nk) qpi_base.
-        """
-
-        # Ensure qpi_base is 3D
-        was_2d = False
-        if qpi_base.ndim == 2:
-            qpi_base = qpi_base[np.newaxis, :, :]
-            was_2d = True
-        elif qpi_base.ndim != 3:
-            raise ValueError(f"qpi_base must be 2D or 3D, got {qpi_base.ndim}D")
-
-        nband, nq, _ = qpi_base.shape
-
-        # -------- 1. extend ----------
-        n_min = int(np.floor(qmin + 0.5))
-        n_max = int(np.ceil(qmax - 0.5))
-        shifts = np.arange(n_min, n_max + 1)
-        nq_big = nq * len(shifts)
-
-        print(
-            f"Extending QPI from [{qmin:.3f}, {qmax:.3f}) with shifts: {shifts.tolist()}"
-        )
-        print(
-            f"Original grid size: {nq} × {nq} → Extended grid size: {nq_big} × {nq_big}"
-        )
-
-        qpi_big = np.zeros((nband, nq_big, nq_big))
-        q1_big = np.zeros((nq_big, nq_big))
-        q2_big = np.zeros((nq_big, nq_big))
-
-        for ix, sx in enumerate(shifts):
-            for iy, sy in enumerate(shifts):
-                x0 = ix * nq
-                x1 = (ix + 1) * nq
-                y0 = iy * nq
-                y1 = (iy + 1) * nq
-
-                qpi_big[:, x0:x1, y0:y1] = qpi_base
-                q1_big[x0:x1, y0:y1] = q1_base + sx
-                q2_big[x0:x1, y0:y1] = q2_base + sy
-
-        # -------- 2. crop ----------
-        mask_x = (q1_big[:, 0] >= qmin) & (q1_big[:, 0] < qmax)
-        mask_y = (q2_big[0, :] >= qmin) & (q2_big[0, :] < qmax)
-
-        q1_ext = q1_big[np.ix_(mask_x, mask_y)]
-        q2_ext = q2_big[np.ix_(mask_x, mask_y)]
-        qpi_ext = qpi_big[:, mask_x, :][:, :, mask_y]
-
-        nq_final = q1_ext.shape[0]
-        print(
-            f"Cropped to final grid: {nq_final} × {nq_final} over [{qmin:.3f}, {qmax:.3f})"
-        )
-
-        # Squeeze back to 2D if input was 2D
-        if was_2d:
-            qpi_ext = qpi_ext[0]
-
-        return qpi_ext, q1_ext, q2_ext
-
-    @staticmethod
-    def _k_to_q(
-        k1_grid: np.ndarray,
-        k2_grid: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Convert k-space grids to dimensionless q-space grids."""
-        nkx, nky = k1_grid.shape
-        dk1 = float(k1_grid[1, 0] - k1_grid[0, 0]) if nkx > 1 else 1.0
-        dk2 = float(k2_grid[0, 1] - k2_grid[0, 0]) if nky > 1 else 1.0
-        q1_vals = (np.arange(nkx) - nkx // 2) * dk1
-        q2_vals = (np.arange(nky) - nky // 2) * dk2
-        q1_grid, q2_grid = np.meshgrid(q1_vals, q2_vals, indexing="ij")
-        return q1_grid, q2_grid
-
-    @staticmethod
-    def _save_qpi_to_h5(
-        qpi: dict[str, np.ndarray],
-        output_path: str,
-        energy_range: float | np.ndarray | list[float],
-        bands: str | list[int] = "all",
-        normalize: bool = True,
-        bvecs: np.ndarray | None = None,
-        mask: np.ndarray | None = None,
-        eta: float = 0.001,
-        compression: str = "gzip",
-        compression_opts: int = 6,
-    ) -> None:
-        """Save QPI results to an HDF5 file with compact storage.
-
-        Parameters
-        ----------
-        qpi : dict[str, np.ndarray]
-            Output dictionary from calculate_qpi, containing:
-            - 'intensity', 'q1_grid', 'q2_grid'
-            (qx_grid and qy_grid are not saved but can be reconstructed from q1/q2 and bvecs)
-        output_path : str
-            Path to save the HDF5 file.
-        energy_range : float or array-like
-            Energy (or energies) used in the calculation.
-        bands : str or list of int, optional
-            Band indices included in the calculation.
-        normalize : bool, optional
-            Whether the JDOS was normalized.
-        bvecs : np.ndarray, optional
-            Reciprocal lattice basis vectors (saved if provided).
-        mask : np.ndarray, optional
-            Real-space mask used in the calculation.
-        eta : float, optional
-            Spectral broadening parameter.
-        compression : str, optional
-            Compression algorithm for the JDOS dataset.
-        compression_opts : int, optional
-            Compression level for the JDOS dataset.
-        """
-        intensity = qpi["intensity"]
-        q1_grid = qpi["q1_grid"]
-        q2_grid = qpi["q2_grid"]
-
-        # Extract 1D coordinates from dimensionless q-grids only
-        nkx, nky = q1_grid.shape
-        q1_1d = q1_grid[:, 0]
-        q2_1d = q2_grid[0, :]
-
-        with h5py.File(output_path, "w") as f:
-            print(f"Saving QPI results to: {output_path}")
-
-            f.create_dataset(
-                "intensity",
-                data=intensity,
-                compression=compression,
-                compression_opts=compression_opts,
-            )
-
-            f.create_dataset("q1", data=q1_1d)
-            f.create_dataset("q2", data=q2_1d)
-
-            f.attrs["eta"] = eta
-            f.attrs["energy_range"] = (
-                energy_range if np.isscalar(energy_range) else np.array(energy_range)
-            )
-            f.attrs["bands"] = "all" if bands == "all" else np.array(bands, dtype=int)
-            f.attrs["normalize"] = normalize
-            f.attrs["grid_shape"] = [nkx, nky]
-
-            if bvecs is not None:
-                f.create_dataset("bvecs", data=bvecs)
-                print("  Saved 'bvecs'.")
-            if mask is not None:
-                f.create_dataset("mask", data=mask)
-                print("  Saved 'mask'.")
-
-        file_size = Path(output_path).stat().st_size
-        size_mb = file_size / (1024 * 1024)
-        intensity_shape = intensity.shape
-        print(f"✅ QPI data saved successfully to: {output_path}")
-        print(f"   - File size: {size_mb:.2f} MB")
-        print(f"   - Intensity shape: {intensity_shape}")
-        print(f"   - Grid shape: ({nkx}, {nky})")
-
-    @staticmethod
-    def load_qpi_from_h5(
-        file_path: str,
-        q_range: tuple[float, float] | None = None,
-    ) -> dict[str, np.ndarray | dict]:
-        """Load QPI results from an HDF5 file saved by `calculate_qpi`.
-
-        Reconstructs a dictionary that closely matches the output of `calculate_qpi`.
-        Optionally applies q-range cropping via `_extend_qpi`.
-
-        Parameters
-        ----------
-        file_path : str
-            Path to the .h5 file saved by `calculate_qpi`.
-        q_range : tuple[float, float] or None, optional
-            If provided, crop/extend the loaded QPI to this dimensionless q-range [q_min, q_max]
-            using the same logic as in `calculate_qpi`.
-
-        Returns
-        -------
-        result : dict
-            Dictionary with keys:
-            - 'intensity': QPI intensity array (optionally cropped).
-            - 'qx_grid', 'qy_grid': Physical q-grids (None if bvecs not saved).
-            - 'q1_grid', 'q2_grid': Dimensionless q-grids (optionally cropped).
-            - 'bvecs': Reciprocal lattice vectors or None.
-            All other saved attributes (e.g., energy_range, bands, normalize) are included
-            as top-level keys for consistency with `calculate_qpi`'s context.
-
-        Notes
-        -----
-        The 2D grids are reconstructed using `np.meshgrid(..., indexing='ij')` from 1D coordinates.
-        """
-        with h5py.File(file_path, "r") as f:
-            # Load main data
-            intensity = f["intensity"][:]
-
-            # Load 1D coordinates
-            q1_1d = f["q1"][:]
-            q2_1d = f["q2"][:]
-
-            # Reconstruct 2D dimensionless grids
-            q1_grid, q2_grid = np.meshgrid(q1_1d, q2_1d, indexing="ij")
-
-            # Load optional bvecs
-            bvecs = f["bvecs"][:] if "bvecs" in f else None
-            # Apply q-range if requested
-            if q_range is not None:
-                intensity, q1_grid, q2_grid = QPICalculator._extend_qpi(
-                    intensity, q1_grid, q2_grid, q_range[0], q_range[1]
-                )
-            qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, bvecs)
-
-            # Build result dict matching calculate_qpi output structure
-            result = {
-                "intensity": intensity,
-                "qx_grid": qx_grid,
-                "qy_grid": qy_grid,
-                "q1_grid": q1_grid,
-                "q2_grid": q2_grid,
-                "bvecs": bvecs,
-            }
-
-            # Add scalar/array attributes as top-level keys for convenience
-            for key, value in f.attrs.items():
-                if key == "energy_range":
-                    # Convert back to scalar if originally scalar
-                    if np.ndim(value) == 0:
-                        result[key] = float(value)
-                    else:
-                        result[key] = np.array(value)
-                elif key == "bands":
-                    if isinstance(value, np.ndarray):
-                        result[key] = value.tolist()
-                    else:
-                        result[key] = value  # "all"
-                else:
-                    result[key] = value
-
-            # Load optional mask if present
-            if "mask" in f:
-                result["mask"] = f["mask"][:]
-
         return result
