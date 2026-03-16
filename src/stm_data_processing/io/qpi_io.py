@@ -13,50 +13,51 @@ def save_qpi_to_h5(
     qpi_layers: np.ndarray,
     output_path: str,
     energy_range: float | np.ndarray | list[float],
-    bands: str | list[int] | None = None,
-    normalize: bool = True,
+    module_type: str,
     bvecs: np.ndarray | None = None,
-    mask: np.ndarray | None = None,
-    V: np.ndarray | None = None,
     eta: float = 0.001,
+    normalize: bool = True,
     nq: int = 256,
+    V: np.ndarray | None = None,
+    mask: np.ndarray | None = None,
+    bands: str | list[int] | None = None,
     compression: str = "gzip",
     compression_opts: int = 6,
+    **metadata_kwargs,
 ) -> None:
     """Save QPI results to an HDF5 file.
 
-    The qpi_layers array is always saved. Optional metadata (bands, bvecs, mask, V, q_range)
-    are stored only if provided. Grid resolution is recorded via the 'nq' attribute.
-    If q_range is given, it is saved as a dataset; otherwise, the grid is assumed uniform
-    with shape (nq, nq).
+    Saves unextended qpi_layers with q1_grid, q2_grid (default [-0.5, 0.5) range).
+    Extension and real-space coordinate conversion are handled during loading.
 
     Parameters
     ----------
     qpi_layers : np.ndarray
-        The QPI intensity array, typically of shape (nq, nq) or (n_energies, nq, nq).
+        The QPI intensity array, shape (n_energies, nq, nq) or (nq, nq).
     output_path : str
         Path to the output HDF5 file.
     energy_range : float or array-like
         Energy value(s) used in the QPI calculation.
-    bands : str, list of int, or None, optional
-        Band indices included in the calculation. Saved as an attribute if not None.
+    module_type : str
+        Module type identifier, e.g., 'jdos' or 'born'.
+    bvecs : np.ndarray or None, optional
+        Reciprocal lattice basis vectors, shape (3, 3).
+    eta : float, optional
+        Lorentzian broadening parameter. Default is 0.001.
     normalize : bool, optional
         Whether the qpi_layers was normalized. Default is True.
-    bvecs : np.ndarray or None, optional
-        Reciprocal lattice basis vectors. Saved as a dataset if provided.
-    mask : np.ndarray or None, optional
-        Real-space mask applied during the calculation. Saved if provided.
     V : np.ndarray or None, optional
-        Real-space potential used in the simulation. Saved if provided.
-    eta : float, optional
-        Lorentzian broadening parameter (in energy units). Default is 0.001.
-    nq : int, optional
-        Number of grid points along each q-direction. Default is 256.
-        Stored as an attribute to indicate grid resolution.
+        Scattering potential matrix. Saved if provided.
+    mask : np.ndarray or None, optional
+        Real-space mask. Saved if provided.
+    bands : str, list of int, or None, optional
+        Band indices. Saved as an attribute if not None.
     compression : str, optional
-        Compression algorithm for the qpi_layers dataset. Default is 'gzip'.
+        Compression algorithm. Default is 'gzip'.
     compression_opts : int, optional
         Compression level (0~9). Default is 6.
+    **metadata_kwargs
+        Additional metadata to save as attributes.
     """
     with h5py.File(output_path, "w") as f:
         logger.info("Saving QPI results to: %s", output_path)
@@ -67,30 +68,36 @@ def save_qpi_to_h5(
             compression=compression,
             compression_opts=compression_opts,
         )
+
+        f.attrs["module_type"] = module_type
         f.attrs["eta"] = eta
         f.attrs["normalize"] = normalize
         f.attrs["nq"] = nq
         f.attrs["energy_range"] = (
             energy_range if np.isscalar(energy_range) else np.array(energy_range)
         )
+
         if bands is not None:
             f.attrs["bands"] = "all" if bands == "all" else np.array(bands, dtype=int)
         if bvecs is not None:
             f.create_dataset("bvecs", data=bvecs)
             logger.info("  Saved 'bvecs'.")
-        if mask is not None:
-            f.create_dataset("mask", data=mask)
-            logger.info("  Saved 'mask'.")
         if V is not None:
             f.create_dataset("V", data=V)
             logger.info("  Saved 'V'.")
+        if mask is not None:
+            f.create_dataset("mask", data=mask)
+            logger.info("  Saved 'mask'.")
+
+        for key, value in metadata_kwargs.items():
+            if value is not None:
+                f.attrs[key] = value
 
     file_size = Path(output_path).stat().st_size
     size_mb = file_size / (1024 * 1024)
-    qpi_layers_shape = qpi_layers.shape
     logger.info("QPI data saved successfully to: %s", output_path)
     logger.info("   - File size: %.2f MB", size_mb)
-    logger.info("   - qpi_layers shape: %s", qpi_layers_shape)
+    logger.info("   - qpi_layers shape: %s", qpi_layers.shape)
     logger.info("   - Grid shape: (%d, %d)", nq, nq)
 
 
@@ -98,9 +105,9 @@ def load_qpi_from_h5(
     h5_path: str,
     q_range: tuple[float, float] | None = None,
 ) -> dict[str, np.ndarray | dict]:
-    """Load QPI results from an HDF5 file saved by `save_qpi_to_h5`.
+    """Load QPI results from an HDF5 file.
 
-    Reconstructs reciprocal-space grids and returns the full QPI data structure.
+    Reconstructs grids and optionally extends qpi_layers based on q_range.
 
     Parameters
     ----------
@@ -114,8 +121,8 @@ def load_qpi_from_h5(
     -------
     dict
         Dictionary containing:
-        - 'qpi_layers': loaded qpi_layers array
-        - 'q1_grid', 'q2_grid': dimensionless fractional grids
+        - 'qpi_layers': loaded (optionally extended) qpi_layers array
+        - 'q1_grid', 'q2_grid': dimensionless fractional grids (extended if q_range given)
         - 'qx_grid', 'qy_grid': real reciprocal-space grids (if bvecs available)
         - 'metadata': dict of all loaded attributes and optional arrays
     """
@@ -125,14 +132,27 @@ def load_qpi_from_h5(
         qpi_layers = f["qpi_layers"][:]
 
         bvecs = f["bvecs"][:] if "bvecs" in f else None
-        mask = f["mask"][:] if "mask" in f else None
         V = f["V"][:] if "V" in f else None
+        mask = f["mask"][:] if "mask" in f else None
 
+        module_type = f.attrs.get("module_type", "unknown")
         eta = f.attrs.get("eta", 0.001)
         normalize = f.attrs.get("normalize", True)
         nq = f.attrs.get("nq", 256)
         energy_range = f.attrs.get("energy_range", None)
         bands = f.attrs.get("bands", None)
+
+        metadata_extra = {}
+        for key in f.attrs:
+            if key not in [
+                "module_type",
+                "eta",
+                "normalize",
+                "nq",
+                "energy_range",
+                "bands",
+            ]:
+                metadata_extra[key] = f.attrs[key]
 
         file_size = Path(h5_path).stat().st_size
         size_mb = file_size / (1024 * 1024)
@@ -140,16 +160,10 @@ def load_qpi_from_h5(
         logger.info("   - File size: %.2f MB", size_mb)
         logger.info("   - qpi_layers shape: %s", qpi_layers.shape)
         logger.info("   - Grid size (nq): %d", nq)
-        if bvecs is not None:
-            logger.info("  Loaded 'bvecs'.")
-        if mask is not None:
-            logger.info("  Loaded 'mask'.")
-        if V is not None:
-            logger.info("  Loaded 'V'.")
+        logger.info("   - Module type: %s", module_type)
 
     q_vals = np.linspace(-0.5, 0.5, nq, endpoint=False)
     q1_grid, q2_grid = np.meshgrid(q_vals, q_vals, indexing="ij")
-
     if q_range is not None:
         qpi_layers_ext, q1_grid_ext, q2_grid_ext = extend_qpi(
             qpi_layers, q1_grid, q2_grid, q_range[0], q_range[1]
@@ -165,14 +179,16 @@ def load_qpi_from_h5(
         qx_grid = qy_grid = None
 
     metadata = {
+        "module_type": module_type,
         "eta": eta,
         "normalize": normalize,
         "nq": nq,
         "energy_range": energy_range,
         "bands": bands,
         "bvecs": bvecs,
-        "mask": mask,
         "V": V,
+        "mask": mask,
+        **metadata_extra,
     }
 
     result = {

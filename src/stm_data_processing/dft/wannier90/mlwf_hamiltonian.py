@@ -1,107 +1,18 @@
 """Wannier90 HR Hamiltonian computation module."""
 
+from __future__ import annotations
+
 import logging
-import os
-from typing import Literal
+from typing import Any
 
 import numpy as np
 
+from stm_data_processing.config import get_backend
 from stm_data_processing.io.w90hr_loader import Wannier90HRLoader
 
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# Optional CuPy (only used if backend involves GPU)
-# ============================================================
-try:
-    import cupy as cp
 
-    _CUPY_IMPORT_OK = True
-except ImportError:
-    cp = None
-    _CUPY_IMPORT_OK = False
-
-
-# ============================================================
-# Backend configuration
-# ============================================================
-
-
-def _env(key: str, default: str) -> str:
-    """Get environment variable with default value."""
-    return os.environ.get(key, default).strip()
-
-
-def _cupy_usable() -> bool:
-    """Return True if CuPy is importable AND a CUDA device seems usable."""
-    if not _CUPY_IMPORT_OK or cp is None:
-        return False
-    try:
-        ndev = int(cp.cuda.runtime.getDeviceCount())  # type: ignore[union-attr]
-        return ndev > 0
-    except Exception:
-        return False
-
-
-_CUPY_USABLE = _cupy_usable()
-
-
-def _detect_backend() -> Literal["cpu", "gpu"]:
-    """
-    Decide backend at import time.
-
-    MLWF_BACKEND = cpu | gpu | auto (default auto)
-
-    auto rule:
-      - gpu if CuPy usable
-      - else cpu
-    """
-    mode = _env("MLWF_BACKEND", "auto").lower()
-    if mode not in {"auto", "cpu", "gpu"}:
-        raise ValueError("MLWF_BACKEND must be one of: auto|cpu|gpu")
-
-    if mode == "cpu":
-        return "cpu"
-    if mode == "gpu":
-        if not _CUPY_USABLE:
-            raise RuntimeError(
-                "MLWF_BACKEND=gpu requested but CuPy/CUDA device is not usable."
-            )
-        return "gpu"
-
-    return "gpu" if _CUPY_USABLE else "cpu"
-
-
-_BACKEND = _detect_backend()
-
-
-def _gpu_return_mode() -> Literal["numpy", "cupy"]:
-    """
-    Get GPU return mode from environment.
-
-    MLWF_GPU_RETURN = numpy | cupy (default numpy)
-    Controls return type when backend uses GPU.
-    """
-    mode = _env("MLWF_GPU_RETURN", "numpy").lower()
-    if mode not in {"numpy", "cupy"}:
-        raise ValueError("MLWF_GPU_RETURN must be one of: numpy|cupy")
-    return mode
-
-
-def _maybe_print_backend_once() -> None:
-    """Print backend once for debug if MLWF_BACKEND_VERBOSE=1."""
-    verbose = _env("MLWF_BACKEND_VERBOSE", "0")
-    if verbose in {"1", "true", "t", "yes", "y"}:
-        msg = f"[MLWFHamiltonian] backend={_BACKEND} (cupy_usable={_CUPY_USABLE})"
-        logger.info(msg)
-
-
-_maybe_print_backend_once()
-
-
-# ============================================================
-# Hamiltonian computation class
-# ============================================================
 class MLWFHamiltonian:
     """
     Wannier90 HR Hamiltonian handler.
@@ -112,16 +23,8 @@ class MLWFHamiltonian:
     Public API
     ----------
     from_seedname(folder, seedname) : class method to load and construct
+    from_arrays(num_wann, r_list, h_list_flat, ndegen, bvecs) : construct from arrays
     hk(k_frac) : compute H(k) for single or batched k-points
-
-    Backend selection (import-time)
-    --------------------------------
-    MLWF_BACKEND = cpu | gpu | auto (default auto)
-      auto: gpu if CuPy usable; else cpu
-
-    GPU return type
-    ---------------
-    MLWF_GPU_RETURN = numpy | cupy (default numpy)
 
     Notes
     -----
@@ -139,7 +42,6 @@ class MLWFHamiltonian:
         h_list_flat: np.ndarray,
         ndegen: np.ndarray,
         bvecs: np.ndarray | None = None,
-        backend: Literal["cpu", "gpu"] | None = None,
     ):
         """
         Initialize MLWFHamiltonian with pre-loaded data.
@@ -157,43 +59,67 @@ class MLWFHamiltonian:
             Degeneracy factors, shape (nrpts,), dtype float64.
         bvecs : np.ndarray | None
             Reciprocal lattice vectors, shape (3, 3), optional.
-        backend : Literal["cpu", "gpu"] | None
-            Compute backend. If None, uses globally detected backend.
         """
-        self._backend = backend if backend is not None else _BACKEND
+        self._validate_data(num_wann, r_list, h_list_flat, ndegen)
 
-        self.num_wann = num_wann
-        self.r_list = r_list
-        self.h_list_flat = h_list_flat
-        self.ndegen = ndegen
-        self.bvecs = bvecs
+        self._num_wann = num_wann
+        self._r_list = r_list
+        self._h_list_flat = h_list_flat
+        self._ndegen = ndegen
+        self._bvecs = bvecs
 
-        self._r_list_gpu: cp.ndarray | None = None
-        self._ndegen_gpu: cp.ndarray | None = None
-        self._h_flat_gpu: cp.ndarray | None = None
+        # ✅ GPU cache - lazily initialized
+        self._r_list_gpu: Any | None = None
+        self._ndegen_gpu: Any | None = None
+        self._h_flat_gpu: Any | None = None
 
-        self._validate_data()
+        self._folder: str | None = None
+        self._seedname: str | None = None
+
+        logger.info(f"[MLWFHamiltonian] Initialized with backend={get_backend()}")
+
+    # ============================================================
+    # Read-only properties
+    # ============================================================
+    @property
+    def num_wann(self) -> int:
+        """Number of Wannier functions (read-only)."""
+        return self._num_wann
+
+    @property
+    def r_list(self) -> np.ndarray:
+        """Lattice vector indices, shape (nrpts, 3) (read-only)."""
+        return self._r_list
+
+    @property
+    def h_list_flat(self) -> np.ndarray:
+        """Flattened Hamiltonian matrices (read-only)."""
+        return self._h_list_flat
+
+    @property
+    def ndegen(self) -> np.ndarray:
+        """Degeneracy factors, shape (nrpts,) (read-only)."""
+        return self._ndegen
+
+    @property
+    def bvecs(self) -> np.ndarray | None:
+        """Reciprocal lattice vectors, shape (3, 3) (read-only)."""
+        return self._bvecs
+
+    @property
+    def folder(self) -> str | None:
+        """Source folder (if loaded from file, read-only)."""
+        return self._folder
+
+    @property
+    def seedname(self) -> str | None:
+        """Source seedname (if loaded from file, read-only)."""
+        return self._seedname
 
     @classmethod
-    def from_seedname(
-        cls, folder: str, seedname: str, backend: Literal["cpu", "gpu"] | None = None
-    ) -> "MLWFHamiltonian":
+    def from_seedname(cls, folder: str, seedname: str) -> MLWFHamiltonian:
         """
         Construct MLWFHamiltonian by loading data from Wannier90 files.
-
-        Parameters
-        ----------
-        folder : str
-            Directory containing the HR file.
-        seedname : str
-            Base name of the Wannier90 files (without extension).
-        backend : Literal["cpu", "gpu"] | None
-            Compute backend. If None, uses globally detected backend.
-
-        Returns
-        -------
-        MLWFHamiltonian
-            Initialized Hamiltonian handler.
         """
         data = Wannier90HRLoader.load(folder, seedname)
         instance = cls(
@@ -202,150 +128,150 @@ class MLWFHamiltonian:
             h_list_flat=data["h_list_flat"],
             ndegen=data["ndegen"],
             bvecs=data["bvecs"],
-            backend=backend,
         )
-        # Store metadata for downstream I/O
-        instance.folder = folder
-        instance.seedname = seedname
+        instance._folder = folder
+        instance._seedname = seedname
         return instance
 
-    def _validate_data(self) -> None:
-        """Validate internal data shapes and types."""
-        nrpts = len(self.r_list)
-        expected_flat_size = self.num_wann * self.num_wann
-
-        if self.r_list.shape != (nrpts, 3):
-            raise ValueError(f"r_list shape mismatch: {self.r_list.shape}")
-        if self.h_list_flat.shape != (nrpts, expected_flat_size):
-            raise ValueError(
-                f"h_list_flat shape mismatch: {self.h_list_flat.shape}, "
-                f"expected ({nrpts}, {expected_flat_size})"
-            )
-        if self.ndegen.shape != (nrpts,):
-            raise ValueError(f"ndegen shape mismatch: {self.ndegen.shape}")
+    @classmethod
+    def from_arrays(
+        cls,
+        num_wann: int,
+        r_list: np.ndarray,
+        h_list_flat: np.ndarray,
+        ndegen: np.ndarray,
+        bvecs: np.ndarray | None = None,
+    ) -> MLWFHamiltonian:
+        """
+        Construct MLWFHamiltonian from raw arrays.
+        """
+        return cls(
+            num_wann=num_wann,
+            r_list=r_list,
+            h_list_flat=h_list_flat,
+            ndegen=ndegen,
+            bvecs=bvecs,
+        )
 
     # ============================================================
     # Public API: Computation
     # ============================================================
-
-    def hk(
-        self, k_frac: tuple[float, float, float] | np.ndarray
-    ) -> np.ndarray | cp.ndarray:
+    def hk(self, k_frac: np.ndarray) -> Any:
         """
         Compute H(k) in Wannier basis.
 
         Parameters
         ----------
-        k_frac : tuple[float, float, float] | np.ndarray
-            Fractional k-point coordinates. Can be:
-            - shape (3,) for single k-point
-            - shape (N, 3) for batch
-            - shape (..., 3) for arbitrary batch dimensions
+        k_frac : np.ndarray
+            Fractional k-point coordinates, shape (N, 3).
+            For single k-point, use shape (1, 3).
 
         Returns
         -------
-        np.ndarray | cp.ndarray
-            Hamiltonian matrix at k. Shape:
-            - (num_wann, num_wann) for single k-point
-            - (..., num_wann, num_wann) for batched input
-
-        Raises
-        ------
-        RuntimeError
-            If GPU backend is requested but CuPy is not available.
+        np.ndarray | cupy.ndarray
+            Hamiltonian matrix at k, shape (N, num_wann, num_wann).
+            Type matches current backend (numpy for CPU, cupy for GPU).
         """
-        k2d, _, _ = self._as_k_array(k_frac)
-        num_k = k2d.shape[0]
+        if k_frac.ndim != 2 or k_frac.shape[-1] != 3:
+            raise ValueError(f"k_frac must have shape (N, 3), got {k_frac.shape}")
 
+        num_k = k_frac.shape[0]
+        backend = get_backend()
         logger.info(
-            "[MLWFHamiltonian] Computing H(k) for %d k-point(s) using backend='%s'",
-            num_k,
-            self._backend,
+            f"[MLWFHamiltonian] Computing H(k) for {num_k} k-point(s) using backend='{backend}'"
         )
 
-        if self._backend == "gpu":
+        if backend == "gpu":
             return self._hk_gpu(k_frac)
-
         return self._hk_cpu(k_frac)
+
+    def clear_gpu_cache(self) -> None:
+        """Clear GPU cache. Call this after switching backend."""
+        self._r_list_gpu = None
+        self._ndegen_gpu = None
+        self._h_flat_gpu = None
+        logger.info("[MLWFHamiltonian] GPU cache cleared.")
 
     # ============================================================
     # Core math (CPU/GPU vectorized)
     # ============================================================
-
-    def _hk_cpu(self, k_frac: tuple[float, float, float] | np.ndarray) -> np.ndarray:
+    def _hk_cpu(self, k_frac: np.ndarray) -> np.ndarray:
         """
         CPU vectorized H(k) computation.
-
-        phases = exp(2j*pi * (k @ r^T))          (N,nr)
-        weights = phases / ndegen[None,:]        (N,nr)
-        hk_flat = weights @ h_flat               (N,nw*nw)
-        hk = hk_flat.reshape(N,nw,nw)
         """
-        k2d, is_single, prefix = self._as_k_array(k_frac)
-
         r = self.r_list.astype(np.float64, copy=False)
-        dot = k2d @ r.T
+        dot = k_frac @ r.T
         phases = np.exp(2j * np.pi * dot)
         weights = phases / self.ndegen[None, :]
 
         hk_flat = weights @ self.h_list_flat
         nw = int(self.num_wann)
-        hk = hk_flat.reshape(-1, nw, nw)
+        return hk_flat.reshape(-1, nw, nw)
 
-        if is_single:
-            return hk[0]
-        if prefix:
-            return hk.reshape(*prefix, nw, nw)
-        return hk
-
-    def _hk_gpu(
-        self, k_frac: tuple[float, float, float] | np.ndarray
-    ) -> np.ndarray | cp.ndarray:
+    def _hk_gpu(self, k_frac: np.ndarray) -> Any:
         """
         GPU vectorized H(k) computation with GEMM-style contraction.
-
-        Return type controlled by MLWF_GPU_RETURN.
         """
+        # ✅ 动态获取 cupy
+        import cupy as cp
+
         self._ensure_gpu_cache()
 
-        k2d_cpu, is_single, prefix = self._as_k_array(k_frac)
-        k2d = cp.asarray(k2d_cpu)  # type: ignore[union-attr]
+        k2d = cp.asarray(k_frac)
 
-        dot = k2d @ self._r_list_gpu.T  # type: ignore[union-attr]
+        dot = k2d @ self._r_list_gpu.T
         phases = cp.exp(2j * cp.pi * dot)
-        weights = phases / self._ndegen_gpu[None, :]  # type: ignore[union-attr]
+        weights = phases / self._ndegen_gpu[None, :]
 
-        hk_flat = weights @ self._h_flat_gpu  # type: ignore[union-attr]
+        hk_flat = weights @ self._h_flat_gpu
         nw = int(self.num_wann)
-        hk = hk_flat.reshape(-1, nw, nw)
+        return hk_flat.reshape(-1, nw, nw)
 
-        if is_single:
-            hk = hk[0]
-        elif prefix:
-            hk = hk.reshape(*prefix, nw, nw)
-
-        if _gpu_return_mode() == "cupy":
-            return hk
-        return cp.asnumpy(hk)  # type: ignore[union-attr]
-
+    # ============================================================
+    # Helper
+    # ============================================================
     def _ensure_gpu_cache(self) -> None:
         """Ensure GPU caches are populated."""
-        if not _CUPY_USABLE or cp is None:
-            raise RuntimeError("GPU path requested but CuPy/CUDA device is not usable.")
-        if self._r_list_gpu is None:
-            self._r_list_gpu = cp.asarray(self.r_list)  # type: ignore[union-attr]
-        if self._ndegen_gpu is None:
-            self._ndegen_gpu = cp.asarray(  # type: ignore[union-attr]
-                self.ndegen, dtype=cp.complex128
-            )
-        if self._h_flat_gpu is None:
-            self._h_flat_gpu = cp.asarray(self.h_list_flat)  # type: ignore[union-attr]
+        import cupy as cp
 
-    def _clear_gpu_cache(self) -> None:
-        """Clear GPU-side cached arrays."""
-        self._r_list_gpu = None
-        self._ndegen_gpu = None
-        self._h_flat_gpu = None
+        if self._r_list_gpu is None:
+            self._r_list_gpu = cp.asarray(self.r_list)
+        if self._ndegen_gpu is None:
+            self._ndegen_gpu = cp.asarray(self.ndegen, dtype=cp.complex128)
+        if self._h_flat_gpu is None:
+            self._h_flat_gpu = cp.asarray(self.h_list_flat)
+
+    @staticmethod
+    def _validate_data(
+        num_wann: int,
+        r_list: np.ndarray,
+        h_list_flat: np.ndarray,
+        ndegen: np.ndarray,
+    ) -> None:
+        """
+        Validate input data shapes and types.
+        """
+        if num_wann is None or num_wann <= 0:
+            raise ValueError(f"num_wann must be positive, got {num_wann}.")
+        if r_list is None:
+            raise ValueError("r_list cannot be None.")
+        if h_list_flat is None:
+            raise ValueError("h_list_flat cannot be None.")
+        if ndegen is None:
+            raise ValueError("ndegen cannot be None.")
+
+        nrpts = len(r_list)
+        expected_flat_size = num_wann * num_wann
+
+        if r_list.shape != (nrpts, 3):
+            raise ValueError(f"r_list shape mismatch: {r_list.shape}")
+        if h_list_flat.shape != (nrpts, expected_flat_size):
+            raise ValueError(
+                f"h_list_flat shape mismatch: {h_list_flat.shape}, "
+                f"expected ({nrpts}, {expected_flat_size})"
+            )
+        if ndegen.shape != (nrpts,):
+            raise ValueError(f"ndegen shape mismatch: {ndegen.shape}")
 
     @staticmethod
     def _as_k_array(

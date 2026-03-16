@@ -1,21 +1,19 @@
+from __future__ import annotations
+
 import logging
-import os
 import time
 
 import numpy as np
 
+from stm_data_processing.config import BACKEND
+from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.io.ek2d_io import EK2DIO
 from stm_data_processing.utils.miscellaneous import frac_to_real_2d
 
-try:
+if BACKEND == "gpu":
     import cupy as cp
-
-    CUPY_AVAILABLE = True
-except ImportError:
-    CUPY_AVAILABLE = False
-
-from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
-
+else:
+    cp = None
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +28,7 @@ class EK2DCalculator:
 
     def __init__(
         self,
-        mlwf_hamiltonian: MLWFHamiltonian,
+        hamiltonian: MLWFHamiltonian,
         nk: int = 256,
     ):
         """
@@ -38,7 +36,7 @@ class EK2DCalculator:
 
         Parameters
         ----------
-        mlwf_hamiltonian : MLWFHamiltonian
+        hamiltonian : MLWFHamiltonian
             Pre-initialized Wannier Hamiltonian instance with loaded data.
             Use MLWFHamiltonian.from_seedname() or MLWFHamiltonian() to create.
         nk : int, default 256
@@ -54,9 +52,12 @@ class EK2DCalculator:
         >>> # Calculate band structure
         >>> result = calculator.calculate()
         """
-        self.wh = mlwf_hamiltonian
-        self.bvecs = self.wh.bvecs
-        self.use_gpu = self.wh._backend == "gpu"
+        if hamiltonian.num_wann <= 0:
+            raise ValueError("hamiltonian.num_wann must be initialized and positive")
+
+        self.ham: MLWFHamiltonian = hamiltonian
+        self.num_wann = hamiltonian.num_wann
+        self.bvecs = hamiltonian.bvecs
         self.nk = nk
 
         # Initialize k-grid and k-points in primitive BZ [-0.5, 0.5)
@@ -66,72 +67,64 @@ class EK2DCalculator:
             self.k1_grid.ravel(), self.k2_grid.ravel(), np.zeros(nk**2)
         ]
 
-        if self.use_gpu and CUPY_AVAILABLE:
-            logger.info("GPU backend detected: using CUDA acceleration.")
-        elif self.use_gpu and not CUPY_AVAILABLE:
-            logger.warning("GPU backend requested but CuPy not available.")
-
-    def _compute_ek2d(
+    def _compute_eigen(
         self,
-        mlwf_hamiltonian: MLWFHamiltonian,
+        hamiltonian: MLWFHamiltonian,
     ) -> np.ndarray:
         """
-        Calculate band contour map from Wannier90 Hamiltonian on CPU.
+        Calculate eigen values from Wannier90 Hamiltonian on CPU.
 
         Parameters
         ----------
-        mlwf_hamiltonian : MLWFHamiltonian
+        hamiltonian : MLWFHamiltonian
             The Wannier Hamiltonian instance with loaded data.
 
         Returns
         -------
-        e : (num_wann, nk, nk) ndarray
+        e : (nk * nk, num_wann) ndarray
             Band energies contour map for all Wannier bands.
         """
         logger.info(
             f"Calculating band structure on {self.nk}x{self.nk} k-grid (CPU)..."
         )
-
         # Compute H(k) for all points at once (vectorized)
-        hk_matrices = mlwf_hamiltonian.hk(self.k_points)
+        hk_matrices = hamiltonian.hk(self.k_points)
 
         # Diagonalize batched Hamiltonians
-        # hk_matrices shape: (N, num_wann, num_wann)
-        evals = np.linalg.eigvalsh(hk_matrices)
-
-        # Reshape to (num_wann, nk, nk)
-        # eigvalsh returns eigenvalues in ascending order, shape (N, num_wann)
-        evals = evals.T.reshape((mlwf_hamiltonian.num_wann, self.nk, self.nk))
+        # hk_matrices shape: (N_kpoints, num_wann, num_wann)
+        # evals shape: (N_kpoints, num_wann)
+        # evecs shape: (N_kpoints, num_wann, num_wann) or None
+        eigfunc = (
+            np.linalg.eigh
+            if self.out_eigvec_flag
+            else lambda x: (np.linalg.eigvalsh(x), None)
+        )
+        evals, evecs = eigfunc(hk_matrices)
 
         logger.info("Band structure calculation complete.")
         logger.info(f"  Energy range: {evals.min():.4f} -> {evals.max():.4f} eV")
 
-        return evals
+        return evals, evecs
 
-    def _compute_ek2d_cuda(
+    def _compute_eigen_cuda(
         self,
-        mlwf_hamiltonian: MLWFHamiltonian,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        hamiltonian: MLWFHamiltonian,
+    ) -> tuple[cp.ndarray, cp.ndarray | None]:
         """
-        Calculate band contour map from Wannier90 Hamiltonian using CUDA acceleration.
+        Calculate eigen values and vectors from Wannier90 Hamiltonian using CUDA acceleration.
 
         Parameters
         ----------
-        mlwf_hamiltonian : MLWFHamiltonian
+        hamiltonian : MLWFHamiltonian
             The Wannier Hamiltonian instance with loaded data.
 
         Returns
         -------
-        e : (num_wann, nk, nk) ndarray
-            Band energies for all bands.
-        k1_grid : (nk, nk) ndarray
-            Fractional k1 coordinates along b1 direction.
-        k2_grid : (nk, nk) ndarray
-            Fractional k2 coordinates along b2 direction.
+        e : (nk * nk, num_wann) cp.ndarray
+            Band energies for all bands (returned as cp.ndarray on GPU).
+        evecs : (nk * nk, num_wann, num_wann) cp.ndarray or None
+            Eigenvectors if out_eigvec_flag is True, else None.
         """
-        # Ensure MLWFHamiltonian returns CuPy arrays for GPU diagonalization
-        os.environ["MLWF_GPU_RETURN"] = "cupy"
-
         # Move k-points to GPU
         k_points_gpu = cp.asarray(self.k_points)
 
@@ -139,17 +132,22 @@ class EK2DCalculator:
             f"Calculating band structure on {self.nk}x{self.nk} k-grid (GPU)..."
         )
 
-        # Compute H(k) for all points at once (vectorized, returns CuPy array)
-        hk_matrices_gpu = mlwf_hamiltonian.hk(k_points_gpu)
+        # Compute H(k) for all points at once (vectorized)
+        hk_matrices = hamiltonian.hk(k_points_gpu)
 
         # Diagonalize batched Hamiltonians on GPU
-        # Allocate memory for results
-        num_wann = mlwf_hamiltonian.num_wann
+        num_wann = hamiltonian.num_wann
         total_kpoints = self.nk * self.nk
-        e_gpu = cp.zeros((num_wann, total_kpoints), dtype=cp.float64)
 
-        # Batch diagonalization to manage memory if needed
-        # cp.linalg.eigh supports batching, but we loop to be safe with memory
+        # Match CPU output shape: (total_kpoints, num_wann)
+        e_gpu = cp.zeros((total_kpoints, num_wann), dtype=cp.float64)
+        evecs_gpu = (
+            cp.zeros((total_kpoints, num_wann, num_wann), dtype=cp.complex128)
+            if self.out_eigvec_flag
+            else None
+        )
+
+        # Batch diagonalization to manage memory
         batch_size = 1024
         num_batches = (total_kpoints + batch_size - 1) // batch_size
 
@@ -161,10 +159,19 @@ class EK2DCalculator:
             end_idx = min(start_idx + batch_size, total_kpoints)
 
             eig_start = time.time()
-            hk_batch = hk_matrices_gpu[start_idx:end_idx]
-            # eigvalsh returns (batch_size, num_wann)
-            evals_batch = cp.linalg.eigvalsh(hk_batch)
-            e_gpu[:, start_idx:end_idx] = evals_batch.T
+            hk_batch = hk_matrices[start_idx:end_idx]
+
+            if self.out_eigvec_flag:
+                # eigh returns (eigenvalues, eigenvectors)
+                evals_batch, evecs_batch = cp.linalg.eigh(hk_batch)
+                e_gpu[start_idx:end_idx, :] = evals_batch
+                evecs_gpu[start_idx:end_idx, :, :] = evecs_batch
+            else:
+                # eigvalsh returns only eigenvalues
+                evals_batch = cp.linalg.eigvalsh(hk_batch)
+                e_gpu[start_idx:end_idx, :] = evals_batch
+
+            cp.cuda.Device().synchronize()
             total_eig_time += time.time() - eig_start
 
             # Print progress
@@ -174,43 +181,48 @@ class EK2DCalculator:
                 progress = (batch_idx + 1) / num_batches * 100
                 elapsed_total = time.time() - start_total_time
                 logger.info(
-                    f"  Progress: {progress:.1f}%, "
-                    f"Batch {batch_idx + 1}/{num_batches}, "
-                    f"Elapsed: {elapsed_total:.1f}s, "
-                    f"Eig: {total_eig_time:.1f}s"
+                    f"  Progress: {progress:.1f}%, Batch {batch_idx + 1}/{num_batches}, "
+                    f"Elapsed: {elapsed_total:.1f}s, Eig: {total_eig_time:.1f}s"
                 )
 
-        # Print performance summary
         logger.info("\nPerformance summary:")
         logger.info(f"  Total diagonalization time: {total_eig_time:.2f}s")
         logger.info(
             f"  Average time per k-point: {total_eig_time / total_kpoints * 1000:.2f}ms"
         )
 
-        # Reshape results to 3D array
-        e_gpu = e_gpu.reshape((num_wann, self.nk, self.nk))
+        logger.info("Band energy contour map complete.")
+        logger.info(f"  Energy range: {e_gpu.min():.4f} -> {e_gpu.max():.4f} eV")
 
-        # Convert results back to CPU
-        e = cp.asnumpy(e_gpu)
+        # Keep on GPU, let caller decide when to convert
+        logger.info("Data kept on GPU.")
+        return e_gpu, evecs_gpu
 
-        logger.info("Band energy contour map complete (GPU).")
-        logger.info(f"  Energy range: {e.min():.4f} -> {e.max():.4f} eV")
+    def calculate_eigh(self):
+        self.out_eigvec_flag = True
+        if BACKEND == "gpu":
+            logger.info("Using GPU-accelerated calculation...")
+            evals_gpu, evecs_gpu = self._compute_eigen_cuda(self.ham)
+            # Convert to CPU at the interface level
+            evals = cp.asnumpy(evals_gpu)
+            evecs = cp.asnumpy(evecs_gpu)
+            # Free GPU memory after conversion
+            cp.get_default_memory_pool().free_all_blocks()
+            cp.get_default_pinned_memory_pool().free_all_blocks()
+        else:
+            logger.info("Using CPU calculation...")
+            evals, evecs = self._compute_eigen(self.ham)
+        # Return raw output immediately if requested
 
-        # Explicitly free temporary GPU memory
-        cp.get_default_memory_pool().free_all_blocks()
-        cp.get_default_pinned_memory_pool().free_all_blocks()
-
-        return e, self.k1_grid, self.k2_grid
+        logger.info("Returning raw eigenvalue array without post-processing.")
+        return evals, evecs
 
     def calculate(
         self,
         k_range: tuple[float, float] | None = None,
         save_to_file: str | None = None,
-        hr_file: str | None = None,
-        std_file: str | None = None,
-        folder: str | None = None,
-        seedname: str | None = None,
-    ) -> dict[str, np.ndarray]:
+        raw_output: bool = False,
+    ) -> dict[str, np.ndarray] | np.ndarray:
         """
         Compute a band energy contour map from pre-loaded Wannier90 Hamiltonian data.
 
@@ -225,31 +237,41 @@ class EK2DCalculator:
         save_to_file : str, optional
             If provided, saves the **primitive BZ result** (before extension) to an HDF5 file
             using EK2DIO. The `.h5` extension is appended if not present.
-        hr_file, std_file, folder, seedname : str, optional
-            Metadata for saving to HDF5. If not provided, uses values from MLWFHamiltonian
-            if available.
+        raw_output : bool, default False
+            If True, returns the raw eigenvalue array immediately after calculation
+            without reshape, dictionary wrapping, or any post-processing.
+            Useful for further custom processing.
 
         Returns
         -------
-        dict
-            A dictionary containing:
-            - 'energies': (num_wann, Nk, Nk) array of band energies in eV.
-            - 'kx', 'ky': (Nk, Nk) arrays of real-space k-coordinates in 1/Angstrom.
-            - 'k1_grid', 'k2_grid': (Nk, Nk) arrays of fractional k-coordinates.
-            - 'bvecs': (3, 3) array of reciprocal lattice vectors in 1/Angstrom, or None.
+        dict or np.ndarray
+            If `raw_output` is False (default):
+                A dictionary containing 'energies', 'kx', 'ky', 'k1_grid', 'k2_grid', 'bvecs'.
+            If `raw_output` is True:
+                Raw eigenvalue array with shape (N, num_wann) in ascending order.
 
         Notes
         -----
         For saving/loading band structure data, use the EK2DIO class instead.
         """
-        # Step 1: Calculate base E(k)
-        if self.use_gpu and CUPY_AVAILABLE:
+        self.out_eigvec_flag = False
+        # Step 1: Calculate base E(k) based on BACKEND
+        if BACKEND == "gpu":
             logger.info("Using GPU-accelerated calculation...")
-            e, k1_grid, k2_grid = self._compute_ek2d_cuda(self.wh)
+            e_gpu, _ = self._compute_eigen_cuda(self.ham)
+            # Convert to CPU at the interface level
+            e = cp.asnumpy(e_gpu)
+            # Free GPU memory after conversion
+            cp.get_default_memory_pool().free_all_blocks()
+            cp.get_default_pinned_memory_pool().free_all_blocks()
         else:
             logger.info("Using CPU calculation...")
-            e = self._compute_ek2d(self.wh)
-            k1_grid, k2_grid = self.k1_grid, self.k2_grid
+            e, _ = self._compute_eigen(self.ham)
+
+        # Reshape to (num_wann, nk, nk)
+        # eigvalsh returns eigenvalues in ascending order, shape (N, num_wann)
+        e = e.T.reshape((self.num_wann, self.nk, self.nk))
+        k1_grid, k2_grid = self.k1_grid, self.k2_grid
 
         # Step 2: Save primitive BZ result if requested — BEFORE extension
         if save_to_file:
@@ -258,7 +280,7 @@ class EK2DCalculator:
                 k1_grid=k1_grid,
                 k2_grid=k2_grid,
                 filename=save_to_file,
-                mlwf_hamiltonian=self.wh,
+                hamiltonian=self.ham,
             )
 
         # Step 3: Optionally extend to larger k-range
@@ -277,7 +299,7 @@ class EK2DCalculator:
             k2_grid = extended["k2_grid"]
 
         # Step 4: Compute real-space coordinates
-        kx, ky = frac_to_real_2d(k1_grid, k2_grid, self.wh.bvecs)
+        kx, ky = frac_to_real_2d(k1_grid, k2_grid, self.ham.bvecs)
 
         return {
             "energies": e,
@@ -285,5 +307,5 @@ class EK2DCalculator:
             "ky": ky,
             "k1_grid": k1_grid,
             "k2_grid": k2_grid,
-            "bvecs": self.wh.bvecs,
+            "bvecs": self.ham.bvecs,
         }

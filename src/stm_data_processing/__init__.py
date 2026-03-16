@@ -1,8 +1,9 @@
 __author__ = "hunfen.gpt"
 
-from . import dft, io, stm, utils
+from . import config, dft, io, stm, utils
 
 __all__ = [
+    "config",
     "dft",
     "io",
     "stm",

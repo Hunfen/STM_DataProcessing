@@ -1,624 +1,540 @@
-import time
+import logging
+import os
+import pickle
 from pathlib import Path
+from typing import Any
 
-import h5py
 import numpy as np
-from scipy.special import expit
+import pyfftw
 
-from stm_data_processing.io.lattice_loader import LatticeLoader
+from stm_data_processing.config import get_backend, get_xp
+from stm_data_processing.dft.wannier90.mlwf_gk import GreenFunction
+from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
+from stm_data_processing.utils.miscellaneous import (
+    extend_qpi,
+    frac_to_real_2d,
+    k_to_q,
+)
 
-try:
-    import cupy as cp
-
-    CUPY_AVAILABLE = True
-except ImportError:
-    CUPY_AVAILABLE = False
+logger = logging.getLogger(__name__)
 
 
-class SusceptibilityCalculator:
-    """Class for calculating static Lindhard susceptibility chi0(q) from band structure data."""
+class SusceptibilityCalculator_wang2012:
+    """Class for calculating Lindhard susceptibility chi0(q) from tight-binding Hamiltonian.
+    Accelatration reference:
+    DOI: https://doi.org/10.1103/PhysRevB.85.224529
+    """
 
-    def __init__(self, eta: float = 20e-3):
-        """Initialize susceptibility calculator.
+    def __init__(
+        self,
+        hamiltonian: MLWFHamiltonian,
+        nk: int = 256,
+        eta: float = 5e-3,
+        minit: np.ndarray | None = None,
+        mfin: np.ndarray | None = None,
+    ):
+        if not isinstance(hamiltonian, MLWFHamiltonian):
+            raise TypeError(
+                f"Expected MLWFHamiltonian, got {type(hamiltonian).__name__}"
+            )
 
-        Parameters
-        ----------
-        eta : float
-            Small imaginary broadening in the denominator (same units as energies);
-            typical values range from 1e-3 to 2e-2 eV.
-        """
+        self.ham = hamiltonian
+        self.nk = nk
         self.eta = eta
 
-    @staticmethod
-    def _fermi(e, mu: float = 0, T: float = 1.5):
-        """Fermi-Dirac distribution function.
-
-        Parameters
-        ----------
-        e : array_like
-            Energy values.
-        mu : float, optional
-            Chemical potential. Default is 0.
-        T : float, optional
-            Temperature in Kelvin. Default is 1.5.
-
-        Returns
-        -------
-        array_like
-            Fermi-Dirac occupation numbers.
-        """
-        if T <= 1e-12:
-            return (e < mu).astype(float)
-        x = (e - mu) / T
-        return expit(-x)
-
-    @staticmethod
-    def _window(e: np.ndarray, mu: float, Ec: float, delta: float) -> np.ndarray:
-        """Smooth energy window W(|e-mu|) ~ 1 inside |e-mu|<Ec, decays outside.
-
-        If Ec<=0 -> no window (all ones).
-
-        Parameters
-        ----------
-        e : np.ndarray
-            Energy values.
-        mu : float
-            Chemical potential.
-        Ec : float
-            Half-width of the energy window.
-        delta : float
-            Smoothness parameter for the window edge.
-
-        Returns
-        -------
-        np.ndarray
-            Window function values.
-        """
-        if Ec <= 0:
-            return np.ones_like(e, dtype=np.float64)
-        if delta <= 0:
-            # hard cutoff
-            return (np.abs(e - mu) <= Ec).astype(np.float64)
-        x = (np.abs(e - mu) - Ec) / delta
-        x = np.clip(x, -80.0, 80.0)
-        return 1.0 / (1.0 + np.exp(x))
-
-    @staticmethod
-    def _extend_chi0(
-        chi0_base: np.ndarray,
-        q1_base: np.ndarray,
-        q2_base: np.ndarray,
-        qmin: float,
-        qmax: float,
-    ):
-        """
-        Extend susceptibility chi0 with strictly preserved q-density
-        and exact [qmin, qmax) cropping.
-
-        Parameters
-        ----------
-        chi0_base : np.ndarray
-            (nk, nk) complex array.
-        q1_base, q2_base : np.ndarray
-            Base q-grid in fractional coordinates [-0.5, 0.5).
-        qmin, qmax : float
-            Desired q-range in fractional units.
-
-        Returns
-        -------
-        chi0_ext, q1_ext, q2_ext
-        """
-
-        if chi0_base.ndim != 2:
-            raise ValueError("chi0_base must be 2D (nk, nk)")
-
-        nq, nq2 = chi0_base.shape
-        if nq != nq2:
-            raise ValueError("chi0_base must be square")
-
-        # ---------- 1. determine integer shifts ----------
-        n_min = int(np.floor(qmin + 0.5))
-        n_max = int(np.ceil(qmax - 0.5))
-        shifts = np.arange(n_min, n_max + 1)
-
-        nq_big = nq * len(shifts)
-
-        chi0_big = np.zeros((nq_big, nq_big), dtype=chi0_base.dtype)
-        q1_big = np.zeros((nq_big, nq_big))
-        q2_big = np.zeros((nq_big, nq_big))
-
-        # ---------- 2. tile ----------
-        for ix, sx in enumerate(shifts):
-            for iy, sy in enumerate(shifts):
-                x0 = ix * nq
-                x1 = (ix + 1) * nq
-                y0 = iy * nq
-                y1 = (iy + 1) * nq
-
-                chi0_big[x0:x1, y0:y1] = chi0_base
-                q1_big[x0:x1, y0:y1] = q1_base + sx
-                q2_big[x0:x1, y0:y1] = q2_base + sy
-
-        # ---------- 3. crop ----------
-        mask_x = (q1_big[:, 0] >= qmin) & (q1_big[:, 0] < qmax)
-        mask_y = (q2_big[0, :] >= qmin) & (q2_big[0, :] < qmax)
-
-        chi0_ext = chi0_big[np.ix_(mask_x, mask_y)]
-        q1_ext = q1_big[np.ix_(mask_x, mask_y)]
-        q2_ext = q2_big[np.ix_(mask_x, mask_y)]
-
-        return chi0_ext, q1_ext, q2_ext
-
-    def _calculate_chi0(
-        self,
-        energies: np.ndarray,
-        f_k: np.ndarray,
-        w_k: np.ndarray,
-        q1_grid: np.ndarray,
-        q2_grid: np.ndarray,
-        matrix_element: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute the static Lindhard susceptibility chi0(q) on an aligned q-grid.
-
-        Uses array rolling to obtain E(k+q). Implemented in CPU serial mode.
-
-        Parameters
-        ----------
-        energies : np.ndarray
-            Band energies E_n(k) on a uniform fractional k-grid in [-0.5, 0.5).
-            Shape: (nband, nk, nk).
-        f_k : np.ndarray
-            Fermi-Dirac occupation numbers f_n(k) = f(E_n(k)).
-            Shape: (nband, nk, nk).
-        w_k : np.ndarray
-            Energy window factors W_n(k) = W(|E_n(k)-mu|).
-            Shape: (nband, nk, nk).
-        q1_grid : np.ndarray
-            Precomputed aligned q-grid in fractional coordinates, wrapped to [-0.5, 0.5).
-            Shape: (nk, nk).
-        q2_grid : np.ndarray
-            Precomputed aligned q-grid in fractional coordinates, wrapped to [-0.5, 0.5).
-            Shape: (nk, nk).
-        matrix_element : np.ndarray | None, optional
-            Optional momentum matrix elements M_{mn}(k). If provided, they modulate the susceptibility.
-            Shape: (nband, nband, nk, nk).
-
-        Returns
-        -------
-        tuple[np.ndarray, np.ndarray, np.ndarray]
-            q1_grid, q2_grid : Same as input.
-            chi0 : Static susceptibility chi0(q). Shape: (nk, nk), dtype: complex128.
-        """
-        _, nk1, nk2 = energies.shape
-
-        # Validate input data
-        if nk1 != nk2:
-            raise ValueError(f"Expected square k-grid, got ({nk1}, {nk2})")
-
-        if f_k.shape != energies.shape:
-            raise ValueError(
-                f"f_k shape {f_k.shape} must match energies shape {energies.shape}"
-            )
-        if w_k.shape != energies.shape:
-            raise ValueError(
-                f"w_k shape {w_k.shape} must match energies shape {energies.shape}"
-            )
-
-        chi0 = np.zeros((nk1, nk2), dtype=np.complex128)
-
-        # Serial loops over q (but vectorized over k-grid within each q using roll)
-        for iq1 in range(nk1):
-            dq1 = iq1
-            for iq2 in range(nk2):
-                dq2 = iq2
-
-                e_kq = np.roll(energies, shift=(-dq1, -dq2), axis=(1, 2))
-                f_kq = np.roll(f_k, shift=(-dq1, -dq2), axis=(1, 2))
-                w_kq = np.roll(w_k, shift=(-dq1, -dq2), axis=(1, 2))
-
-                denom = (e_kq[None, ...] - energies[:, None, ...]) + (1j * self.eta)
-                numer = f_k[:, None, ...] - f_kq[None, ...]
-                win = w_k[:, None, ...] * w_kq[None, ...]
-
-                if matrix_element is None:
-                    chi0[iq1, iq2] = np.sum(win * numer / denom)
-                else:
-                    chi0[iq1, iq2] = np.sum(matrix_element * win * numer / denom)
-        chi0 = np.fft.fftshift(chi0, axes=(0, 1))
-        return chi0
-
-    def _calculate_chi0_cuda(
-        self,
-        energies: np.ndarray,
-        f_k: np.ndarray,
-        w_k: np.ndarray,
-        q1_grid: np.ndarray,
-        q2_grid: np.ndarray,
-        matrix_element: np.ndarray | None = None,
-    ) -> np.ndarray:
-        """Compute chi0(q) on GPU with reduced memory usage and optional matrix element support.
-
-        Uses band-chunking to avoid O(nband^2 * nk^2) memory blowup.
-        """
-        nband, nk1, nk2 = energies.shape
-        if nk1 != nk2:
-            raise ValueError(f"Expected square k-grid, got ({nk1}, {nk2})")
-        if f_k.shape != energies.shape or w_k.shape != energies.shape:
-            raise ValueError("Shape mismatch in input arrays.")
-        if matrix_element is not None and matrix_element.shape != (
-            nband,
-            nband,
-            nk1,
-            nk2,
-        ):
-            raise ValueError(
-                f"matrix_element shape {matrix_element.shape} must be (nband, nband, nk1, nk2)"
-            )
-
-        print(
-            f"🚀 Starting GPU calculation: nband={nband}, grid={nk1}x{nk2}, eta={self.eta:.3f}, "
-            f"matrix_element={'enabled' if matrix_element is not None else 'disabled'}"
+        logger.info(
+            f"[SusceptibilityCalculator] Initialized with backend={get_backend()}"
         )
-        start_time = time.time()
 
-        # Transfer to GPU
-        energies_gpu = cp.asarray(energies)
-        f_k_gpu = cp.asarray(f_k)
-        w_k_gpu = cp.asarray(w_k)
+        self._minit: np.ndarray | None = None
+        self._mfin: np.ndarray | None = None
+        self._init_orbital_matrices(minit, mfin)
 
-        if matrix_element is not None:
-            matrix_element_gpu = cp.asarray(matrix_element)
-        else:
-            matrix_element_gpu = None
+        self._hk_grid = None
+        self._gf = None
+        self._k_points = None
+        self._k1_grid = None
+        self._k2_grid = None
+        self._q1_grid = None
+        self._q2_grid = None
 
-        chi0_gpu = cp.zeros((nk1, nk2), dtype=cp.complex128)
+    # Properties
+    @property
+    def num_wann(self):
+        """Number of Wannier functions."""
+        return self.ham.num_wann
 
-        # Chunk size for (m, n) bands — tune based on GPU memory
-        band_chunk_size = min(8, nband)  # e.g., 8 → max 64 band pairs per chunk
+    @property
+    def minit(self):
+        """Initial state orbital selection matrix."""
+        return self._minit
 
-        total_q = nk1 * nk2
-        processed_q = 0
+    @property
+    def mfin(self):
+        """Final state orbital selection matrix."""
+        return self._mfin
 
-        for iq1 in range(nk1):
-            for iq2 in range(nk2):
-                processed_q += 1
-                if processed_q % max(1, total_q // 10) == 0:
-                    elapsed = time.time() - start_time
-                    est_total = elapsed / processed_q * total_q
-                    print(
-                        f"📦 Processed {processed_q}/{total_q} q-points "
-                        f"(elapsed: {elapsed:.1f}s, est. remaining: {est_total - elapsed:.1f}s)"
-                    )
+    @property
+    def xp(self):
+        return get_xp()
 
-                # Shifted quantities at k+q
-                e_kq = cp.roll(energies_gpu, shift=(-iq1, -iq2), axis=(1, 2))
-                f_kq = cp.roll(f_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
-                w_kq = cp.roll(w_k_gpu, shift=(-iq1, -iq2), axis=(1, 2))
+    @property
+    def hk_grid(self):
+        """Lazy load hk_grid, cached per instance."""
+        if self._hk_grid is None:
+            self._hk_grid = self.xp.asarray(self.ham.hk(self.k_points))
+        return self._hk_grid
 
-                chi0_q_val = cp.array(0.0 + 0.0j, dtype=cp.complex128)
+    @property
+    def gf(self):
+        """GreenFunction instance."""
+        if self._gf is None:
+            self._gf = GreenFunction(self.ham, eta=self.eta)
+        return self._gf
 
-                # Process (m, n) in chunks
-                for m_start in range(0, nband, band_chunk_size):
-                    m_end = min(m_start + band_chunk_size, nband)
-                    for n_start in range(0, nband, band_chunk_size):
-                        n_end = min(n_start + band_chunk_size, nband)
+    @property
+    def k_points(self):
+        """k_frac grid points."""
+        if self._k_points is None:
+            k_vals = np.linspace(-0.5, 0.5, self.nk, endpoint=False)
+            k1, k2 = np.meshgrid(k_vals, k_vals, indexing="ij")
 
-                        # Extract slices
-                        e_n = energies_gpu[n_start:n_end, :, :]  # (nb2, nk1, nk2)
-                        f_n = f_k_gpu[n_start:n_end, :, :]
-                        w_n = w_k_gpu[n_start:n_end, :, :]
+            self._k1_grid = k1
+            self._k2_grid = k2
+            self._q1_grid = k1.copy()
+            self._q2_grid = k2.copy()
 
-                        e_mq = e_kq[m_start:m_end, :, :]  # (nb1, nk1, nk2)
-                        f_mq = f_kq[m_start:m_end, :, :]
-                        w_mq = w_kq[m_start:m_end, :, :]
-
-                        # Broadcast to (nb1, nb2, nk1, nk2)
-                        denom = (
-                            e_n[None, :, :, :] - e_mq[:, None, :, :]
-                        ) + 1j * self.eta
-                        numer = f_n[None, :, :, :] - f_mq[:, None, :, :]
-                        win = w_n[None, :, :, :] * w_mq[:, None, :, :]
-
-                        if matrix_element_gpu is not None:
-                            M_mn = matrix_element_gpu[
-                                m_start:m_end, n_start:n_end, :, :
-                            ]  # (nb1, nb2, nk1, nk2)
-                            term = M_mn * win * numer / denom
-                        else:
-                            term = win * numer / denom
-
-                        # Sum over all bands and k-points
-                        chi0_q_val += cp.sum(term)
-
-                chi0_gpu[iq1, iq2] = chi0_q_val
-
-                # Optional: free memory periodically (helps on small GPUs)
-                if iq1 % 4 == 0 and iq2 == 0:
-                    cp.get_default_memory_pool().free_all_blocks()
-
-        print("💾 Transferring result from GPU...")
-        chi0 = cp.asnumpy(chi0_gpu)
-        chi0 = np.fft.fftshift(chi0, axes=(0, 1))
-
-        total_time = time.time() - start_time
-        print(f"✅ GPU computation completed in {total_time:.2f} seconds.")
-        return chi0
-
-    def calculate_chi0(
-        self,
-        ek2d: dict[str, np.ndarray],
-        q_range: tuple[float, float] | None = (-0.5, 0.5),
-        mu: float = 0.0,
-        T: float = 0.0,
-        Ec: float = 0.3,
-        delta: float = 0.02,
-        matrix_element: np.ndarray | None = None,
-        use_gpu: bool = False,
-        save_path: str | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute the static Lindhard susceptibility chi0(q) on an aligned q-grid.
-
-        Uses array rolling to obtain E(k+q).
-
-        Parameters
-        ----------
-        ek2d : dict
-            Dictionary returned by wannier90_ek2d containing:
-            - 'energies': (nband, nk, nk) float array of band energies E_n(k)
-            - 'k1_grid', 'k2_grid': (nk, nk) arrays of fractional k-coordinates in [-0.5, 0.5)
-            - 'bvecs': reciprocal lattice vectors
-        q_range : tuple[float, float] | None, optional
-            Desired q-range in fractional units. Default is (-0.5, 0.5).
-        mu : float, optional
-            Chemical potential (in the same units as energies, e.g., eV). Default is 0.0.
-        T : float, optional
-            Thermal energy (in K). Setting T=0 corresponds to zero temperature (step-function occupation).
-            Default is 0.0.
-        Ec : float, optional
-            Half-width of the energy window around mu (in eV). If Ec <= 0, no windowing is applied.
-            Default is 0.3.
-        delta : float, optional
-            Smoothness parameter for the window edge (in eV). If delta <= 0, a hard cutoff is used.
-            Default is 0.02.
-        matrix_element : np.ndarray | None, optional
-            Optional momentum matrix elements M_{mn}(k). If provided, they modulate the susceptibility.
-            Shape: (nband, nband, nk, nk).
-        use_gpu : bool, optional
-            If True, use GPU acceleration with CUDA. Default is False.
-        save_path : str | None, optional
-            If provided, save the results to an HDF5 file at this path.
-
-        Returns
-        -------
-        dict
-            Dictionary containing:
-            - 'chi0': (nk, nk) complex128 ndarray, static susceptibility chi0(q)
-            - 'q1_grid', 'q2_grid': (nk, nk) ndarray, aligned q-grid in fractional coordinates
-            - 'qx', 'qy': (nk, nk) ndarray, q-grid in real coordinates
-            - 'bvecs': reciprocal lattice vectors
-        """
-        energies = np.asarray(ek2d["energies"])
-        k1_grid = ek2d["k1_grid"]
-        k2_grid = ek2d["k2_grid"]
-        lattice_obj = LatticeLoader(bvecs_array=ek2d["bvecs"])
-
-        if not (
-            np.all(k1_grid >= -0.5)
-            and np.all(k1_grid < 0.5)
-            and np.all(k2_grid >= -0.5)
-            and np.all(k2_grid < 0.5)
-        ):
-            raise ValueError(
-                "Input k-grid must be in primitive Brillouin zone [-0.5, 0.5)"
+            self._k_points = np.column_stack(
+                [
+                    k1.ravel(),
+                    k2.ravel(),
+                    np.zeros(self.nk * self.nk, dtype=np.float64),
+                ]
             )
+        return self._k_points
 
-        _, nk1, nk2 = energies.shape
-        if nk1 != nk2:
-            raise ValueError(f"Expected square k-grid, got ({nk1}, {nk2})")
+    @property
+    def k1_grid(self):
+        """k1 grid (initialized with k_points)."""
+        _ = self.k_points  # Ensure initialization
+        return self._k1_grid
 
-        # Build q-grid
-        dk = 1.0 / nk1
-        q = (np.arange(nk1) - nk1 // 2) * dk  # [-0.5, 0.5)
-        q1_grid, q2_grid = np.meshgrid(q, q, indexing="ij")
+    @property
+    def k2_grid(self):
+        """k2 grid (initialized with k_points)."""
+        _ = self.k_points  # Ensure initialization
+        return self._k2_grid
 
-        f_k = self._fermi(energies, mu=mu, T=T).astype(np.float64)
-        w_k = self._window(energies, mu=mu, Ec=Ec, delta=delta).astype(np.float64)
+    @property
+    def q1_grid(self):
+        """q1 grid (copy of k1_grid)."""
+        _ = self.k_points  # Ensure initialization
+        return self._q1_grid
 
-        if use_gpu:
-            if not CUPY_AVAILABLE:
-                print("Warning: CuPy not available. Falling back to CPU.")
-                use_gpu = False
-            else:
-                chi0 = self._calculate_chi0_cuda(
-                    energies=energies,
-                    f_k=f_k,
-                    w_k=w_k,
-                    q1_grid=q1_grid,
-                    q2_grid=q2_grid,
-                    matrix_element=matrix_element,
+    @property
+    def q2_grid(self):
+        """q2 grid (copy of k2_grid)."""
+        _ = self.k_points  # Ensure initialization
+        return self._q2_grid
+
+    # Core math
+    def _compute_single_particle_spectra(self, omega):
+        """Compute spectral function A(k, omega) = -Im[G(k, omega)]/pi for all k-points."""
+        hk_grid = self.hk_grid
+        gr_k = self.gf.compute_green(hk_grid, omega)
+        return -self.xp.imag(gr_k) / self.xp.pi
+
+    def _compute_imag_chi_cuda(self, omega_limit: float, resolution: float):
+        """CUDA version of occupied-unoccupied susceptibility calculation."""
+        import cupy as cp
+
+        logger.info(
+            f"Starting CUDA occupied-unoccupied susceptibility: omega_limit={omega_limit}, resolution={resolution}"
+        )
+
+        nw = self.num_wann
+        nk = self.nk
+
+        MAX_GPU_MEMORY_FRACTION = 0.75
+        mem_pool = self.xp.get_default_memory_pool()
+        mem_pool.set_limit(size=int(24 * 1024**3 * MAX_GPU_MEMORY_FRACTION))
+
+        logger.info(
+            f"[CUDA] Memory pool limit set to {MAX_GPU_MEMORY_FRACTION * 100:.0f}% of 24GB"
+        )
+
+        n_eps = int(np.round(np.abs(omega_limit) / resolution)) + 1
+        eps_occ = np.linspace(-np.abs(omega_limit), 0.0, n_eps)
+        eps_unocc = eps_occ + omega_limit
+
+        n_spectra_total = 2 * n_eps
+
+        logger.info(
+            f"Total energy points: {n_eps}, k-points: {nk}x{nk}, Wannier functions: {nw}"
+        )
+        logger.info(f"[CUDA] Total spectral function computations: {n_spectra_total}")
+
+        chi_q_accum = self.xp.zeros((nk, nk), dtype=self.xp.float64)
+
+        logger.info("[CUDA] Computing spectral functions and convolution...")
+        spectra_count = 0
+        for i in range(n_eps):
+            spectra_occ = self._compute_single_particle_spectra(eps_occ[i])
+            spectra_occ_2d = self.xp.ascontiguousarray(
+                spectra_occ.reshape(nk, nk, nw, nw)
+            )
+            del spectra_occ
+            spectra_count += 1
+
+            spectra_unocc = self._compute_single_particle_spectra(eps_unocc[i])
+            spectra_unocc_2d = self.xp.ascontiguousarray(
+                spectra_unocc.reshape(nk, nk, nw, nw)
+            )
+            del spectra_unocc
+            spectra_count += 1
+
+            b_occ = self.xp.fft.fftn(spectra_occ_2d, axes=(0, 1))
+            b_occ_shifted = self.xp.fft.fftshift(b_occ, axes=(0, 1))
+            del spectra_occ_2d, b_occ
+
+            b_unocc = self.xp.fft.fftn(spectra_unocc_2d, axes=(0, 1))
+            b_unocc_shifted = self.xp.fft.fftshift(b_unocc, axes=(0, 1))
+            del spectra_unocc_2d, b_unocc
+
+            b_prod = self.xp.einsum("ijab,ijba->ij", b_occ_shifted, b_unocc_shifted)
+            del b_occ_shifted, b_unocc_shifted
+
+            conv_q = self.xp.fft.ifftn(
+                self.xp.fft.ifftshift(b_prod, axes=(0, 1)), axes=(0, 1)
+            ).real
+            del b_prod
+
+            chi_q_accum += conv_q
+            del conv_q
+
+            if spectra_count % 20 == 0:
+                mem_pool.free_unused_blocks()
+
+            if (
+                spectra_count % max(1, n_spectra_total // 10) == 0
+                or spectra_count == n_spectra_total
+            ):
+                progress = spectra_count / n_spectra_total * 100
+                used_mem = mem_pool.used_bytes() / 1024**3
+                logger.info(
+                    f"[CUDA] Spectral function progress: {progress:.1f}% ({spectra_count}/{n_spectra_total}), "
+                    f"GPU Memory: {used_mem:.2f} GB"
                 )
+
+        chi_q_accum = self.xp.fft.fftshift(chi_q_accum)
+        chi_q = -np.abs(resolution) / (2 * np.pi) * chi_q_accum
+        chi_q = self.xp.asnumpy(chi_q)
+
+        mem_pool.free_all_blocks()
+        cp.get_default_memory_pool().free_all_blocks()
+
+        logger.info("[CUDA] Susceptibility calculation completed.")
+
+        return chi_q
+
+    def _compute_imag_chi(self, omega_limit: float, resolution: float):
+        """Compute Im[chi(q)] with orbital selection matrices."""
+        import importlib.util
+
+        PYFFTW_AVAILABLE = importlib.util.find_spec("pyfftw") is not None
+        if not PYFFTW_AVAILABLE:
+            logger.warning("pyFFTW not available, falling back to numpy.fft")
+
+        nw = self.num_wann
+        nk = self.nk
+
+        n_eps = int(np.round(np.abs(omega_limit) / resolution)) + 1
+        eps_occ = np.linspace(-np.abs(omega_limit), 0.0, n_eps)
+        eps_unocc = eps_occ + omega_limit
+
+        n_spectra_total = 2 * n_eps
+        logger.info(
+            f"Occupied energy range: [{eps_occ[0]:.3f}, {eps_occ[-1]:.3f}] eV ({n_eps} points), "
+            f"Unoccupied energy range: [{eps_unocc[0]:.3f}, {eps_unocc[-1]:.3f}] eV ({n_eps} points)"
+        )
+        logger.info(f"[CPU] Total spectral function computations: {n_spectra_total}")
+
+        chi_q_accum = np.zeros((nk, nk), dtype=np.float64)
+
+        if PYFFTW_AVAILABLE:
+            logger.info("[CPU] Starting pyFFTW plan initialization...")
+
+            num_threads = (
+                max(1, len(os.sched_getaffinity(0)))
+                if hasattr(os, "sched_getaffinity")
+                else os.cpu_count()
+            )
+            num_threads = 10
+
+            logger.info(f"[CPU] Using {num_threads} threads, nk={nk}, num_wann={nw}")
+
+            wisdom_path = self._get_fftw_wisdom_path(nk, nw)
+
+            spectra_shape = (nk, nk, nw, nw)
+            fft_axes = (0, 1)
+
+            logger.info("[CPU] Creating FFT plan for occupied states...")
+            fft_occ, input_occ = self._init_fftw_plan(
+                spectra_shape, fft_axes, num_threads, wisdom_path
+            )
+            logger.info("[CPU] FFT plan for occupied states completed.")
+
+            logger.info("[CPU] Creating FFT plan for unoccupied states...")
+            fft_unocc, input_unocc = self._init_fftw_plan(
+                spectra_shape, fft_axes, num_threads, wisdom_path
+            )
+            logger.info("[CPU] FFT plan for unoccupied states completed.")
+
+            logger.info("[CPU] Creating IFFT plan for convolution...")
+            conv_shape = (nk, nk)
+            ifft_conv, input_conv = self._init_fftw_plan(
+                conv_shape, fft_axes, num_threads, wisdom_path
+            )
+            logger.info("[CPU] IFFT plan for convolution completed.")
+
+            logger.info(f"[CPU] pyFFTW initialized with {num_threads} threads")
         else:
-            chi0 = self._calculate_chi0(
-                energies=energies,
-                f_k=f_k,
-                w_k=w_k,
-                q1_grid=q1_grid,
-                q2_grid=q2_grid,
-                matrix_element=matrix_element,
+            fft_occ = fft_unocc = ifft_conv = None
+            input_occ = input_unocc = input_conv = None
+
+        logger.info(
+            "[CPU] Computing spectral functions and convolution (streaming mode)..."
+        )
+        spectra_count = 0
+
+        for i in range(n_eps):
+            spectra_occ = np.asarray(self._compute_single_particle_spectra(eps_occ[i]))
+            spectra_occ = spectra_occ.reshape(nk, nk, nw, nw)
+
+            spectra_occ = np.einsum("ac,ijcb->ijab", self._minit, spectra_occ)
+            spectra_count += 1
+
+            spectra_unocc = np.asarray(
+                self._compute_single_particle_spectra(eps_unocc[i])
+            )
+            spectra_unocc = spectra_unocc.reshape(nk, nk, nw, nw)
+
+            spectra_unocc = np.einsum("ac,ijcb->ijab", self._mfin, spectra_unocc)
+            spectra_count += 1
+
+            if PYFFTW_AVAILABLE:
+                input_occ[:] = spectra_occ
+                b_occ = fft_occ()
+                b_occ_shifted = np.fft.fftshift(b_occ, axes=(0, 1))
+
+                input_unocc[:] = spectra_unocc
+                b_unocc = fft_unocc()
+                b_unocc_shifted = np.fft.fftshift(b_unocc, axes=(0, 1))
+            else:
+                b_occ = np.fft.fftn(spectra_occ, axes=(0, 1))
+                b_occ_shifted = np.fft.fftshift(b_occ, axes=(0, 1))
+                b_unocc = np.fft.fftn(spectra_unocc, axes=(0, 1))
+                b_unocc_shifted = np.fft.fftshift(b_unocc, axes=(0, 1))
+
+            del spectra_occ, spectra_unocc
+
+            b_prod = np.einsum("ijab,ijba->ij", b_occ_shifted, b_unocc_shifted)
+            del b_occ_shifted, b_unocc_shifted, b_occ, b_unocc
+
+            if PYFFTW_AVAILABLE:
+                input_conv[:] = np.fft.ifftshift(b_prod, axes=(0, 1))
+                conv_q = ifft_conv().real
+            else:
+                conv_q = np.fft.ifftn(
+                    np.fft.ifftshift(b_prod, axes=(0, 1)), axes=(0, 1)
+                ).real
+
+            del b_prod
+
+            chi_q_accum += conv_q
+            del conv_q
+
+            if (
+                spectra_count % max(1, n_spectra_total // 10) == 0
+                or spectra_count == n_spectra_total
+            ):
+                progress = spectra_count / n_spectra_total * 100
+                logger.info(
+                    f"[CPU] Spectral function progress: {progress:.1f}% ({spectra_count}/{n_spectra_total})"
+                )
+
+        chi_q = np.fft.fftshift(chi_q_accum)
+        chi_q = -np.abs(resolution) / (2 * np.pi) * chi_q
+
+        logger.info("[CPU] Susceptibility calculation completed.")
+        return chi_q
+
+    # Helper
+    def _get_fftw_wisdom_path(self, nk: int, nw: int) -> str:
+        """Get FFTW wisdom file path for specific grid size."""
+        wisdom_dir = Path(__file__).parent / "fftw_wisdom"
+        wisdom_dir.mkdir(parents=True, exist_ok=True)
+        return str(wisdom_dir / f"fftw_wisdom_nk{nk}_nw{nw}.json")
+
+    def _init_fftw_plan(
+        self, shape: tuple, fft_axes: tuple, num_threads: int, wisdom_path: str
+    ):
+        wisdom_path_obj = Path(wisdom_path)
+        use_wisdom = False
+
+        if wisdom_path_obj.exists():
+            try:
+                with wisdom_path_obj.open("rb") as f:
+                    wisdom_tuple = pickle.load(f)
+                pyfftw.import_wisdom(wisdom_tuple)
+                logger.info(f"[CPU] Loaded FFTW wisdom from {wisdom_path}")
+                use_wisdom = True
+            except Exception as e:
+                logger.warning(f"[CPU] Failed to load wisdom: {e}")
+
+        fftw_flags = ["FFTW_ESTIMATE"] if use_wisdom else ["FFTW_MEASURE"]
+
+        input_arr = pyfftw.empty_aligned(shape, dtype="complex128")
+        output_arr = pyfftw.empty_aligned(shape, dtype="complex128")
+        fft_plan = pyfftw.FFTW(
+            input_arr,
+            output_arr,
+            axes=fft_axes,
+            flags=fftw_flags,
+            threads=num_threads,
+        )
+
+        if not use_wisdom:
+            wisdom_tuple = pyfftw.export_wisdom()
+            wisdom_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            with wisdom_path_obj.open("wb") as f:
+                pickle.dump(wisdom_tuple, f)
+            logger.info(f"[CPU] Saved FFTW wisdom to {wisdom_path}")
+
+        return fft_plan, input_arr
+
+    def _init_orbital_matrices(
+        self, minit: np.ndarray | None = None, mfin: np.ndarray | None = None
+    ):
+        """Initialize orbital selection matrices."""
+        nw = self.num_wann
+
+        if minit is None:
+            self._minit = np.eye(nw, dtype=np.float64)
+        else:
+            self._verify_matrix(minit, "minit")
+            self._minit = np.asarray(minit, dtype=np.float64)
+
+        if mfin is None:
+            self._mfin = np.eye(nw, dtype=np.float64)
+        else:
+            self._verify_matrix(mfin, "mfin")
+            self._mfin = np.asarray(mfin, dtype=np.float64)
+
+    def _verify_matrix(self, matrix: np.ndarray, name: str):
+        """Verify orbital selection matrix shape."""
+        nw = self.num_wann
+        if matrix.shape != (nw, nw):
+            raise ValueError(f"{name} must have shape ({nw}, {nw}), got {matrix.shape}")
+
+    # Public API
+    def calculate(
+        self,
+        omega_limit: float,
+        resolution: float,
+        q_range: tuple[float, float] | None = (-0.5, 0.5),
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Calculate static Lindhard susceptibility chi0(q)."""
+        nk = self.nk
+
+        # Obtain Backend every time.
+        current_backend = get_backend()
+        logger.info(
+            f"[INFO] Starting susceptibility calculation on {current_backend} "
+            f"(nk={nk}, omega_limit={omega_limit:.3f}, resolution={resolution:.3e})",
+        )
+
+        if current_backend == "gpu":
+            chi_q = self._compute_imag_chi_cuda(omega_limit, resolution)
+        else:
+            chi_q = self._compute_imag_chi(omega_limit, resolution)
+
+        if output_path is not None:
+            logger.info("[INFO] Saving susceptibility results to: %s", output_path)
+            save_susceptibility_to_h5(
+                susceptibility=chi_q,
+                outpath=output_path,
+                module_type="Imaginary Lindhard",
+                bevecs=self.ham.bvecs,
+                eta=self.eta,
+                omega_limit=omega_limit,
+                resolution=resolution,
+                nq=nk,
+                minit=self._minit,
+                mfin=self._mfin,
             )
 
-        # Extend chi0 to desired q_range
+        q1_grid_orig, q2_grid_orig = k_to_q(self.k1_grid, self.k2_grid)
+
         if q_range is not None:
-            chi0, q1_grid, q2_grid = self._extend_chi0(
-                chi0, q1_grid, q2_grid, q_range[0], q_range[1]
+            chi_q, q1_grid, q2_grid = extend_qpi(
+                chi_q, q1_grid_orig, q2_grid_orig, q_range[0], q_range[1]
             )
+        else:
+            q1_grid, q2_grid = q1_grid_orig, q2_grid_orig
 
-        qx, qy = lattice_obj.frac_to_real(q1_grid, q2_grid)
+        qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, self.ham.bvecs)
 
-        result = {
-            "chi0": chi0,
-            "q1_grid": q1_grid,
-            "q2_grid": q2_grid,
-            "qx": qx,
-            "qy": qy,
-            "bvecs": lattice_obj.get_bvecs(),
+        metadata = {
+            "module_type": "imag_Lindhard",
+            "eta": self.eta,
+            "omega_limit": omega_limit,
+            "resolution": resolution,
+            "nq": nk,
+            "bvecs": self.ham.bvecs,
+            "minit": self._minit,
+            "mfin": self._mfin,
         }
 
-        if save_path is not None:
-            self._save_susceptibility_to_h5(
-                chi0_result=result,
-                output_path=save_path,
-                mu=mu,
-                T=T,
-                Ec=Ec,
-                delta=delta,
-                matrix_element_used=(matrix_element is not None),
-                use_gpu=use_gpu,
-            )
+        result: dict[str, Any] = {
+            "data": chi_q,
+            "q1_grid": q1_grid,
+            "q2_grid": q2_grid,
+            "qx_grid": qx_grid,
+            "qy_grid": qy_grid,
+            "metadata": metadata,
+        }
+
+        logger.info("[INFO] Susceptibility calculation completed.")
 
         return result
 
-    def _save_susceptibility_to_h5(
-        self,
-        chi0_result: dict[str, np.ndarray],
-        output_path: str,
-        mu: float = 0.0,
-        T: float = 0.0,
-        Ec: float = 0.3,
-        delta: float = 0.02,
-        matrix_element_used: bool = False,
-        use_gpu: bool = False,
-        compression: str = "gzip",
-        compression_opts: int = 6,
-    ) -> None:
-        """Save susceptibility results to an HDF5 file with compact storage.
+    def set_orbital_selection(
+        self, minit: np.ndarray | None = None, mfin: np.ndarray | None = None
+    ):
+        """Update orbital selection matrices."""
+        if minit is not None:
+            self._verify_matrix(minit, "minit")
+            self._minit = np.asarray(minit, dtype=np.float64)
 
-        Parameters
-        ----------
-        chi0_result : dict[str, np.ndarray]
-            Output dictionary from calculate_chi0, containing:
-            - 'chi0': susceptibility array
-            - 'q1_grid', 'q2_grid': fractional q-grids
-            - 'qx', 'qy': real-space q-grids
-            - 'bvecs': reciprocal lattice vectors
-        output_path : str
-            Path to save the HDF5 file.
-        mu : float, optional
-            Chemical potential used in the calculation.
-        T : float, optional
-            Temperature used in the calculation.
-        Ec : float, optional
-            Energy window half-width used in the calculation.
-        delta : float, optional
-            Smoothness parameter for the window edge.
-        matrix_element_used : bool, optional
-            Whether matrix elements were used in the calculation.
-        use_gpu : bool, optional
-            Whether GPU acceleration was used.
-        compression : str, optional
-            Compression algorithm for the susceptibility dataset.
-        compression_opts : int, optional
-            Compression level for the susceptibility dataset.
-        """
-        chi0 = chi0_result["chi0"]
-        q1_grid = chi0_result["q1_grid"]
-        q2_grid = chi0_result["q2_grid"]
-        bvecs = chi0_result["bvecs"]
+        if mfin is not None:
+            self._verify_matrix(mfin, "mfin")
+            self._mfin = np.asarray(mfin, dtype=np.float64)
 
-        # Extract 1D coordinates from fractional q-grids
-        nq1, nq2 = q1_grid.shape
-        q1_1d = q1_grid[:, 0]
-        q2_1d = q2_grid[0, :]
+        logger.info(
+            f"[INFO] Orbital selection updated: minit shape={self._minit.shape}, "
+            f"mfin shape={self._mfin.shape}"
+        )
 
-        with h5py.File(output_path, "w") as f:
-            print(f"Saving susceptibility results to: {output_path}")
-
-            # Save main datasets
-            f.create_dataset(
-                "chi0",
-                data=chi0,
-                compression=compression,
-                compression_opts=compression_opts,
-            )
-
-            f.create_dataset("q1", data=q1_1d)
-            f.create_dataset("q2", data=q2_1d)
-            f.create_dataset("bvecs", data=bvecs)
-
-            # Save attributes
-            f.attrs["eta"] = self.eta
-            f.attrs["mu"] = mu
-            f.attrs["T"] = T
-            f.attrs["Ec"] = Ec
-            f.attrs["delta"] = delta
-            f.attrs["matrix_element_used"] = matrix_element_used
-            f.attrs["use_gpu"] = use_gpu
-            f.attrs["grid_shape"] = [nq1, nq2]
-
-        file_size = Path(output_path).stat().st_size
-        size_mb = file_size / (1024 * 1024)
-        chi0_shape = chi0.shape
-        print(f"✅ Susceptibility data saved successfully to: {output_path}")
-        print(f"   - File size: {size_mb:.2f} MB")
-        print(f"   - chi0 shape: {chi0_shape}")
-        print(f"   - Grid shape: ({nq1}, {nq2})")
-
-    @staticmethod
-    def load_susceptibility_from_h5(file_path: str) -> dict[str, np.ndarray | dict]:
-        """Load susceptibility results from an HDF5 file saved by `_save_susceptibility_to_h5`.
-
-        Reconstructs a dictionary that closely matches the output of `calculate_chi0`.
-
-        Parameters
-        ----------
-        file_path : str
-            Path to the .h5 file saved by `_save_susceptibility_to_h5`.
-
-        Returns
-        -------
-        result : dict
-            Dictionary with keys:
-            - 'chi0': susceptibility array
-            - 'q1_grid', 'q2_grid': fractional q-grids
-            - 'qx', 'qy': real-space q-grids (reconstructed from q1/q2 and bvecs)
-            - 'bvecs': reciprocal lattice vectors
-            All saved attributes (e.g., eta, mu, T, Ec) are included as top-level keys.
-
-        Notes
-        -----
-        The 2D grids are reconstructed using `np.meshgrid(..., indexing='ij')` from 1D coordinates.
-        """
-        with h5py.File(file_path, "r") as f:
-            # Load main data
-            chi0 = f["chi0"][:]
-            bvecs = f["bvecs"][:]
-
-            # Load 1D coordinates
-            q1_1d = f["q1"][:]
-            q2_1d = f["q2"][:]
-
-            # Reconstruct 2D fractional grids
-            q1_grid, q2_grid = np.meshgrid(q1_1d, q2_1d, indexing="ij")
-
-            # Convert to real-space coordinates
-            lattice_obj = LatticeLoader(bvecs_array=bvecs)
-            qx, qy = lattice_obj.frac_to_real(q1_grid, q2_grid)
-
-            # Build result dict matching calculate_chi0 output structure
-            result = {
-                "chi0": chi0,
-                "q1_grid": q1_grid,
-                "q2_grid": q2_grid,
-                "qx": qx,
-                "qy": qy,
-                "bvecs": bvecs,
-            }
-
-            # Add scalar/array attributes as top-level keys
-            for key, value in f.attrs.items():
-                if key == "grid_shape":
-                    result[key] = list(value)
-                else:
-                    result[key] = value
-
-        return result
+    def clear_cache(self):
+        """Clear cached data. Call this after switching backend."""
+        self._hk_grid = None
+        self._gf = None
+        self._k_points = None
+        self._k1_grid = None
+        self._k2_grid = None
+        self._q1_grid = None
+        self._q2_grid = None
+        logger.info("[SusceptibilityCalculator] Cache cleared.")

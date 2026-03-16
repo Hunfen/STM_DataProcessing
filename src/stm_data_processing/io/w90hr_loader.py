@@ -4,9 +4,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import h5py  # Added for HDF5 support
 import numpy as np
 
 from stm_data_processing.io.lattice_loader import LatticeLoader
+
+logger = logging.getLogger(__name__)
 
 
 class Wannier90HRLoader:
@@ -18,23 +21,23 @@ class Wannier90HRLoader:
 
     Public API
     ----------
-    load(folder, seedname) : Load all HR data from Wannier90 files
+    load(folder, seedname) : Load all HR data from Wannier90 files (.h5 preferred)
     """
-
-    logger = logging.getLogger(__name__)
 
     def __init__(self) -> None:
         """Initialize the data loader."""
         pass
 
     @staticmethod
-    def load(folder: str, seedname: str) -> dict[str, Any]:
+    def load(folder: str | Path, seedname: str) -> dict[str, Any]:
         """
         Load Wannier90 HR Hamiltonian data from file.
 
+        Prioritizes HDF5 format (.h5) if available, falls back to .dat format.
+
         Parameters
         ----------
-        folder : str
+        folder : str | Path
             Directory containing the HR file.
         seedname : str
             Base name of the Wannier90 files (without extension).
@@ -42,37 +45,96 @@ class Wannier90HRLoader:
         Returns
         -------
         dict[str, Any]
-            Dictionary containing:
-            - num_wann : int
-            - r_list : np.ndarray (nrpts, 3) int32
-            - h_list : np.ndarray (nrpts, nw, nw) complex128
-            - ndegen : np.ndarray (nrpts,) float64
-            - h_list_flat : np.ndarray (nrpts, nw*nw) complex128
-            - bvecs : np.ndarray | None (3, 3) reciprocal lattice vectors
+            Dictionary containing HR data and metadata.
+        """
+        folder_p = Path(folder)
+        h5_file = folder_p / f"{seedname}_hr.h5"
 
-        Raises
-        ------
-        FileNotFoundError
-            If the HR file does not exist.
-        RuntimeError
-            If the file format is invalid.
+        if h5_file.exists():
+            logger.info("[Wannier90HRLoader] Loading HR data from HDF5: %s", h5_file)
+            return Wannier90HRLoader._load_h5(folder, seedname)
+        else:
+            logger.info(
+                "[Wannier90HRLoader] Loading HR data from DAT: %s",
+                folder_p / f"{seedname}_hr.dat",
+            )
+            return Wannier90HRLoader._load_hr(folder, seedname)
+
+    @staticmethod
+    def _load_h5(folder: str | Path, seedname: str) -> dict[str, Any]:
+        """
+        Load Wannier90 HR data from HDF5 file.
+
+        Parameters
+        ----------
+        folder : str | Path
+            Directory containing the HDF5 file.
+        seedname : str
+            Base name of the Wannier90 files.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing HR data.
+        """
+        folder_p = Path(folder)
+        h5_file = folder_p / f"{seedname}_hr.h5"
+        if not h5_file.exists():
+            raise FileNotFoundError(f"HDF5 file not found: {h5_file}")
+
+        with h5py.File(h5_file, "r") as f:
+            num_wann = int(f.attrs["num_wann"])
+            r_list = f["r_list"][:]
+            h_list = f["h_list"][:]
+            ndegen = f["ndegen"][:]
+
+        bvecs = Wannier90HRLoader._load_bvecs(folder_p, seedname)
+        h_list_flat = h_list.reshape(len(r_list), num_wann * num_wann)
+
+        logger.info(
+            "[Wannier90HRLoader] Loaded HR (HDF5) with num_wann=%d, nrpts=%d",
+            num_wann,
+            len(r_list),
+        )
+
+        return {
+            "num_wann": num_wann,
+            "r_list": r_list,
+            "h_list": h_list,
+            "ndegen": ndegen,
+            "h_list_flat": h_list_flat,
+            "bvecs": bvecs,
+        }
+
+    @staticmethod
+    def _load_hr(folder: str | Path, seedname: str) -> dict[str, Any]:
+        """
+        Load Wannier90 HR Hamiltonian data from .dat file.
+
+        Parameters
+        ----------
+        folder : str | Path
+            Directory containing the HR file.
+        seedname : str
+            Base name of the Wannier90 files.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing HR data.
         """
         folder_p = Path(folder)
         hr_file = folder_p / f"{seedname}_hr.dat"
         if not hr_file.exists():
             raise FileNotFoundError(f"HR file not found: {hr_file}")
 
-        Wannier90HRLoader.logger.info(
-            "[Wannier90HRLoader] Loading HR data from: %s", hr_file
-        )
-
         bvecs = Wannier90HRLoader._load_bvecs(folder_p, seedname)
         num_wann, r_list, h_list, ndegen = Wannier90HRLoader._parse_hr_file(hr_file)
 
         h_list_flat = h_list.reshape(len(r_list), num_wann * num_wann)
 
-        Wannier90HRLoader.logger.info(
-            "[Wannier90HRLoader] Loaded HR with num_wann=%d, nrpts=%d",
+        logger.info(
+            "[Wannier90HRLoader] Loaded HR (DAT) with num_wann=%d, nrpts=%d",
             num_wann,
             len(r_list),
         )
