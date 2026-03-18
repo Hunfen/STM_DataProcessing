@@ -1,6 +1,5 @@
 """Python module that helps read the Nanonis files."""
 
-import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -47,7 +46,8 @@ class NanonisFileLoader:
             error_msg = f"File is empty: {f_path}"
             raise ValueError(error_msg)
 
-        self.file_path, self.fname = os.Path.split(f_path)
+        self.file_path = str(file_path_obj.parent)
+        self.fname = file_path_obj.name
         self._raw_header = None
         self._raw_data = None
         self._header = None
@@ -64,6 +64,7 @@ class NanonisFileLoader:
         elif f_path.endswith(".3ds"):
             self.file_type = "3ds"
             self._raw_header, self._raw_data = self._3ds_loader(f_path)
+        else:
             error_msg = f"Unsupported file type: {f_path}"
             raise ValueError(error_msg)
 
