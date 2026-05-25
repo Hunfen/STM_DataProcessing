@@ -36,6 +36,7 @@ htmlcov/
 .pydevproject
 .settings/
 .ruff_cache/
+.history/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -55,4 +56,4 @@ cuda-keyring_1.1-1_all.deb.1
 
 # FFTW wisdom files
 **/fftw_wisdom/
-*.fftw_wisdom
+*.fftw_wisdom.history/
