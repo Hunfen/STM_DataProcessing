@@ -1,7 +1,10 @@
+import logging
 import re
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # List of valid chemical element symbols for validation
 VALID_ELEMENTS = {
@@ -217,7 +220,7 @@ class OpenMX:
                     value_str = line.split("=")[1].strip()
                     chemical_potential = float(value_str)
                 except (IndexError, ValueError) as e:
-                    print(f"Warning: Could not parse chemical potential: {e}")
+                    logger.warning("Could not parse chemical potential: %s", e)
                     continue
 
         if chemical_potential is not None:
@@ -263,7 +266,7 @@ class OpenMX:
                     a3 = np.array(list(map(float, avecs_lines[2].split())))
                     return np.array([a1, a2, a3])
                 except (ValueError, IndexError) as e:
-                    print(f"Warning: Could not parse unit cell vectors: {e}")
+                    logger.warning("Could not parse unit cell vectors: %s", e)
 
         return None
 
@@ -349,8 +352,10 @@ class OpenMX:
 
         # Validate that we have the expected number of lines
         if len(species_lines) != species_number:
-            print(
-                f"Warning: Species.Number={species_number} but found {len(species_lines)} species lines"
+            logger.warning(
+                "Species.Number=%s but found %s species lines",
+                species_number,
+                len(species_lines),
             )
 
         # Parse each species line
@@ -361,7 +366,7 @@ class OpenMX:
             raw_lines.append(line)
             parts = line.split()
             if len(parts) < 3:
-                print(f"Warning: Skipping invalid species line: {line}")
+                logger.warning("Skipping invalid species line: %s", line)
                 continue
 
             label = parts[0]
@@ -370,7 +375,7 @@ class OpenMX:
 
             # Check if the label is a valid element
             if label not in VALID_ELEMENTS:
-                print(f"Skipping non-element species: {label}")
+                logger.warning("Skipping non-element species: %s", label)
                 continue
 
             # Parse orbital information from basis_info
@@ -378,8 +383,8 @@ class OpenMX:
             orbitals = OpenMX._parse_orbital_basis_static(basis_info, label)
 
             if orbitals is None:
-                print(
-                    f"Warning: Could not parse orbital basis for {label}: {basis_info}"
+                logger.warning(
+                    "Could not parse orbital basis for %s: %s", label, basis_info
                 )
                 continue
 
@@ -393,8 +398,10 @@ class OpenMX:
             valid_species.append(species_dict)
 
         n_valid_species = len(valid_species)
-        print(
-            f"Found {n_valid_species} valid atomic species out of {len(species_lines)} total lines"
+        logger.info(
+            "Found %s valid atomic species out of %s total lines",
+            n_valid_species,
+            len(species_lines),
         )
 
         result = {
@@ -456,8 +463,11 @@ class OpenMX:
             return orbitals
 
         except Exception as e:
-            print(
-                f"Error parsing orbital basis '{basis_info}' for element {element}: {e}"
+            logger.error(
+                "Error parsing orbital basis '%s' for element %s: %s",
+                basis_info,
+                element,
+                e,
             )
             return None
 
@@ -838,20 +848,20 @@ class OpenMX:
 
         # Check if files exist
         if not self.out_file.exists():
-            print(f"Warning: .out file not found: {self.out_file}")
+            logger.warning(".out file not found: %s", self.out_file)
         else:
-            print(f"  Found .out file: {self.out_file}")
+            logger.info("  Found .out file: %s", self.out_file)
 
         if not self.dat_file.exists():
-            print(f"Warning: .dat file not found: {self.dat_file}")
+            logger.warning(".dat file not found: %s", self.dat_file)
         else:
-            print(f"  Found .dat file: {self.dat_file}")
+            logger.info("  Found .dat file: %s", self.dat_file)
 
         self.folder = folder
         self.systemname = systemname
 
-        print(f"  OpenMX System.Name: {systemname}")
-        print(f"  Folder: {folder}")
+        logger.info("  OpenMX System.Name: %s", systemname)
+        logger.info("  Folder: %s", folder)
 
     def read_openmx_file(self, fname: str | None = None) -> dict:
         """
@@ -878,20 +888,20 @@ class OpenMX:
         if fname is None:
             if self.out_file is not None and Path(self.out_file).exists():
                 fname = self.out_file
-                print(f"Using auto-detected .out file: {fname}")
+                logger.info("Using auto-detected .out file: %s", fname)
             elif self.dat_file is not None and Path(self.dat_file).exists():
                 fname = self.dat_file
-                print(f"Using auto-detected .dat file: {fname}")
+                logger.info("Using auto-detected .dat file: %s", fname)
             elif self.folder is not None and self.systemname is not None:
                 # Try to construct paths even if they weren't set before
                 out_path = Path(self.folder) / f"{self.systemname}.out"
                 dat_path = Path(self.folder) / f"{self.systemname}.dat"
                 if out_path.exists():
                     fname = out_path
-                    print(f"Using constructed .out file: {fname}")
+                    logger.info("Using constructed .out file: %s", fname)
                 elif dat_path.exists():
                     fname = dat_path
-                    print(f"Using constructed .dat file: {fname}")
+                    logger.info("Using constructed .dat file: %s", fname)
                 else:
                     raise ValueError(
                         "No valid file path provided and no .out/.dat files found. "
@@ -903,7 +913,7 @@ class OpenMX:
                     "Please provide fname or initialize with folder and systemname."
                 )
         else:
-            print(f"Using provided file: {fname}")
+            logger.info("Using provided file: %s", fname)
 
         # Read the file
         try:

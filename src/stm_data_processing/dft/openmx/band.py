@@ -1,7 +1,10 @@
 import contextlib
+import logging
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def parse_dft_band_data(
@@ -49,14 +52,14 @@ def parse_dft_band_data(
     if fname_band is None:
         if folder is not None and systemname is not None:
             fname_band = Path(folder) / f"{systemname}.Band"
-            print(f"Using auto-detected band file: {fname_band}")
+            logger.info(f"Using auto-detected band file: {fname_band}")
         else:
             raise ValueError(
                 "fname_band not provided and folder/systemname not set. "
                 "Please provide fname_band or both folder and systemname."
             )
     else:
-        print(f"Using provided band file: {fname_band}")
+        logger.info(f"Using provided band file: {fname_band}")
 
     # Read raw lines from .Band file
     try:
@@ -77,9 +80,9 @@ def parse_dft_band_data(
     mu_au = float(header[2])
     fermi_energy = mu_au * h2ev
 
-    print("Parsing band data:")
-    print(f"  Number of bands: {nband}")
-    print(f"  Fermi energy: {fermi_energy:.4f} eV")
+    logger.info("Parsing band data:")
+    logger.info(f"  Number of bands: {nband}")
+    logger.info(f"  Fermi energy: {fermi_energy:.4f} eV")
 
     # Second line: Reciprocal lattice vectors in a.u.
     b_line = raw[1].split()
@@ -167,8 +170,8 @@ def parse_dft_band_data(
     kpts_frac = np.array(kpts_frac)
     bands = np.array(bands)
 
-    print(f"  Number of k-points: {len(kpts_frac)}")
-    print(f"  Energy range (eV, EF=0): {bands.min():.4f} → {bands.max():.4f}")
+    logger.info(f"  Number of k-points: {len(kpts_frac)}")
+    logger.info(f"  Energy range (eV, EF=0): {bands.min():.4f} → {bands.max():.4f}")
 
     kpts_cart = kpts_frac @ b
 

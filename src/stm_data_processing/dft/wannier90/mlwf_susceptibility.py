@@ -462,12 +462,12 @@ class SusceptibilityCalculator_wang2012:
             chi_q = self._compute_imag_chi(omega_limit, resolution)
 
         if output_path is not None:
-            logger.info("[INFO] Saving susceptibility results to: %s", output_path)
+            logger.info("Saving susceptibility results to: %s", output_path)
             save_susceptibility_to_h5(
                 susceptibility=chi_q,
-                outpath=output_path,
+                output_path=output_path,
                 module_type="Imaginary Lindhard",
-                bevecs=self.ham.bvecs,
+                bvecs=self.ham.bvecs,
                 eta=self.eta,
                 omega_limit=omega_limit,
                 resolution=resolution,
@@ -507,7 +507,7 @@ class SusceptibilityCalculator_wang2012:
             "metadata": metadata,
         }
 
-        logger.info("[INFO] Susceptibility calculation completed.")
+        logger.info("Susceptibility calculation completed.")
 
         return result
 

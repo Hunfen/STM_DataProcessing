@@ -261,7 +261,7 @@ class BornQPI:
             qpi_layers[ie] = compute_func(float(omega)) / np.pi  # np.pi is here.
 
         if output_path is not None:
-            logger.info("[INFO] Saving QPI to %s", output_path)
+            logger.info("Saving QPI to %s", output_path)
             save_qpi_to_h5(
                 qpi_layers=qpi_layers,
                 output_path=output_path,
@@ -311,6 +311,6 @@ class BornQPI:
             "metadata": metadata,
         }
 
-        logger.info("[INFO] QPI calculation completed.")
+        logger.info("QPI calculation completed.")
 
         return result

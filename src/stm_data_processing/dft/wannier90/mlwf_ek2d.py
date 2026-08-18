@@ -185,7 +185,7 @@ class EK2DCalculator:
                     f"Elapsed: {elapsed_total:.1f}s, Eig: {total_eig_time:.1f}s"
                 )
 
-        logger.info("\nPerformance summary:")
+        logger.info("Performance summary:")
         logger.info(f"  Total diagonalization time: {total_eig_time:.2f}s")
         logger.info(
             f"  Average time per k-point: {total_eig_time / total_kpoints * 1000:.2f}ms"
@@ -280,7 +280,7 @@ class EK2DCalculator:
                 k1_grid=k1_grid,
                 k2_grid=k2_grid,
                 filename=save_to_file,
-                hamiltonian=self.ham,
+                mlwf_hamiltonian=self.ham,
             )
 
         # Step 3: Optionally extend to larger k-range

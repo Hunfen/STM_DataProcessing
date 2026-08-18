@@ -1,7 +1,10 @@
+import logging
 import re
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
@@ -62,14 +65,16 @@ def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
     # ---- load system total DOS ----
     total_files = list(dos_dir.glob("*.DOS.*"))
     if len(total_files) == 1:
-        dos["total"] = pd.read_csv(total_files[0], sep=r"\s+", comment="#", names=["E", "DOS", "IDOS"])
+        dos["total"] = pd.read_csv(
+            total_files[0], sep=r"\s+", comment="#", names=["E", "DOS", "IDOS"]
+        )
     elif len(total_files) > 1:
         raise RuntimeError(f"Multiple total DOS files found: {total_files}")
 
     # ---- load PDOS ----
     atom_dirs = sorted(dos_dir.glob("atom*"))
     if not atom_dirs:
-        print(f"Warning: No 'atom*' directories found in {dos_dir}")
+        logger.warning("No 'atom*' directories found in %s", dos_dir)
 
     for atom_dir in atom_dirs:
         if not atom_dir.is_dir():

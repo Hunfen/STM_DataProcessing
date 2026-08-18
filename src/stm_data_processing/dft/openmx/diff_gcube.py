@@ -9,9 +9,12 @@ Definition of difference:
     input1 - input2 = output
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,9 +134,10 @@ class CubeFile:
             errors.append("Found a difference in the grid vectors")
 
         if errors:
-            for err in errors:
-                print(err)
-            raise ValueError("Cube files are not compatible for subtraction")
+            raise ValueError(
+                "Cube files are not compatible for subtraction:\n  - "
+                + "\n  - ".join(errors)
+            )
 
 
 def diff_cube_files(input1: str | Path, input2: str | Path, output: str | Path) -> None:
@@ -178,7 +182,7 @@ def diff_cube_files(input1: str | Path, input2: str | Path, output: str | Path) 
 
     # Write output
     output_cube.write(output)
-    print(f"Successfully wrote difference to {output}")
+    logger.info("Successfully wrote difference to %s", output)
 
 
 def main() -> None:
