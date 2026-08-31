@@ -260,7 +260,6 @@ def QPI(mappath, n):
         data = raw_data.signals["LI Demod 1 X (A)"][:, :, n]
     except Exception:
         data = raw_data.signals["LI Demod 1 X [AVG] (A)"][:, :, n]
-    angle = float(raw_data.header["angle"])
     scan_range = raw_data.header["size_xy"]
     # 绘制QPI,先做完fft,再转动
     fft2 = np.fft.fft2(data)
@@ -331,7 +330,6 @@ def ShowMapI(mappath, n):
     except Exception:
         bias = raw_data.signals["sweep_signal"] * 1000 / divider
     data = raw_data.signals["Current (A)"][:, :, n]
-    angle = float(raw_data.header["angle"])
     scan_range = raw_data.header["size_xy"]
 
     # --------------------------------------------------------------------------------
@@ -376,10 +374,9 @@ def SXM(topopath):
         raw_data = nap.read.Scan(topopath)
         topo = raw_data.signals["Z"]["forward"]
         size = raw_data.header["scan_range"]
-        angle = float(raw_data.header["scan_angle"])
         direction = raw_data.header["scan_dir"]
         fig = plt.figure(figsize=(2.55, 2.55))
-        ax0 = fig.add_subplot(111)
+        fig.add_subplot(111)
         # 这里扫图方向不仅影响着储存在矩阵中的行的正反,还关系着转动矩阵转角符号问题
         if direction == "up":
             plt.imshow(
@@ -403,8 +400,8 @@ def SXM(topopath):
             pad_inches=0,
         )
         plt.close(fig)
-    except Exception:
-        return
+    except Exception as e:
+        raise ValueError(f"Failed to read SXM file {topopath}: {e}") from e
 
 
 # 寻找单谱或linecut数据对应的topography文件
@@ -513,15 +510,6 @@ def STS(stspath):
                     (scan_offset[1] + range_y_new / 2) * 1e9,
                 ),
             )
-        extentx = [
-            (scan_offset[0] - range_x_new / 2) * 1e9,
-            (scan_offset[0] + range_x_new / 2) * 1e9,
-        ]
-        extenty = [
-            (scan_offset[1] - range_y_new / 2) * 1e9,
-            (scan_offset[1] + range_y_new / 2) * 1e9,
-        ]
-
         ax0.plot(X, Y, "ro", markersize=3)
         # if (extentx[0])<=X<=extentx[1] and extenty[0]<=Y<=extenty[1]:
         #     ax0.plot(X,Y,'ro',markersize=3)
@@ -696,14 +684,6 @@ def Linecut(lcpath):
                     (scan_offset[1] + range_y_new / 2) * 1e9,
                 ),
             )
-        extentx = [
-            (scan_offset[0] - range_x_new / 2) * 1e9,
-            (scan_offset[0] + range_x_new / 2) * 1e9,
-        ]
-        extenty = [
-            (scan_offset[1] - range_y_new / 2) * 1e9,
-            (scan_offset[1] + range_y_new / 2) * 1e9,
-        ]
         # if (extentx[0]<=X[0]<=extentx[1] and extenty[0]<=X[1]<=extenty[1]) or (extentx[0]<=Y[0]<=extentx[1] and extenty[0]<=Y[1]<=extenty[1]):
         ax0.plot(X[0], X[1], color="k", fillstyle="none", marker="o", markersize=5)
         ax0.plot([X[0], Y[0]], [X[1], Y[1]], "k--")
@@ -907,9 +887,13 @@ for k in range(len(DataFolderpath)):
                 ax.set_ylim(-400, 400)
 
             topopath = SxmFiles[i]
-            SXM(topopath)
-            PlotSXM(topopath)
-            raw_data = nap.read.Scan(topopath)
+            try:
+                SXM(topopath)
+                PlotSXM(topopath)
+                raw_data = nap.read.Scan(topopath)
+            except Exception as e:
+                print(f"Warning: failed to read SXM file {topopath}, skipping: {e}")
+                continue
             setpointI = (
                 float(raw_data.header["z-controller"]["Setpoint"][0].split(" ")[0])
                 * 1e12

@@ -60,6 +60,19 @@ class EK2DCalculator:
         self.bvecs = hamiltonian.bvecs
         self.nk = nk
 
+        # Whether eigenvectors should be returned by the diagonalization.
+        # Initialized here so _compute_eigen / _compute_eigen_cuda can be used
+        # directly (e.g. by JDOSQPI) without first calling calculate().
+        self.out_eigvec_flag: bool = False
+
+        # Cache of (evals, evecs) keyed by (out_eigvec_flag, nk): the Wannier
+        # Hamiltonian data is immutable for the lifetime of this calculator, so
+        # repeated calculate()/calculate_eigh() calls reuse the diagonalization
+        # instead of recomputing it.
+        self._eigen_cache: dict[
+            tuple[bool, int], tuple[np.ndarray, np.ndarray | None]
+        ] = {}
+
         # Initialize k-grid and k-points in primitive BZ [-0.5, 0.5)
         k_vals = np.linspace(-0.5, 0.5, nk, endpoint=False)
         self.k1_grid, self.k2_grid = np.meshgrid(k_vals, k_vals, indexing="ij")
@@ -70,7 +83,7 @@ class EK2DCalculator:
     def _compute_eigen(
         self,
         hamiltonian: MLWFHamiltonian,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray | None]:
         """
         Calculate eigen values from Wannier90 Hamiltonian on CPU.
 
@@ -81,16 +94,27 @@ class EK2DCalculator:
 
         Returns
         -------
-        e : (nk * nk, num_wann) ndarray
+        evals : (nk * nk, num_wann) ndarray
             Band energies contour map for all Wannier bands.
+        evecs : (nk * nk, num_wann, num_wann) ndarray or None
+            Eigenvectors if out_eigvec_flag is True, else None.
         """
+        cache_key = (self.out_eigvec_flag, self.nk)
+        if cache_key in self._eigen_cache:
+            logger.info(
+                "Reusing cached band structure (nk=%d, out_eigvec_flag=%s).",
+                self.nk,
+                self.out_eigvec_flag,
+            )
+            return self._eigen_cache[cache_key]
+
         logger.info(
             f"Calculating band structure on {self.nk}x{self.nk} k-grid (CPU)..."
         )
         # Compute H(k) for all points at once (vectorized)
         hk_matrices = hamiltonian.hk(self.k_points)
 
-        # Diagonalize batched Hamiltonians
+        # Diagonalize batched Hamiltonians (vectorized over all k-points)
         # hk_matrices shape: (N_kpoints, num_wann, num_wann)
         # evals shape: (N_kpoints, num_wann)
         # evecs shape: (N_kpoints, num_wann, num_wann) or None
@@ -104,6 +128,7 @@ class EK2DCalculator:
         logger.info("Band structure calculation complete.")
         logger.info(f"  Energy range: {evals.min():.4f} -> {evals.max():.4f} eV")
 
+        self._eigen_cache[cache_key] = (evals, evecs)
         return evals, evecs
 
     def _compute_eigen_cuda(
@@ -125,6 +150,15 @@ class EK2DCalculator:
         evecs : (nk * nk, num_wann, num_wann) cp.ndarray or None
             Eigenvectors if out_eigvec_flag is True, else None.
         """
+        cache_key = (self.out_eigvec_flag, self.nk)
+        if cache_key in self._eigen_cache:
+            logger.info(
+                "Reusing cached band structure (nk=%d, out_eigvec_flag=%s).",
+                self.nk,
+                self.out_eigvec_flag,
+            )
+            return self._eigen_cache[cache_key]
+
         # Move k-points to GPU
         k_points_gpu = cp.asarray(self.k_points)
 
@@ -196,6 +230,7 @@ class EK2DCalculator:
 
         # Keep on GPU, let caller decide when to convert
         logger.info("Data kept on GPU.")
+        self._eigen_cache[cache_key] = (e_gpu, evecs_gpu)
         return e_gpu, evecs_gpu
 
     def calculate_eigh(self):

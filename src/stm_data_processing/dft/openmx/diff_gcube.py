@@ -106,8 +106,8 @@ class CubeFile:
 
             for atom in self.atoms:
                 f.write(
-                    f"{atom[0]:5.0f} {0.0:12.6f} {atom[1]:12.6f} "
-                    f"{atom[2]:12.6f} {atom[3]:12.6f}\n"
+                    f"{atom[0]:5.0f} {atom[1]:12.6f} {atom[2]:12.6f} "
+                    f"{atom[3]:12.6f} {atom[4]:12.6f}\n"
                 )
 
             # Write grid data (6 values per line)

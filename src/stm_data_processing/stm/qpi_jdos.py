@@ -99,14 +99,21 @@ class JDOSQPI:
         ek2d_calc = EK2DCalculator(self.ham, nk=self.nk)
 
         if BACKEND == "gpu" and cp is not None:
-            # Compute on GPU, then convert to CPU for storage
-            e_gpu = ek2d_calc._compute_ek2d_cuda(self.ham, return_gpu=True)
-            e_gpu = cp.transpose(e_gpu, (1, 2, 0))
+            # Compute on GPU, then convert to CPU for storage.
+            # _compute_eigen_cuda returns (evals, evecs) with evals shape
+            # (nk*nk, num_wann); reshape to the (nk, nk, num_wann) layout used
+            # by _compute_spectral_function (bands on the last axis).
+            e_gpu, _ = ek2d_calc._compute_eigen_cuda(self.ham)
+            e_gpu = cp.reshape(e_gpu, (self.nk, self.nk, self.num_wann))
             e_cpu = cp.asnumpy(e_gpu)
             return e_cpu
         else:
-            e_cpu = ek2d_calc._compute_ek2d(self.ham)
-            e_cpu = np.ascontiguousarray(np.transpose(e_cpu, (1, 2, 0)))
+            # _compute_eigen returns (evals, evecs) with evals shape
+            # (nk*nk, num_wann); reshape to (nk, nk, num_wann).
+            e_cpu, _ = ek2d_calc._compute_eigen(self.ham)
+            e_cpu = np.ascontiguousarray(
+                np.reshape(e_cpu, (self.nk, self.nk, self.num_wann))
+            )
             return e_cpu
 
     def _compute_spectral_function(

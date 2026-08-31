@@ -13,12 +13,10 @@ np.int = int
 def get_divider(file_path: Path) -> int:
     """Return a scaling factor based on whether the path contains 'd1', 'd10', or 'd100'."""
     name = str(file_path)
-    if "d1" in name:
-        return 1
-    if "d10" in name:
-        return 10
     if "d100" in name:
         return 100
+    if "d10" in name:
+        return 10
     return 1
 
 

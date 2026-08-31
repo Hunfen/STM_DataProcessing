@@ -274,7 +274,7 @@ class SusceptibilityCalculator_wang2012:
 
             logger.info(f"[CPU] Using {num_threads} threads, nk={nk}, num_wann={nw}")
 
-            wisdom_path = self._get_fftw_wisdom_path(nk, nw)
+            wisdom_path = self._get_fftw_wisdom_path(nk, nw, "FFTW_FORWARD")
 
             spectra_shape = (nk, nk, nw, nw)
             fft_axes = (0, 1)
@@ -293,8 +293,13 @@ class SusceptibilityCalculator_wang2012:
 
             logger.info("[CPU] Creating IFFT plan for convolution...")
             conv_shape = (nk, nk)
+            wisdom_path = self._get_fftw_wisdom_path(nk, nw, "FFTW_BACKWARD")
             ifft_conv, input_conv = self._init_fftw_plan(
-                conv_shape, fft_axes, num_threads, wisdom_path
+                conv_shape,
+                fft_axes,
+                num_threads,
+                wisdom_path,
+                direction="FFTW_BACKWARD",
             )
             logger.info("[CPU] IFFT plan for convolution completed.")
 
@@ -371,14 +376,20 @@ class SusceptibilityCalculator_wang2012:
         return chi_q
 
     # Helper
-    def _get_fftw_wisdom_path(self, nk: int, nw: int) -> str:
-        """Get FFTW wisdom file path for specific grid size."""
+    def _get_fftw_wisdom_path(self, nk: int, nw: int, direction: str) -> str:
+        """Get FFTW wisdom file path for specific grid size and transform direction."""
         wisdom_dir = Path(__file__).parent / "fftw_wisdom"
         wisdom_dir.mkdir(parents=True, exist_ok=True)
-        return str(wisdom_dir / f"fftw_wisdom_nk{nk}_nw{nw}.json")
+        direction_tag = direction.lower().replace("fftw_", "")
+        return str(wisdom_dir / f"fftw_wisdom_nk{nk}_nw{nw}_{direction_tag}.json")
 
     def _init_fftw_plan(
-        self, shape: tuple, fft_axes: tuple, num_threads: int, wisdom_path: str
+        self,
+        shape: tuple,
+        fft_axes: tuple,
+        num_threads: int,
+        wisdom_path: str,
+        direction: str = "FFTW_FORWARD",
     ):
         wisdom_path_obj = Path(wisdom_path)
         use_wisdom = False
@@ -403,6 +414,7 @@ class SusceptibilityCalculator_wang2012:
             axes=fft_axes,
             flags=fftw_flags,
             threads=num_threads,
+            direction=direction,
         )
 
         if not use_wisdom:

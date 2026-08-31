@@ -142,24 +142,36 @@ class BornQPI:
         omega: float,
     ) -> np.ndarray:
         nk = self.nk
+        nw = self.num_wann
 
         logger.info(f"  [CPU] Computing QPI at ω = {omega:.4f} eV (nk={nk})...")
 
-        g0_k = self.gf.compute_green(self.hk_grid_cpu, omega)  # shape: (nk, nk, nw, nw)
+        g0_k = self.gf.compute_green(self.hk_grid, omega)  # shape: (nk, nk, nw, nw)
 
+        # Precompute GV[k,a,c] = Σ_b G0[k,a,b] · V[b,c]
+        gv = np.einsum("ijab,bc->ijac", g0_k, self.V, optimize=True)
+
+        # FFT-based correlation theorem: computes all nk*nk q-points at once
+        # instead of looping over q (the O(nk^2) Python loop this replaces).
+        #
+        # s(q) = Σ_k Tr[G0(k) · V · G0(k+q)]
+        #      = Σ_{a,c} Σ_k GV[k,a,c] · G0[k+q,c,a]
+        #
+        # For complex fields the correct no-conjugate formula is (same as the
+        # CUDA path): IFFT( FFT(A*)* · FFT(B) ) = Σ_k A[k] · B[k+q] with
+        # A = GV[:, :, a, c] and B = G0[:, :, c, a] (verified against the
+        # direct np.roll + einsum reference to machine precision).
+        #
+        # Loop over the c orbital index only for memory efficiency; inside each
+        # iteration all q-points and all a orbitals are vectorized.
         qpi: np.ndarray = np.zeros((nk, nk), dtype=np.float64)
-        total_q = nk * nk
-        logger.info(f"  [CPU] Processing {total_q} q-points...")
+        for c in range(nw):
+            fft_gv_c = np.conj(np.fft.fftn(np.conj(gv[:, :, :, c]), axes=(0, 1)))
+            fft_g0_c = np.fft.fftn(g0_k[:, :, c, :], axes=(0, 1))
+            corr_c = np.fft.ifftn(fft_gv_c * fft_g0_c, axes=(0, 1))
+            qpi += -np.imag(np.sum(corr_c, axis=2))  # np.pi not included yet
 
-        for q1 in range(nk):
-            for q2 in range(nk):
-                g0_kq = np.roll(g0_k, shift=(-q1, -q2), axis=(0, 1))
-                s = np.einsum("ijab,bc,ijca->", g0_k, self.V, g0_kq, optimize=True)
-                qpi[q1, q2] = -np.imag(s)  # np.pi not included yet
-
-                done = q1 * nk + q2 + 1
-                percent = round(100 * done / total_q)
-                logger.info(f"    Progress: {percent:3d}% ({done}/{total_q})")
+        logger.info(f"  [CPU] Done (nk={nk}).")
 
         return np.fft.fftshift(qpi)
 
@@ -185,9 +197,7 @@ class BornQPI:
 
         logger.info(f"  [CUDA] Computing QPI at ω = {omega:.4f} eV (nk={nk})...")
 
-        g0_k_gpu = self.gf.compute_green(
-            self.hk_grid_gpu, omega
-        )  # shape: (nk, nk, nw, nw)
+        g0_k_gpu = self.gf.compute_green(self.hk_grid, omega)  # shape: (nk, nk, nw, nw)
         v_gpu = cp.asarray(self.V, dtype=cp.complex128)
 
         # Precompute GV[k,a,c] = Σ_b G[k,a,b] · V[b,c]

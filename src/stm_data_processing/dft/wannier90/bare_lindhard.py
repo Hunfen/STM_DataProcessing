@@ -71,7 +71,17 @@ class BareLindhardCalculator:
         precompute_weight: bool = False,
     ) -> np.ndarray:
         """
-        Bare Lindhard susceptibility with vectorized computation.
+        Bare Lindhard susceptibility with a vectorized CPU implementation.
+
+        The k-grid is flattened and q-points are processed in chunks, so the
+        only Python loops left are over band pairs (m, n) and q-chunks —
+        mirroring the (correct) GPU path. The orbital overlap is evaluated
+        between eigenstates at k and k+q:
+
+            overlap(q, k; m, n) = sum_a u_{a,m}(k) * conj(u_{a,n}(k+q))
+
+        so the weight is not a delta_mn and the intraband (m == n) terms
+        contribute through f(eps_m(k)) - f(eps_m(k+q)).
 
         Parameters
         ----------
@@ -81,11 +91,11 @@ class BareLindhardCalculator:
             Temperature in K.
         orb_sel : np.ndarray[int] | None
             Selected orbitals for projection.
-        q_chunk_size : int, default 16
-            Number of q1-points to process simultaneously.
+        q_chunk_size : int, default 8
+            Number of q-points to process simultaneously.
         precompute_weight : bool, default False
-            If True, pre-compute orbital weights (faster but uses more memory).
-            If False, compute on-the-fly (slower but memory efficient).
+            Accepted for API compatibility; weights are always computed
+            on the fly inside the vectorized band-pair loop.
 
         Returns
         -------
@@ -96,97 +106,97 @@ class BareLindhardCalculator:
         nk1, nk2, num_wann = evals.shape
         num_kpts = nk1 * nk2
 
-        # Compute Fermi distribution for all bands
-        f_k = np.zeros((nk1, nk2, num_wann), dtype=np.float64)
-        for n in range(num_wann):
-            f_k[:, :, n] = fermi(evals[:, :, n], mu=ef, T=temperature)
+        logger.info(
+            f"Starting CPU bare Lindhard calculation: "
+            f"k-grid ({nk1}x{nk2}), {num_wann} Wannier functions, "
+            f"{num_kpts} k-points"
+        )
 
-        # Orbital selection mask
+        # Fermi distribution for all bands (vectorized)
+        f_k = fermi(evals, mu=ef, T=temperature)  # (nk1, nk2, num_wann)
+
+        # Handle orbital selection
         if orb_sel is None:
-            orb_mask = np.ones(num_wann, dtype=bool)
+            orb_indices = np.arange(num_wann, dtype=np.int32)
         else:
-            orb_mask = np.zeros(num_wann, dtype=bool)
-            orb_mask[orb_sel] = True
+            orb_indices = np.asarray(orb_sel, dtype=np.int32)
+        num_orb = len(orb_indices)
+        logger.info(f"Using {num_orb} orbitals for susceptibility calculation")
 
-        # Pre-compute weights or not
-        if precompute_weight:
-            weight_mn = np.zeros((num_wann, num_wann, nk1, nk2), dtype=np.float64)
+        # Flatten the k-grid for advanced indexing (mirrors the GPU path)
+        k1_flat, k2_flat = np.meshgrid(
+            np.arange(nk1, dtype=np.int32),
+            np.arange(nk2, dtype=np.int32),
+            indexing="ij",
+        )
+        k_indices = np.column_stack([k1_flat.ravel(), k2_flat.ravel()])
+        k_flat_idx = k_indices[:, 0] * nk2 + k_indices[:, 1]  # (num_kpts,)
+
+        # Flatten data arrays for advanced indexing
+        evals_flat = evals.reshape(num_kpts, num_wann)
+        f_k_flat = f_k.reshape(num_kpts, num_wann)
+        # evecs_flat[k, orb, band]
+        evecs_flat = evecs.reshape(num_kpts, num_wann, num_wann)
+
+        # Initialize result; q-grid in the same (q1, q2) layout as the output
+        chi_q = np.zeros(num_kpts, dtype=np.complex128)
+        q1_vals = np.arange(nk1, dtype=np.int32)
+        q2_vals = np.arange(nk2, dtype=np.int32)
+        q_grid = np.column_stack([q1_vals.repeat(nk2), np.tile(q2_vals, nk1)])
+        num_qpts = len(q_grid)
+
+        num_q_chunks = (num_qpts + q_chunk_size - 1) // q_chunk_size
+        logger.info(
+            f"Processing {num_qpts} q-points in {num_q_chunks} chunks "
+            f"(chunk size: {q_chunk_size}), {num_wann * num_wann} band pairs per chunk"
+        )
+
+        for q_start in range(0, num_qpts, q_chunk_size):
+            q_end = min(q_start + q_chunk_size, num_qpts)
+            q_chunk = q_grid[q_start:q_end]  # (n_q_chunk, 2)
+
+            # k+q indices with periodic boundary conditions
+            kq_indices = (q_chunk[:, None, :] + k_indices[None, :, :]) % np.array(
+                [nk1, nk2], dtype=np.int32
+            )
+            kq_flat_idx = kq_indices[:, :, 0] * nk2 + kq_indices[:, :, 1]
+
+            # Process each band pair (m, n): vectorized over k and q
             for m in range(num_wann):
                 for n in range(num_wann):
-                    overlap = np.zeros((nk1, nk2), dtype=np.complex128)
-                    for a in range(num_wann):
-                        if orb_mask[a]:
-                            overlap += evecs[:, :, a, m] * np.conj(evecs[:, :, a, n])
-                    weight_mn[m, n, :, :] = np.abs(overlap) ** 2
-            logger.info(f"Pre-computed weights: {weight_mn.nbytes / 1024**3:.2f} GB")
-        else:
-            weight_mn = None
-            logger.info("On-the-fly weight computation (memory efficient)")
+                    # Energies and occupations at k (band m) and k+q (band n)
+                    eps_m = evals_flat[k_flat_idx, m]  # (num_kpts,)
+                    eps_n = evals_flat[kq_flat_idx, n]  # (n_q_chunk, num_kpts)
+                    f_m = f_k_flat[k_flat_idx, m]  # (num_kpts,)
+                    f_n = f_k_flat[kq_flat_idx, n]  # (n_q_chunk, num_kpts)
 
-        # Initialize susceptibility
-        chi_q = np.zeros((nk1, nk2), dtype=np.complex128)
+                    # Overlap <u_{m,k}|u_{n,k+q}> over selected orbitals
+                    u_km = evecs_flat[k_flat_idx, :, m][
+                        :, orb_indices
+                    ]  # (num_kpts, num_orb)
+                    u_kqn = evecs_flat[kq_flat_idx, :, n][
+                        :, :, orb_indices
+                    ]  # (n_q_chunk, num_kpts, num_orb)
+                    overlap = np.sum(
+                        u_km[None, :, :] * np.conj(u_kqn), axis=2
+                    )  # (n_q_chunk, num_kpts)
+                    weight = np.abs(overlap) ** 2
 
-        # Process q1-points in chunks
-        for q1_start in range(0, nk1, q_chunk_size):
-            q1_end = min(q1_start + q_chunk_size, nk1)
+                    # Lindhard term
+                    numerator = f_m[None, :] - f_n  # (n_q_chunk, num_kpts)
+                    denominator = (
+                        eps_n - eps_m[None, :] + 1j * self.eta
+                    )  # (n_q_chunk, num_kpts)
 
-            # Create index arrays
-            k1_idx = np.arange(nk1)
-            k2_idx = np.arange(nk2)
-            q1_idx = np.arange(q1_start, q1_end)
+                    # Sum over k-points
+                    chi_contrib = np.sum(
+                        weight * numerator / denominator, axis=1
+                    )  # (n_q_chunk,)
 
-            # Process each band pair
-            for m in range(num_wann):
-                for n in range(num_wann):
-                    f_m = f_k[:, :, m]
-                    f_n = f_k[:, :, n]
+                    chi_q[q_start:q_end] += chi_contrib / num_kpts
 
-                    if np.max(np.abs(f_m - f_n)) < 1e-10:
-                        continue
-
-                    # Get weight
-                    if precompute_weight:
-                        weight = weight_mn[m, n, :, :]
-                    else:
-                        # Compute on-the-fly
-                        overlap = np.zeros((nk1, nk2), dtype=np.complex128)
-                        for a in range(num_wann):
-                            if orb_mask[a]:
-                                overlap += evecs[:, :, a, m] * np.conj(
-                                    evecs[:, :, a, n]
-                                )
-                        weight = np.abs(overlap) ** 2
-
-                    eps_m = evals[:, :, m]
-                    eps_n = evals[:, :, n]
-
-                    # Process each q2
-                    for q2 in range(nk2):
-                        # Calculate k+q indices with periodic boundary conditions
-                        k1q_idx = (k1_idx[:, None] + q1_idx[None, :]) % nk1
-                        k2q_idx = (k2_idx + q2) % nk2
-
-                        # Get shifted values
-                        eps_n_shift = eps_n[k1q_idx, k2q_idx[:, None]]
-                        f_n_shift = f_n[k1q_idx, k2q_idx[:, None]]
-
-                        # Reshape for broadcasting
-                        f_m_expanded = f_m[:, :, None]  # shape: (nk1, nk2, 1)
-                        eps_m_expanded = eps_m[:, :, None]  # shape: (nk1, nk2, 1)
-                        weight_expanded = weight[:, :, None]  # shape: (nk1, nk2, 1)
-
-                        # Calculate contribution
-                        numerator = f_m_expanded - f_n_shift  # shape: (nk1, nk2, n_q1)
-                        denominator = eps_n_shift - eps_m_expanded + 1j * self.eta
-
-                        # Sum over k1, k2
-                        chi_contrib = np.sum(
-                            weight_expanded * numerator / denominator, axis=(0, 1)
-                        )
-
-                        # Add to result
-                        chi_q[q1_start:q1_end, q2] += chi_contrib / num_kpts
-        return chi_q
+        logger.info("Bare Lindhard CPU calculation completed.")
+        return chi_q.reshape(nk1, nk2)
 
     def _compute_bare_lindhard_cuda(
         self,
@@ -530,12 +540,16 @@ class BareLindhardCalculator:
         if precompute_weight and not is_gpu:
             base_memory += num_kpts * num_wann * num_wann * 8  # weight_mn
 
-        # Temporary array memory per q-chunk
-        # NEW: Only (q_chunk, kpts) arrays, no band-pair dimension
-        # Arrays: overlap, weight, numerator, denominator, eps_n, f_n, u_kqn
-        num_temp_arrays = 7
+        # Temporary array memory per q-point (vectorized over q and k)
+        # Arrays: overlap, weight, numerator, denominator, eps_n, f_n,
+        # eps_m, f_m (kpts), plus u_km / u_kqn which scale with the number
+        # of selected orbitals
+        num_temp_arrays = 8
         bytes_per_element = 16  # complex128 (conservative)
-        temp_memory_per_chunk = num_temp_arrays * num_kpts * bytes_per_element
+        temp_memory_per_chunk = (
+            num_temp_arrays * num_kpts * bytes_per_element
+            + 2 * num_kpts * num_wann * bytes_per_element  # u_km + u_kqn
+        )
 
         # Calculate memory available for temporary arrays
         if is_gpu:

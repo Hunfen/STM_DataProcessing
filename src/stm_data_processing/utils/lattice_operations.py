@@ -122,8 +122,8 @@ class LatticeOperations:
         b_inv = np.linalg.inv(b)
 
         # supercell reciprocal basis in xy (row-wise)
-        # B' = B @ (T^{-1})^T
-        b_p = b @ np.linalg.inv(t).T
+        # B' = inv(T) @ B  (consistent with A_super = T^T @ A_old convention)
+        b_p = np.linalg.inv(t) @ b
 
         # enumerate candidate (m,n) in a safe finite range
         m_max = int(np.ceil(np.max(np.abs(t)))) + 1
@@ -299,7 +299,7 @@ class LatticeOperations:
         vertices : ndarray, shape (2, 6)
             The six vertices of the first Brillouin zone (column-wise).
         """
-        gs = self.extend_vecs_c3(include_neg=False, tol=tol, sort=True)  # (2, 6)
+        gs = self.extend_vecs_c3(include_neg=True, tol=tol, sort=True)  # (2, 6)
 
         if gs.shape[1] != 6:
             raise ValueError("Expected 6 reciprocal vectors for hexagonal lattice")
