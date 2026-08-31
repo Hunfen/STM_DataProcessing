@@ -7,11 +7,19 @@
 > - 🧪 = 通过代码推导 + 局部数值实验确认
 > - ⚠️ = 存疑（suspicious），需真实数据进一步确认
 
+## 修复状态（2026-09-01）
+
+> 本报告 **10 个 High 级 bug（H1–H10）已全部修复**，并完成 CPU 计算路径性能优化；改动经 AgentTeams（`deepseek-v4-flash` 编码 + `deepseek-v4-pro` 审查，6/6 审查 PASS）验证，已提交并推送到 `master`（commit `d5abd11`）。
+>
+> - 涉及 10 个源文件：`qpi_born.py`、`qpi_jdos.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`mlwf_susceptibility.py`、`lattice_operations.py`、`plot_funcs.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`。
+> - CPU 性能：BornQPI 的 CPU QPI 由 `np.roll` 双循环改为 FFT 相关定理（nk=32 提速 58×、nk=64 提速 207×）；`bare_lindhard` 向量化（nk=16 提速 158×）；`mlwf_susceptibility` 逆 FFT 方向修正并复用计划；`mlwf_ek2d` 本征分解加缓存。
+> - Medium（19）/ Low（25）项**尚未处理**，仍待后续。
+
 ## 一、统计总览
 
 | 严重程度 | 数量 | 说明 |
 |---------|------|------|
-| 🔴 High | 10 | 崩溃 / 输出结果错误 / 模块完全不可用 |
+| 🔴 High | 10 | 崩溃 / 输出结果错误 / 模块完全不可用（✅ 已修复 2026-09-01） |
 | 🟡 Medium | 19 | 特定输入或路径下结果错误、数据错配 |
 | 🟢 Low | 25 | 隐患、资源泄漏、文档与实现不一致 |
 | **合计** | **54** | |
@@ -22,22 +30,22 @@
 
 ## 二、High（10）
 
-### H1. `BornQPI` 引用不存在的属性 `hk_grid_cpu` / `hk_grid_gpu` ✅
+### H1. `BornQPI` 引用不存在的属性 `hk_grid_cpu` / `hk_grid_gpu` ✅（已修复 2026-09-01）
 - **位置**：`stm/qpi_born.py:148`、`qpi_born.py:189`（定义在 `:68`、`:76` 的 `self.hk_grid`）
 - **现象**：`__init__` 只赋值 `self.hk_grid`，CPU/GPU 计算函数却分别读取 `self.hk_grid_cpu` / `self.hk_grid_gpu`，全仓库无任何地方定义这两个属性。`calculate()` 在 CPU、GPU 后端均抛 `AttributeError`（已用最小 mock 哈密顿量实测复现）。
 - **修复**：统一属性名（如 CPU 分支 `self.hk_grid_cpu`、GPU 分支 `self.hk_grid_gpu`），或让两个计算函数直接使用 `self.hk_grid`。
 
-### H2. `JDOSQPI` 调用 `EK2DCalculator` 中不存在的方法 ✅
+### H2. `JDOSQPI` 调用 `EK2DCalculator` 中不存在的方法 ✅（已修复 2026-09-01）
 - **位置**：`stm/qpi_jdos.py:103`（`_compute_ek2d_cuda`）、`:108`（`_compute_ek2d`）；实际方法名为 `_compute_eigen` / `_compute_eigen_cuda`（`dft/wannier90/mlwf_ek2d.py:70`、`:109`）
 - **现象**：`JDOSQPI.__init__` 在对角化阶段即抛 `AttributeError`（已实测复现）。即使改名还有第二层不匹配：`_compute_eigen*` 返回 `(evals, evecs)` 二元组且 evals 形状为 `(nk², nw)`，而调用方期待 `(nw, nk, nk)` 再 `transpose((1,2,0))`；且 `_compute_eigen` 依赖的 `self.out_eigvec_flag` 只在 `calculate()/calculate_eigh()` 里设置、`__init__` 未初始化。
 - **修复**：改回正确的调用（并 reshape/transpose），或在 `EK2DCalculator` 补回 `_compute_ek2d/_compute_ek2d_cuda` 接口；在 `__init__` 初始化 `out_eigvec_flag`。
 
-### H3. pyFFTW "IFFT" 计划实际是正向 FFT ✅
+### H3. pyFFTW "IFFT" 计划实际是正向 FFT ✅（已修复 2026-09-01）
 - **位置**：`dft/wannier90/mlwf_susceptibility.py:400-406`（计划创建）、`:296-298`（"ifft" 计划）、`:347`（使用处）
 - **现象**：`_init_fftw_plan` 未传 `direction`，`pyfftw.FFTW` 默认 `FFTW_FORWARD`，因此名为 `ifft_conv` 的计划做的是正向 FFT。数值实验：默认计划与 `np.fft.ifftn` 相差因子 64（nk²，nk=8 时），而 `direction="FFTW_BACKWARD"` 与 `ifftn` 一致到机器精度。pyfftw 是硬依赖且无条件导入，**默认 CPU 路径必然命中此 bug**（numpy 回退分支是死代码，见 L8）。对 nk=256 结果差 65536 倍量级。
 - **修复**：`_init_fftw_plan` 增加 `direction` 参数；逆变换计划传 `direction="FFTW_BACKWARD"`。
 
-### H4. `bare_lindhard` CPU 路径多重错误，结果恒为零 🧪
+### H4. `bare_lindhard` CPU 路径多重错误，结果恒为零 🧪（已修复 2026-09-01）
 - **位置**：`dft/wannier90/bare_lindhard.py`
   1. **权重用同 k 本征矢**（`:152-158` on-the-fly、`:116-120` 预计算）：`overlap = Σ_a u_{a,m}(k) conj(u_{a,n}(k)) = δ_mn`（本征矢正交），而物理上应为 `⟨u_{m,k}|u_{n,k+q}⟩`（GPU 路径 `:351-356` 是对的）；
   2. **对角项被跳过**（`:144-145`）：`f_m - f_n` 在同 k 下对 m=n 恒为 0，`continue` 丢弃全部带内项（带内贡献应为 `f(ε_m(k)) − f(ε_m(k+q))`，非零）；
@@ -45,32 +53,32 @@
 - **现象**：错误 1+2 叠加使 m≠n 权重为 0（全轨道选择下本征矢正交）、m=n 被跳过 → **默认参数下 CPU 路径返回的 χ(q) 恒为 0**（轨道子集选择时权重不全为零，但仍是同 k 的错误量）；错误 3 使即便修复 1+2 仍会算错。GPU 路径无这些问题 → 双后端结果严重不一致。
 - **修复**：权重改为对 (k, k+q) 本征矢求重叠；删除/修正对角项跳过逻辑；用 3D 索引 `eps_n[k1q_idx[:,:,None], (k2_idx+ q2)%nk2]` 构造 `(nk, nk, n_q1)`。
 
-### H5. 超胞倒格基变换转置错误 🧪
+### H5. 超胞倒格基变换转置错误 🧪（已修复 2026-09-01）
 - **位置**：`utils/lattice_operations.py:126` `b_p = b @ np.linalg.inv(t).T`
 - **现象**：`LATTICE` 类文档与 `supercell()` 采用的约定是 `A_super = Mᵀ @ A_old`，对应的倒格变换应为 `B_super = inv(M) @ B`。代码写的是 `B @ inv(M)ᵀ`，隐含约定 `A_super = A @ M`，与 `lattice.py` 冲突。数值实验：`lat.supercell(M).bvecs == inv(M) @ B` 为 True、`== B @ inv(M).T` 为 False；对非对称变换矩阵（如 `[[2,1],[0,1]]`）两式给出的 Bragg 点完全不同。
 - **修复**：`b_p = np.linalg.inv(t) @ b`。
 
-### H6. `get_1stbz_vertices` 在常见取向下直接抛异常 ✅
+### H6. `get_1stbz_vertices` 在常见取向下直接抛异常 ✅（已修复 2026-09-01）
 - **位置**：`utils/lattice_operations.py:302`
 - **现象**：`extend_vecs_c3(include_neg=False)` 在 b1、b2 方位角相差 120° 的取向（石墨烯惯例，实测 b1=-30°、b2=90°）下只返回 3 个唯一矢量，随后 `gs.shape[1] != 6` 抛 `ValueError`。同一物理晶格的另一种等价取向（差 60°）却正常。
 - **修复**：改为 `include_neg=True`（两种取向下都恰好得到 6 个最近邻倒格矢）。
 
-### H7. `get_divider` 子串匹配顺序错误，d10/d100 全部按 d1 处理 ✅
+### H7. `get_divider` 子串匹配顺序错误，d10/d100 全部按 d1 处理 ✅（已修复 2026-09-01）
 - **位置**：`utils/plot_funcs.py:13-22`
 - **现象**：`"d1" in name` 是 `"d10"`、`"d100"` 的子串，永远先命中 `return 1`，后两个分支为死代码。所有依赖它的绘图函数（`plot_map_bias`、`plot_qpi_bias`、`plot_map_current_bias`、`plot_sts`、`plot_linecut`，及 `nanonis_ppt_generator.py` 的 `:230/:316/:367`）对 d10/d100 高增益数据偏压换算错误 10/100 倍。对照：`AutoPPt_winnew_modified.py:1079-1084` 的内联版本用三条独立 `if` 覆盖赋值，恰好正确。
 - **修复**：从长到短匹配：`if "d100" in name: return 100; if "d10" in name: return 10; return 1`。
 
-### H8. 无效 SXM 清理逻辑死代码，坏文件导致整个脚本崩溃 ⚠️
+### H8. 无效 SXM 清理逻辑死代码，坏文件导致整个脚本崩溃 ⚠️（已修复 2026-09-01）
 - **位置**：`utils/AutoPPt_winnew_modified.py:862-869`（清理循环）+ `:406`（`SXM()` 用 `except Exception: return` 吞掉一切异常）
 - **现象**：清理循环期望 `SXM()` 对坏文件抛 `ValueError` 以便 `del SxmFiles[i]`，但 `SXM()` 永不抛异常，坏文件残留，随后 `:912` 的 `nap.read.Scan(topopath)`（无保护）直接抛异常，`prs.save()` 前整个脚本崩溃、已生成内容全部丢失。
 - **修复**：`SXM()` 读失败时重新抛出（或返回状态），并把 `:912` 的读取包进 try。
 
-### H9. `nanonis_ppt_generator.py` 无法作为包模块导入 ✅
+### H9. `nanonis_ppt_generator.py` 无法作为包模块导入 ✅（已修复 2026-09-01）
 - **位置**：`utils/nanonis_ppt_generator.py:15` `from plot_funcs import (...)`
 - **现象**：裸导入依赖 `utils` 目录在 `sys.path` 上；`import stm_data_processing.utils.nanonis_ppt_generator` 直接抛 `ModuleNotFoundError: No module named 'plot_funcs'`（导入测试复现）。此外该文件无 `__main__` 保护，模块级 `input()` 交互提示（`:38-69`）使其即便修好导入也无法作为库使用。
 - **修复**：改为相对导入 `from .plot_funcs import ...`（或 `from stm_data_processing.utils.plot_funcs import ...`），并将交互逻辑移入 `if __name__ == "__main__":`。
 
-### H10. `diff_gcube` 写出的原子坐标整体错位、z 坐标丢失 ✅
+### H10. `diff_gcube` 写出的原子坐标整体错位、z 坐标丢失 ✅（已修复 2026-09-01）
 - **位置**：`dft/openmx/diff_gcube.py:107-111`（与 `:60` 的读取解析对照）
 - **现象**：`read` 把原子行解析为 5 列 `[Z, charge, x, y, z]`；`write` 却输出 `f"{atom[0]} {0.0} {atom[1]} {atom[2]} {atom[3]}"`，即 `Z, 0.0, charge, x, y`：电荷被硬编码为 0，随后 charge→x、x→y、y→z 整体错位一位，真正的 z（`atom[4]`）被丢弃。任何读取输出 cube 原子块的工具（VESTA/ASE/VMD）都会得到错误的原子位置（网格差分数据本身正确）。
 - **修复**：`f"{atom[0]:5.0f} {atom[1]:12.6f} {atom[2]:12.6f} {atom[3]:12.6f} {atom[4]:12.6f}\n"`。
