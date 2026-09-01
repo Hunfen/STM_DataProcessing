@@ -18,8 +18,12 @@ def load_wout_file(filename: str) -> dict:
     dict
         Dictionary containing parsed data:
         - 'disentangle_data': (3, num_iter) array with [iteration, time, delta]
-        - 'wannierise_spreads': (num_cycle, num_wann, 1) array with spreads
-        - 'wannierise_od': (num_cycle, 1) array with O_D values
+        - 'wannierise_spreads': (num_cycle, num_wann, 1) array with spreads,
+          where num_cycle counts the actual Wannierise cycles (the Initial
+          State row, if present, is dropped)
+        - 'wannierise_od': (num_cycle, 1) array with O_D values, row-aligned
+          with 'wannierise_spreads' (the Initial State O_D row is dropped
+          only when the file actually printed one)
         - 'disentangle_tar': float, convergence tolerance for disentanglement
         - 'wannierise_tar': float, convergence tolerance for wannierisation
     """
@@ -31,7 +35,9 @@ def load_wout_file(filename: str) -> dict:
     num_wann = 0
     spreads_data = []  # Each element is a list of spreads for one cycle
     od_data = []  # O_D value for each cycle
-    current_cycle = -1  # -1 represents Initial State, 0+ represents cycles
+    saw_initial_state = False  # True when an "Initial State" row was parsed
+    saw_initial_state_od = False  # True when the Initial State block printed O_D
+    in_initial_state_block = False  # True while parsing the Initial State block
 
     # Convergence tolerance values
     disentangle_tar = None
@@ -178,10 +184,12 @@ def load_wout_file(filename: str) -> dict:
                         spreads_data.append(current_spreads)
                         current_spreads = []
                     in_wannierise_section = False
+                    in_initial_state_block = False
 
                 # Identify cycle start
                 if line.startswith("Initial State"):
-                    current_cycle = -1
+                    saw_initial_state = True
+                    in_initial_state_block = True
                     reading_spreads = True
                     current_spreads = []
 
@@ -191,11 +199,7 @@ def load_wout_file(filename: str) -> dict:
                     if current_spreads and len(current_spreads) == num_wann:
                         spreads_data.append(current_spreads)
                         current_spreads = []
-
-                    # Extract cycle number
-                    match = re.search(r"Cycle:\s+(\d+)", line)
-                    if match:
-                        current_cycle = int(match.group(1))
+                    in_initial_state_block = False
                     reading_spreads = True
 
                 # Read WF centre and spread lines
@@ -218,6 +222,8 @@ def load_wout_file(filename: str) -> dict:
                     if match:
                         od = float(match.group(1))
                         od_data.append(od)
+                        if in_initial_state_block:
+                            saw_initial_state_od = True
 
     # Process the last cycle's data for wannierise
     if current_spreads and len(current_spreads) == num_wann:
@@ -230,18 +236,25 @@ def load_wout_file(filename: str) -> dict:
 
     # Convert wannierise data
     if spreads_data and num_wann > 0:
-        # Check if there's an Initial State (cycle=-1)
-        # If so, start from the first actual cycle (remove Initial State)
-        if len(spreads_data) > 1 and current_cycle == -1:
-            spreads_data = spreads_data[1:]  # Remove Initial State
-
-        # Similarly process od_data
-        if len(od_data) > 1:
-            od_data = od_data[1:]  # Remove O_D corresponding to Initial State
+        # The Initial State row (if present) precedes the actual cycles; drop
+        # it from the spreads array. Wannier90 does not print an O_D value for
+        # the Initial State in the standard format, so od_data is trimmed only
+        # when a legacy format actually provided one (saw_initial_state_od),
+        # keeping wannierise_spreads and wannierise_od row-aligned.
+        if saw_initial_state:
+            spreads_data = spreads_data[1:]  # Remove Initial State spreads
+        if saw_initial_state_od:
+            od_data = od_data[1:]  # Remove Initial State O_D (legacy format)
 
         # Convert to numpy arrays
         spreads_array = np.array(spreads_data).reshape(-1, num_wann, 1)
         od_array = np.array(od_data).reshape(-1, 1)
+
+        if len(spreads_array) != len(od_array):
+            raise ValueError(
+                "Mismatch between Wannierise spreads and O_D rows: "
+                f"{len(spreads_array)} spreads rows vs {len(od_array)} O_D rows."
+            )
     else:
         spreads_array = np.array([])
         od_array = np.array([])

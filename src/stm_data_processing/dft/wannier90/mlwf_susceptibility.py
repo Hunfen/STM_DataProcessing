@@ -24,6 +24,17 @@ class SusceptibilityCalculator_wang2012:
     """Class for calculating Lindhard susceptibility chi0(q) from tight-binding Hamiltonian.
     Accelatration reference:
     DOI: https://doi.org/10.1103/PhysRevB.85.224529
+
+    Conventions
+    -----------
+    The occupied and unoccupied spectral functions A(k, eps) are projected
+    with the orbital selection matrices minit (initial state) and mfin (final
+    state) via einsum("ac,ijcb->ijab") before the FFT-based convolution,
+    identically on the CPU and GPU paths. The energy integration over
+    eps_occ = linspace(-|omega_limit|, 0, n_eps) is weighted by the actual
+    grid spacing d_eps = |omega_limit| / (n_eps - 1); the resolution argument
+    only sets the nominal point count via
+    n_eps = round(|omega_limit| / resolution) + 1.
     """
 
     def __init__(
@@ -145,8 +156,48 @@ class SusceptibilityCalculator_wang2012:
         gr_k = self.gf.compute_green(hk_grid, omega)
         return -self.xp.imag(gr_k) / self.xp.pi
 
+    def _energy_grid(self, omega_limit: float, resolution: float):
+        """Build the occupied/unoccupied energy grids and the integration step.
+
+        Returns
+        -------
+        tuple[int, np.ndarray, np.ndarray, float]
+            (n_eps, eps_occ, eps_unocc, d_eps) where eps_occ spans
+            [-|omega_limit|, 0] with n_eps points, eps_unocc = eps_occ +
+            omega_limit, and d_eps = |omega_limit| / (n_eps - 1) is the
+            actual grid spacing. d_eps is the integration weight used for the
+            final normalization (bug M7 fix); the resolution argument only
+            sets the nominal point count
+            n_eps = round(|omega_limit| / resolution) + 1.
+
+        Raises
+        ------
+        ValueError
+            If n_eps < 2, i.e. |omega_limit| < 0.5 * resolution: the grid
+            degenerates to a single point and d_eps is undefined.
+        """
+        n_eps = int(np.round(np.abs(omega_limit) / resolution)) + 1
+        if n_eps < 2:
+            raise ValueError(
+                f"omega_limit={omega_limit} with resolution={resolution} gives "
+                f"n_eps=1; require |omega_limit| >= 0.5 * resolution so the "
+                f"energy integration grid has at least two points"
+            )
+        eps_occ = np.linspace(-np.abs(omega_limit), 0.0, n_eps)
+        eps_unocc = eps_occ + omega_limit
+        d_eps = np.abs(omega_limit) / (n_eps - 1)
+        return n_eps, eps_occ, eps_unocc, d_eps
+
     def _compute_imag_chi_cuda(self, omega_limit: float, resolution: float):
-        """CUDA version of occupied-unoccupied susceptibility calculation."""
+        """CUDA version of occupied-unoccupied susceptibility calculation.
+
+        The orbital selection matrices minit/mfin are applied with the same
+        einsum("ac,ijcb->ijab") projection as the CPU path before the FFT
+        (bug M6 fix), so non-identity selection matrices change the result.
+        The final normalization uses the actual energy-grid spacing
+        d_eps = |omega_limit| / (n_eps - 1) as the integration weight
+        (bug M7 fix), not the requested resolution.
+        """
         import cupy as cp
 
         logger.info(
@@ -164,9 +215,9 @@ class SusceptibilityCalculator_wang2012:
             f"[CUDA] Memory pool limit set to {MAX_GPU_MEMORY_FRACTION * 100:.0f}% of 24GB"
         )
 
-        n_eps = int(np.round(np.abs(omega_limit) / resolution)) + 1
-        eps_occ = np.linspace(-np.abs(omega_limit), 0.0, n_eps)
-        eps_unocc = eps_occ + omega_limit
+        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
+            omega_limit, resolution
+        )
 
         n_spectra_total = 2 * n_eps
 
@@ -176,6 +227,11 @@ class SusceptibilityCalculator_wang2012:
         logger.info(f"[CUDA] Total spectral function computations: {n_spectra_total}")
 
         chi_q_accum = self.xp.zeros((nk, nk), dtype=self.xp.float64)
+
+        # Bug M6 fix: move the orbital selection matrices to the GPU once so
+        # the per-energy projection below matches the CPU path exactly.
+        minit_gpu = self.xp.asarray(self._minit)
+        mfin_gpu = self.xp.asarray(self._mfin)
 
         logger.info("[CUDA] Computing spectral functions and convolution...")
         spectra_count = 0
@@ -187,12 +243,23 @@ class SusceptibilityCalculator_wang2012:
             del spectra_occ
             spectra_count += 1
 
+            # Apply the initial-state orbital projection (bug M6 fix),
+            # mirroring the CPU path: einsum("ac,ijcb->ijab", minit, A).
+            spectra_occ_2d = self.xp.einsum(
+                "ac,ijcb->ijab", minit_gpu, spectra_occ_2d
+            )
+
             spectra_unocc = self._compute_single_particle_spectra(eps_unocc[i])
             spectra_unocc_2d = self.xp.ascontiguousarray(
                 spectra_unocc.reshape(nk, nk, nw, nw)
             )
             del spectra_unocc
             spectra_count += 1
+
+            # Apply the final-state orbital projection (bug M6 fix).
+            spectra_unocc_2d = self.xp.einsum(
+                "ac,ijcb->ijab", mfin_gpu, spectra_unocc_2d
+            )
 
             b_occ = self.xp.fft.fftn(spectra_occ_2d, axes=(0, 1))
             b_occ_shifted = self.xp.fft.fftshift(b_occ, axes=(0, 1))
@@ -228,7 +295,10 @@ class SusceptibilityCalculator_wang2012:
                 )
 
         chi_q_accum = self.xp.fft.fftshift(chi_q_accum)
-        chi_q = -np.abs(resolution) / (2 * np.pi) * chi_q_accum
+        # Bug M7 fix: weight by the actual grid spacing d_eps instead of the
+        # requested resolution (they differ when |omega|/resolution is not an
+        # integer).
+        chi_q = -d_eps / (2 * np.pi) * chi_q_accum
         chi_q = self.xp.asnumpy(chi_q)
 
         mem_pool.free_all_blocks()
@@ -239,7 +309,14 @@ class SusceptibilityCalculator_wang2012:
         return chi_q
 
     def _compute_imag_chi(self, omega_limit: float, resolution: float):
-        """Compute Im[chi(q)] with orbital selection matrices."""
+        """Compute Im[chi(q)] with orbital selection matrices.
+
+        The orbital selection matrices minit/mfin are applied as
+        einsum("ac,ijcb->ijab") projections on the spectral functions before
+        the FFT. The final normalization uses the actual energy-grid spacing
+        d_eps = |omega_limit| / (n_eps - 1) as the integration weight
+        (bug M7 fix), not the requested resolution.
+        """
         import importlib.util
 
         PYFFTW_AVAILABLE = importlib.util.find_spec("pyfftw") is not None
@@ -249,9 +326,9 @@ class SusceptibilityCalculator_wang2012:
         nw = self.num_wann
         nk = self.nk
 
-        n_eps = int(np.round(np.abs(omega_limit) / resolution)) + 1
-        eps_occ = np.linspace(-np.abs(omega_limit), 0.0, n_eps)
-        eps_unocc = eps_occ + omega_limit
+        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
+            omega_limit, resolution
+        )
 
         n_spectra_total = 2 * n_eps
         logger.info(
@@ -370,7 +447,10 @@ class SusceptibilityCalculator_wang2012:
                 )
 
         chi_q = np.fft.fftshift(chi_q_accum)
-        chi_q = -np.abs(resolution) / (2 * np.pi) * chi_q
+        # Bug M7 fix: weight by the actual grid spacing d_eps instead of the
+        # requested resolution (they differ when |omega|/resolution is not an
+        # integer).
+        chi_q = -d_eps / (2 * np.pi) * chi_q
 
         logger.info("[CPU] Susceptibility calculation completed.")
         return chi_q

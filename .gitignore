@@ -60,3 +60,6 @@ cuda-keyring_1.1-1_all.deb.1
 
 # DSH AgentTeams
 .agent-teams/
+
+# Temporary verification artifacts
+tmp_verify/

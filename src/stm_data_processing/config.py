@@ -187,10 +187,15 @@ class BackendArray:
 
     def __init__(self, backend: Literal["cpu", "gpu", "auto"] = "auto"):
         if backend == "auto":
-            self.backend = BACKEND
-        else:
-            self.backend = backend
-        self.xp = get_xp() if self.backend == "gpu" else _numpy_module
+            backend = BACKEND
+        if backend == "gpu" and not _cupy_usable():
+            logger.warning(
+                "[Config] BackendArray: GPU requested but CuPy is not usable. "
+                "Falling back to CPU."
+            )
+            backend = "cpu"
+        self.backend: Literal["cpu", "gpu"] = backend
+        self.xp = _cupy_module if backend == "gpu" else _numpy_module
 
     def array(self, data, **kwargs):
         """Create an array on the current backend."""

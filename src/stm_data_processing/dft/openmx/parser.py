@@ -563,8 +563,11 @@ class OpenMX:
         Returns
         -------
         dict or None
-            Dictionary with 'positions_frac', 'elements', and 'spin_weights' keys,
-            or None if the block is not found.
+            Dictionary with 'positions_frac' (None for Unit Ang),
+            'positions_ang' (None for Unit FRAC), 'elements', and
+            'spin_weights' keys, or None if the block is not found.
+            Angstrom coordinates are converted to fractional by the caller
+            (read_atomic_positions) using the lattice vectors.
         """
         # Find the coordinate unit
         coord_unit = None
@@ -633,12 +636,10 @@ class OpenMX:
         if not positions:
             return None
 
-        # If coordinates are in Angstrom, convert to fractional
-        if coord_unit == "ANG":
-            # Note: We cannot convert Angstrom to fractional without lattice vectors
-            # So we'll keep them as-is and let the caller handle the conversion
-            # This is a limitation - the user would need to provide lattice vectors separately
-            pass
+        # Angstrom coordinates are returned as positions_ang; the caller
+        # (read_atomic_positions) converts them to fractional coordinates with
+        # the lattice vectors via positions_frac = positions_ang @ inv(avecs).
+        # Both quantities are assumed to be in Angstrom (not Bohr).
 
         return {
             "positions_frac": positions if coord_unit == "FRAC" else None,
@@ -721,6 +722,57 @@ class OpenMX:
         self.bvecs = result["bvecs"]
         return self.bvecs
 
+    def _ang_to_frac(self, positions_ang: list | np.ndarray) -> np.ndarray:
+        """Convert Cartesian (Angstrom) positions to fractional coordinates.
+
+        The conversion uses the real-space lattice vectors:
+        positions_frac = positions_ang @ inv(avecs).  Both positions_ang and
+        avecs are assumed to be in Angstrom (a Bohr/AU input would need a
+        separate length conversion and is not handled here).
+
+        Raises
+        ------
+        RuntimeError
+            If the lattice vectors (avecs) are not available.
+        """
+        if self.avecs is None:
+            raise RuntimeError(
+                "Atomic positions are in Angstrom but the lattice vectors "
+                "(avecs) are not available; cannot convert to fractional "
+                "coordinates"
+            )
+        positions_ang = np.asarray(positions_ang, dtype=np.float64)
+        avecs = np.asarray(self.avecs, dtype=np.float64)
+        return positions_ang @ np.linalg.inv(avecs)
+
+    def _positions_dict_from_species(
+        self, species_result: dict | None, source: str
+    ) -> dict | None:
+        """Build a positions dict from a species/coordinates parse result.
+
+        Handles both fractional coordinates and Angstrom coordinates (the
+        latter converted to fractional via _ang_to_frac).  Returns None when
+        the parse result is missing or carries no coordinates.
+        """
+        if not species_result:
+            return None
+        if species_result["positions_frac"] is not None:
+            return self._create_positions_dict(
+                species_result["positions_frac"],
+                species_result["elements"],
+                species_result["spin_weights"],
+                source,
+            )
+        if species_result.get("positions_ang") is not None:
+            positions_frac = self._ang_to_frac(species_result["positions_ang"])
+            return self._create_positions_dict(
+                positions_frac,
+                species_result["elements"],
+                species_result["spin_weights"],
+                source,
+            )
+        return None
+
     def read_atomic_positions(self, fname: str | None = None) -> dict:
         """
         Read atomic positions from OpenMX .out/.dat file with priority order.
@@ -731,6 +783,15 @@ class OpenMX:
         3. Atoms.SpeciesAndCoordinates block from .dat file (lowest priority)
 
         Spin weights are only available from sources 2 and 3.
+
+        When the Atoms.SpeciesAndCoordinates block uses Unit Ang, the
+        Cartesian positions are converted to fractional coordinates with the
+        real-space lattice vectors: positions_frac = positions_ang @
+        inv(avecs).  Both quantities are assumed to be in Angstrom; Bohr/AU
+        coordinates are not converted.  If Angstrom coordinates are present
+        but the lattice vectors are unavailable, a RuntimeError is raised.
+        The original RuntimeError is kept when no coordinates can be found in
+        any source.
 
         Parameters
         ----------
@@ -784,13 +845,10 @@ class OpenMX:
 
         # Try to get positions from species and coordinates block (priority 2)
         species_result = self._parse_species_and_coordinates(result.get("lines", []))
-        if species_result and species_result["positions_frac"] is not None:
-            positions_dict = self._create_positions_dict(
-                species_result["positions_frac"],
-                species_result["elements"],
-                species_result["spin_weights"],
-                "species_coordinates",
-            )
+        positions_dict = self._positions_dict_from_species(
+            species_result, "species_coordinates"
+        )
+        if positions_dict is not None:
             # Set the atomic positions data and atom count
             self.atomic_positions_data = positions_dict
             self.n_atoms = len(positions_dict["elements"])
@@ -802,16 +860,10 @@ class OpenMX:
                 with Path(self.dat_file).open() as f:
                     dat_lines = f.readlines()
                 dat_species_result = self._parse_species_and_coordinates(dat_lines)
-                if (
-                    dat_species_result
-                    and dat_species_result["positions_frac"] is not None
-                ):
-                    positions_dict = self._create_positions_dict(
-                        dat_species_result["positions_frac"],
-                        dat_species_result["elements"],
-                        dat_species_result["spin_weights"],
-                        "dat_file",
-                    )
+                positions_dict = self._positions_dict_from_species(
+                    dat_species_result, "dat_file"
+                )
+                if positions_dict is not None:
                     # Set the atomic positions data and atom count
                     self.atomic_positions_data = positions_dict
                     self.n_atoms = len(positions_dict["elements"])

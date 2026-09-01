@@ -25,18 +25,33 @@ def parse_dft_band_data(
     systemname : str, optional
         System name for OpenMX files.
 
+    Notes
+    -----
+    The .Band file format is: line 1 holds "nband  nspin  chemical_potential"
+    (chemical potential in Hartree); line 2 the reciprocal lattice vectors;
+    line 3 the number of k-paths, followed by one k-path info line per path
+    "nkpts  start(3)  end(3)  label_start  label_end"; the band data section
+    is then arranged with spin as the outer loop and k-point as the inner
+    loop, each k-point being a line "nband  kx  ky  kz" followed by nband
+    energy values (Hartree, possibly wrapped over several lines).
+
     Returns
     -------
     dict
         Dictionary containing:
-        - 'dist' : 1D array of cumulative k-path distance (1/Å)
-        - 'bands' : (nk_total, nband) array of band energies (eV, EF=0)
+        - 'dist' : 1D array of cumulative k-path distance (1/Å), computed
+          over the single-spin path (identical for every spin)
+        - 'bands' : band energies in eV with EF=0; shape (nk, nband) when
+          nspin == 1 (backward compatible), or (nspin, nk, nband) for
+          spin-polarized data
         - 'tick_pos' : list of float, x-positions of high-symmetry points
         - 'tick_label' : list of str, labels for high-symmetry points
-        - 'kpts_frac' : (nk_total, 3) fractional k coordinates
-        - 'kpts_cart' : (nk_total, 3) cartesian k coordinates (1/Å)
+        - 'kpts_frac' : (nk, 3) fractional k coordinates (not duplicated per
+          spin)
+        - 'kpts_cart' : (nk, 3) cartesian k coordinates (1/Å)
         - 'fermi_energy' : Fermi energy in eV
         - 'n_bands' : Number of bands
+        - 'nspin' : Spin degrees of freedom read from the header (1 or 2)
 
     Raises
     ------
@@ -71,17 +86,20 @@ def parse_dft_band_data(
     if not raw:
         raise ValueError(f"Empty band file: {fname_band}")
 
-    # First line: number of bands and Fermi energy (in Hartree)
+    # First line: nband, nspin (spin degrees of freedom) and chemical
+    # potential (in Hartree)
     header = raw[0].split()
     if len(header) < 3:
         raise ValueError(f"Invalid header in band file: {raw[0]}")
 
     nband = int(header[0])
+    nspin = int(header[1])
     mu_au = float(header[2])
     fermi_energy = mu_au * h2ev
 
     logger.info("Parsing band data:")
     logger.info(f"  Number of bands: {nband}")
+    logger.info(f"  Spin degrees of freedom: {nspin}")
     logger.info(f"  Fermi energy: {fermi_energy:.4f} eV")
 
     # Second line: Reciprocal lattice vectors in a.u.
@@ -128,9 +146,11 @@ def parse_dft_band_data(
 
         i += 1
 
-    # Now process dispersion data
-    kpts_frac = []
-    bands = []
+    # Now process dispersion data.  The band data section is arranged with
+    # spin as the outer loop and k-point as the inner loop; each k-point block
+    # is a header line "nband  kx  ky  kz" followed by nband energy values
+    # (Hartree), possibly wrapped over several lines.
+    blocks: list[tuple[np.ndarray, np.ndarray]] = []
 
     while i < len(lines):
         toks = lines[i].split()
@@ -151,8 +171,6 @@ def parse_dft_band_data(
             i += 1
             continue
 
-        kpts_frac.append([kx, ky, kz])
-
         # Collect band energies
         e_vals_au = []
         j = i + 1
@@ -162,15 +180,46 @@ def parse_dft_band_data(
                     e_vals_au.append(float(t))
             j += 1
 
-        e_vals_au = np.array(e_vals_au[:nband])
-        e_vals = (e_vals_au - mu_au) * h2ev
-        bands.append(e_vals)
+        blocks.append((np.array([kx, ky, kz]), np.array(e_vals_au[:nband])))
         i = j
 
-    kpts_frac = np.array(kpts_frac)
-    bands = np.array(bands)
+    if not blocks:
+        raise ValueError(f"No band data found in: {fname_band}")
 
-    logger.info(f"  Number of k-points: {len(kpts_frac)}")
+    # Every spin traces the same k-path, so the block count is nspin * nk.
+    n_kpts = len(blocks) // nspin
+    if n_kpts * nspin != len(blocks):
+        raise ValueError(
+            f"Band data block count ({len(blocks)}) is not divisible by "
+            f"nspin={nspin}; expected nspin * nk blocks in: {fname_band}"
+        )
+
+    # The k-path geometry comes from the first spin (identical for all spins).
+    kpts_frac = np.array([block[0] for block in blocks[:n_kpts]])
+    if nspin > 1:
+        # Defensive check: the k-path must be the same for every spin.
+        for s in range(1, nspin):
+            spin_k = np.array(
+                [block[0] for block in blocks[s * n_kpts : (s + 1) * n_kpts]]
+            )
+            if not np.allclose(kpts_frac, spin_k, atol=1e-8):
+                raise ValueError(
+                    f"Spin {s} k-path differs from spin 0 in: {fname_band}"
+                )
+        # (nspin, nk, nband)
+        bands_au = np.array(
+            [
+                [block[1] for block in blocks[s * n_kpts : (s + 1) * n_kpts]]
+                for s in range(nspin)
+            ]
+        )
+    else:
+        # (nk, nband): backward-compatible shape for non-spin-polarized data
+        bands_au = np.array([block[1] for block in blocks])
+
+    bands = (bands_au - mu_au) * h2ev  # eV, EF=0
+
+    logger.info(f"  Number of k-points per spin: {n_kpts}")
     logger.info(f"  Energy range (eV, EF=0): {bands.min():.4f} → {bands.max():.4f}")
 
     kpts_cart = kpts_frac @ b
@@ -204,6 +253,7 @@ def parse_dft_band_data(
         "kpts_cart": kpts_cart,
         "fermi_energy": fermi_energy,
         "n_bands": nband,
+        "nspin": nspin,
     }
 
 
@@ -229,7 +279,8 @@ def openmx_band_analysis(
     dict
         Parsed band structure data containing:
         - 'dist' : 1D array of cumulative k-path distance (1/Å)
-        - 'bands' : (nk_total, nband) array of band energies (eV, EF=0)
+        - 'bands' : (nk_total, nband) or (nspin, nk_total, nband) array of
+          band energies (eV, EF=0); see parse_dft_band_data for details
         - 'tick_pos' : list of float, x-positions of high-symmetry points
         - 'tick_label' : list of str, labels for high-symmetry points
         - 'kpts_frac' : (nk_total, 3) fractional k coordinates

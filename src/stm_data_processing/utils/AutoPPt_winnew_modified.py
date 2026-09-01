@@ -21,6 +21,23 @@ np.float = float
 np.int = int
 # fmt: on
 
+# isort: off
+try:
+    from .plot_funcs import (
+        build_bias_labels,
+        finite_range,
+        subtractMeanPlane,
+        topo_colormap,
+    )
+except ImportError:  # allow running as a standalone script
+    from plot_funcs import (
+        build_bias_labels,
+        finite_range,
+        subtractMeanPlane,
+        topo_colormap,
+    )
+# isort: on
+
 # ================= 交互式输入区 =================
 # 1. 数据文件夹路径
 print("请输入数据处理文件夹路径(多个路径用英文逗号分隔):")
@@ -176,22 +193,7 @@ def ShowMap(mappath, n):
     if "d100" in str(mappath):
         divider = 100
     raw_data = nap.read.Grid(mappath)
-    try:
-        SegBias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for i in range(len(SegBias)):
-            p = SegBias[i].split(",")
-            temp = list(
-                np.linspace(eval(p[0]), eval(p[1]), eval(p[-3])) * 1000 / divider
-            )
-            if i == 0:
-                bias += temp
-            else:
-                bias += temp[1:]
-    except Exception:  # 使用具体异常类型
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
     try:
         data = raw_data.signals["LI Demod 1 X (A)"][:, :, n]
     except Exception:
@@ -207,7 +209,7 @@ def ShowMap(mappath, n):
         data,
         origin="lower",
         extent=(0, scan_range[0] * 1e9, 0, scan_range[1] * 1e9),
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
     )
     plt.xticks([])
     plt.yticks([])
@@ -240,22 +242,7 @@ def QPI(mappath, n):
     if "d100" in str(mappath):
         divider = 100
     raw_data = nap.read.Grid(mappath)
-    try:
-        SegBias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for i in range(len(SegBias)):
-            p = SegBias[i].split(",")
-            temp = list(
-                np.linspace(eval(p[0]), eval(p[1]), eval(p[-3])) * 1000 / divider
-            )
-            if i == 0:
-                bias += temp
-            else:
-                bias += temp[1:]
-    except Exception:
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
     try:
         data = raw_data.signals["LI Demod 1 X (A)"][:, :, n]
     except Exception:
@@ -266,10 +253,13 @@ def QPI(mappath, n):
     shift2center = np.fft.fftshift(fft2)
     QPI2 = np.log(1 + abs(shift2center))
     # 由于colorbar范围问题,需要求平均值和标准差以将colorbar颜色卡在某个范围
-    mean_value = np.mean(QPI2)
-    std_deviation = np.std(QPI2)
-    vqmin = np.min(QPI2)
-    vqmax = mean_value + 1.5 * std_deviation
+    if np.any(np.isfinite(QPI2)):
+        mean_value = float(np.nanmean(QPI2))
+        std_deviation = float(np.nanstd(QPI2))
+        vqmin = float(np.nanmin(QPI2))
+        vqmax = mean_value + 1.5 * std_deviation
+    else:
+        vqmin, vqmax = None, None
     # 计算Q空间的范围
     range_qx = 2 * np.pi / (scan_range[0] * 1e9 / len(data[0]))
     range_qy = 2 * np.pi / (scan_range[1] * 1e9 / len(data[:, 0]))
@@ -278,7 +268,7 @@ def QPI(mappath, n):
     ax0.imshow(
         QPI2,
         origin="lower",
-        cmap="gray_r",
+        cmap=topo_colormap("gray_r"),
         vmin=vqmin,
         vmax=vqmax,
         extent=(-range_qx / 2, range_qx / 2, -range_qy / 2, range_qy / 2),
@@ -313,22 +303,7 @@ def ShowMapI(mappath, n):
         divider = 100
     raw_data = nap.read.Grid(mappath)
     # 获取mapping对应的偏压列表
-    try:
-        SegBias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for i in range(len(SegBias)):
-            p = SegBias[i].split(",")
-            temp = list(
-                np.linspace(eval(p[0]), eval(p[1]), eval(p[-3])) * 1000 / divider
-            )
-            if i == 0:
-                bias += temp
-            else:
-                bias += temp[1:]
-    except Exception:
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
     data = raw_data.signals["Current (A)"][:, :, n]
     scan_range = raw_data.header["size_xy"]
 
@@ -340,7 +315,7 @@ def ShowMapI(mappath, n):
         data,
         origin="lower",
         extent=(0, scan_range[0] * 1e9, 0, scan_range[1] * 1e9),
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
     )
     plt.xticks([])
     # plt.tick_params(axis='x', which='both', pad=0)
@@ -382,12 +357,14 @@ def SXM(topopath):
             plt.imshow(
                 topo,
                 origin="lower",
-                cmap="Blues_r",
+                cmap=topo_colormap("Blues_r"),
                 extent=(0, size[0] * 1e9, 0, size[1] * 1e9),
             )
         else:
             plt.imshow(
-                topo, cmap="Blues_r", extent=(0, size[0] * 1e9, 0, size[1] * 1e9)
+                topo,
+                cmap=topo_colormap("Blues_r"),
+                extent=(0, size[0] * 1e9, 0, size[1] * 1e9),
             )
         plt.xticks([])
         plt.yticks([])
@@ -483,9 +460,9 @@ def STS(stspath):
             ax0.imshow(
                 topo2,
                 origin="lower",
-                cmap="Blues_r",
-                vmin=topo.min(),
-                vmax=topo.max(),
+                cmap=topo_colormap("Blues_r"),
+                vmin=finite_range(topo)[0],
+                vmax=finite_range(topo)[1],
                 extent=(
                     (scan_offset[0] - range_x_new / 2) * 1e9,
                     (scan_offset[0] + range_x_new / 2) * 1e9,
@@ -500,9 +477,9 @@ def STS(stspath):
             )
             ax0.imshow(
                 topo2,
-                cmap="Blues_r",
-                vmin=topo.min(),
-                vmax=topo.max(),
+                cmap=topo_colormap("Blues_r"),
+                vmin=finite_range(topo)[0],
+                vmax=finite_range(topo)[1],
                 extent=(
                     (scan_offset[0] - range_x_new / 2) * 1e9,
                     (scan_offset[0] + range_x_new / 2) * 1e9,
@@ -556,7 +533,7 @@ def Linecut(lcpath):
         extent=(bias[0], bias[-1], 0, L),
         aspect="auto",
         origin="lower",
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
         interpolation="none",
     )
     ax1.tick_params(axis="both", which="major", pad=1)
@@ -566,7 +543,7 @@ def Linecut(lcpath):
     ax1.set_ylabel("Length(nm)", fontdict=font, labelpad=0.3)
 
     # 画出linecut的堆叠偏移单谱
-    offset = 0.25 * np.mean(lcdata[0])
+    offset = 0.25 * np.nanmean(lcdata[0])
     cmap = plt.get_cmap("brg")
     colors = [
         cmap(i) for i in np.linspace(0, 1, len(lcdata))
@@ -656,9 +633,9 @@ def Linecut(lcpath):
             ax0.imshow(
                 topo2,
                 origin="lower",
-                cmap="Blues_r",
-                vmin=topo.min(),
-                vmax=topo.max(),
+                cmap=topo_colormap("Blues_r"),
+                vmin=finite_range(topo)[0],
+                vmax=finite_range(topo)[1],
                 extent=(
                     (scan_offset[0] - range_x_new / 2) * 1e9,
                     (scan_offset[0] + range_x_new / 2) * 1e9,
@@ -674,9 +651,9 @@ def Linecut(lcpath):
             )
             ax0.imshow(
                 topo2,
-                cmap="Blues_r",
-                vmin=topo.min(),
-                vmax=topo.max(),
+                cmap=topo_colormap("Blues_r"),
+                vmin=finite_range(topo)[0],
+                vmax=finite_range(topo)[1],
                 extent=(
                     (scan_offset[0] - range_x_new / 2) * 1e9,
                     (scan_offset[0] + range_x_new / 2) * 1e9,
@@ -746,26 +723,6 @@ def angle_def(angle):
         return 360 + angle
 
 
-def subtractMeanPlane(matrix):
-    xdim, ydim = matrix.shape
-    coordMatrix = np.zeros((xdim * ydim, 3))
-    zVector = np.zeros(xdim * ydim)
-    for i in range(xdim):
-        for j in range(ydim):
-            coordMatrix[i * xdim + j] = [i, j, 1]
-            zVector[i * xdim + j] = matrix[i, j]
-
-    zVector = np.matrix(zVector)
-    coordMatrix = np.matrix(coordMatrix)
-    planeVector = (coordMatrix.T * coordMatrix).I * coordMatrix.T * zVector.T
-    planeMatrix = np.zeros((xdim, ydim))
-
-    for i in range(xdim):
-        for j in range(ydim):
-            planeMatrix[i, j] = i * planeVector[0] + j * planeVector[1] + planeVector[2]
-    return np.subtract(matrix, planeMatrix)
-
-
 def PlotSXM(sxmpath):
     try:
         raw_data = nap.read.Scan(sxmpath)
@@ -780,7 +737,7 @@ def PlotSXM(sxmpath):
         ax.imshow(
             topo,
             origin=origin,
-            cmap="Blues_r",
+            cmap=topo_colormap("Blues_r"),
             extent=(
                 (scan_offset[0] - scan_range[0] / 2) * 1e9,
                 (scan_offset[0] + scan_range[0] / 2) * 1e9,
@@ -1066,7 +1023,7 @@ for k in range(len(DataFolderpath)):
                     divider = 10
                 if "d100" in str(topopath):
                     divider = 100
-                setpointV_topo = raw_data.header["bias"] * 1000 / divider
+                setpointV_topo = raw_data_topo.header["bias"] * 1000 / divider
                 # 再画一次没有标识的形貌
                 SXM(topopath)
             # 开始将获得的照片画在ppt上并标注文字信息
@@ -1233,7 +1190,7 @@ for k in range(len(DataFolderpath)):
                     divider = 10
                 if "d100" in str(topopath):
                     divider = 100
-                setpointV_topo = raw_data.header["bias"] * 1000 / divider
+                setpointV_topo = raw_data_topo.header["bias"] * 1000 / divider
                 # 再画一次旋转没有标记的形貌
                 SXM(topopath)
             # 开始将获得的照片画在ppt上并标注文字信息
@@ -1375,7 +1332,7 @@ for k in range(len(DataFolderpath)):
             plt.imshow(
                 topo_inmap,
                 origin="lower",
-                cmap="Blues_r",
+                cmap=topo_colormap("Blues_r"),
                 extent=(0, scan_range[0] * 1e9, 0, scan_range[1] * 1e9),
             )
             plt.xticks([])

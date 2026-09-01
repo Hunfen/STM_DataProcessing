@@ -13,14 +13,77 @@
 >
 > - 涉及 10 个源文件：`qpi_born.py`、`qpi_jdos.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`mlwf_susceptibility.py`、`lattice_operations.py`、`plot_funcs.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`。
 > - CPU 性能：BornQPI 的 CPU QPI 由 `np.roll` 双循环改为 FFT 相关定理（nk=32 提速 58×、nk=64 提速 207×）；`bare_lindhard` 向量化（nk=16 提速 158×）；`mlwf_susceptibility` 逆 FFT 方向修正并复用计划；`mlwf_ek2d` 本征分解加缓存。
-> - Medium（19）/ Low（25）项**尚未处理**，仍待后续。
+> - Medium（19）项已于同日全部处理完毕（见下节）；Low（25）项**尚未处理**，仍待后续。
+
+### Medium 全部修复（2026-09-01）
+
+> 本报告 **19 个 Medium 级 bug（M1–M19）已全部处理完毕**（M15 经真实数据验证确认无需改变行为，仅做健壮性加固）。改动经 AgentTeams `stm-medium-bugfix`（3 名 `deepseek-v4-flash` 编码成员 + 1 名 `deepseek-v4-pro` 评审成员）执行：6 轮评审 + 2 轮 repair 复审全部 PASS，集成验收通过。
+>
+> - 涉及 12 个源文件：`nanonis_loader.py`、`bare_lindhard.py`、`mlwf_susceptibility.py`、`dos.py`、`band.py`、`parser.py`、`AutoPPt_winnew_modified.py`、`plot_funcs.py`、`qpi_tmat.py`、`monitor.py`、`config.py`、`lattice_loader.py`。
+> - 新增 8 个回归脚本（`scripts/regression/`），全部 exit 0：`check_nanonis_3ds.py`(8)、`check_nanonis_sxm.py`(6)、`check_3ds_real_data.py`(2)、`check_bare_lindhard.py`(6)、`check_mlwf_susceptibility.py`(4)、`check_openmx_parsers.py`(7)、`check_ppt_helpers.py`(8)、`check_core_misc.py`(7)。
+> - 集成验收：`ruff check src` 仍为 22 条既有 cosmetic 基线（全部在 `extract_k_type.py`）无新增；39 个模块导入冒烟 38 通过，唯一失败项为既有 L20（`AutoPPt_winnew_modified` 模块级 `input()`）。
+
+#### 评审抓出的两个回归（已闭环）
+
+评审由 `deepseek-v4-pro` 独立执行（读代码 + 重跑脚本 + 真实文件复现），两轮 `needs_revision`：
+
+1. **M3 首版修复引入回归**：守卫写成 `if "Bias Spectroscopy" in self._raw_header:`，而 raw 键恒为 `"Bias Spectroscopy>..."`，判断恒为 False，使 `MultiLine Settings → DataFrame` 转换变成死代码（真实多段 `.dat` 实测由 `(6,5)` DataFrame 退化为 `str`）。已改为检查重构后的字典 `if "Bias Spectroscopy" in header:`；**`_reform_3ds_header` 中同款守卫本来就是错的（本报告 M3 原文误将其当作正确范例），一并修正**。
+2. **M11 首版未真正修复**：`od_data[1:]` 仍在 `saw_initial_state` 分支中执行，但 `O_D=` 行只出现在各 Cycle、Initial State 块无该行，真实 `.wout` 会触发新加的一致性检查而崩溃；且其回归 fixture 人为给 Initial State 补了 O_D 行掩盖了缺陷。已改为三标志解耦（`saw_initial_state` / `in_initial_state_block` / `saw_initial_state_od`），同时兼容"旧版 W90 确实打印 Initial State O_D"的变体。
+
+#### 行为变更（调用方需注意）
+
+| 变更 | 影响 |
+|---|---|
+| `bare_lindhard` 分母统一为标准约定 `ε_m(k) − ε_n(k+q) + iη` | **Re χ₀ 相对旧版本整体变号**；与旧结果对比时需注意 |
+| `mlwf_susceptibility` 能量权重改为 `dε=\|ω\|/(n_eps−1)` | `\|ω\|/resolution` 为整数时**逐位无变化**；非整数时幅度校正（示例 8.11%） |
+| `dos['pdos'][atom]['s']` 由（本已失效的）DataFrame 改为 dict | 仓库内无消费者；外部脚本若按旧形状取 PDOS 需同步 |
+| `.Band` 返回值新增 `nspin` 键；nspin=2 时 `bands` 为 `(nspin, nk, nband)` | nspin=1 保持 `(nk, nband)` 向后兼容 |
+| `mlwf_susceptibility` 在 `n_eps == 1` 时抛 `ValueError` | 旧行为为静默产出无意义结果 |
+| `TmatQPI` 由空壳 stub 变为可用（CPU 单杂质 s 波 T 矩阵） | GPU 分支抛显式 `NotImplementedError`，接口已就位 |
+
+#### 真实数据验证结论（用户提供文件）
+
+- **M15 无需改变行为**：6 个真实 `.sxm`（topo0002/0007/0011/0013/0019/0020）的布局均为 header 结束后 `\n\n\n\x1a\x04` + 数据，旧启发式（跳 2 行 + seek 2 字节）与按 `\x1a\x04` 标记定位**落在同一字节（4539）**；新旧实现输出逐元素完全一致（2,621,440 floats，`equal_nan=True`），与 nanonispy 5 通道对比 max abs diff = `0.000e+00`。改动仅为：标记定位 + 找不到时回退旧逻辑并告警 + 数据量下限告警。
+- **3DS loader**：`2025-07-09/Grid Spectroscopy002.3ds` 为 520×1 一维 line（`grid (520,14,401)`，无 NaN）；`2025-10-24/Grid Spectroscopy008.3ds` 声明 50×50 但**原始文件仅记录 1940/2500 像素**（10,910,560 floats = 1940×5624，测量中断），修复后按 NaN 正确补齐为 `(2500,14,401)`（NaN 比例 0.2240）并告警，而非越界崩溃。
+- **带 MultiLine Settings 的真实文件**是 `2025-06-25/Grid Spectroscopy002.3ds`（2025-07-09 的同名文件无此键），持久断言已按实际含键文件固化。
+
+#### 后续轮次（2026-09-01 晚，用户复查图像后追加）
+
+用户复查预览图时发现 `topo0002.sxm` 的形貌图整幅空白，由此定位到一个**不在原报告 54 条内的新缺陷**，并顺带修掉两个此前记录的既有隐患。
+
+##### N1. `subtractMeanPlane` 被 NaN 污染，中断扫描图像整幅变 NaN 🔴（已修复 2026-09-01）
+
+- **位置**：`utils/plot_funcs.py` `subtractMeanPlane`（M9 修复后 `AutoPPt_winnew_modified.py` 已复用该实现，两处同时受影响）
+- **现象**：Nanonis 对**未扫完**的 SXM 区域写入 NaN（真实文件 `2025-07-09/topo0002.sxm`：SCAN_PIXELS 512×512、字节完整 2,621,440 floats，但每通道 finite 仅 **0.623**，约 319/512 行）。`subtractMeanPlane` 把 NaN 一起喂进 `lstsq`，得到 NaN 平面系数 → **输出 finite 比例 0.000**，整幅图变 NaN、绘图全空白。loader 行为正确（按 header 建数组 + 顺序填值），缺陷完全在绘图侧。影响 PPT 批处理的形貌总览盒与所有 map 显示路径。
+- **修复**：平面拟合只用 finite 像素（`np.isfinite` 掩码筛选设计矩阵与目标向量），平面对全图求值后相减，**NaN 位置原样保留**；finite 点 < 3 时返回原数组副本并 warning。新增 `finite_range()`（nan 安全 vmin/vmax）与 `topo_colormap()`（NaN 显示为不透明 `#d9d9d9`），接入 `plot_sxm_topo`/`plot_map_bias`/`plot_qpi_bias`/`plot_map_current_bias`/`plot_sts`/`plot_linecut` 及 AutoPPt 的 ShowMap/ShowMapI/SXM/PlotSXM/STS/Linecut/inmap。
+- **验证**：全 finite 输入与修复前**位级一致**（评审员独立复现，含 512×512）；30% NaN 平面的 finite 区域残差 8.9e-16、NaN 掩码逐点不变；真实中断扫描探针 finite 0.381→0.381（修复前 0.0）。`check_ppt_helpers.py` 12/12。
+
+##### N2 / N3. loader 两个既有隐患（已修复 2026-09-01）
+
+- **N2 `.data` 原地改写 `._raw_data`**：`_reform_sxm_data` 以 view reshape 后对 backward 行原地 `fliplr`，取过 `.data` 之后 `.raw_data` 返回的已是被翻转的数据。修复：reshape 后显式 `copy()` 再翻转（一次 payload 大小拷贝，docstring 已注明）。验证：6 个真实文件访问前后快照逐元素相等、二次访问幂等、flip 语义不变（nanonispy diff 仍为 0）。
+- **N3 `.channels` 引号残留**：`header` 未解析时走 raw 回退分支，通道名带首尾双引号。修复：属性先 `_ensure_header_parsed()`，raw 分支再 `strip('"')` 兜底。验证：两种访问顺序得到相同且无引号的 14 个通道名。
+
+##### 3DS 验证按用户口径重做
+
+- dI/dV 通道由 `LI Demod 1 X (A)` 改为用户指定的 **`DSP 7280 Y (%)`**（forward，动态 `channels.index` 取索引，非硬编码）。
+- 一维：`2025-07-09/Grid Spectroscopy002.3ds`（520×1、401 点）→ dI/dV 对 bias 的 colormap。
+- 二维：改用 `2025-07-14/Grid Spectroscopy001.3ds`（**90×400、Points 7**、14 通道，全部像素已采集）→ 7 个 bias 切片（10.0/6.7/3.3/0.0/−3.3/−6.7/−10.0 mV）各出一张 90×400 的 dI/dV map + 多子图总览。基于 `2025-10-24/Grid Spectroscopy008.3ds`（未扫完）的旧图已删除。
+- 预览图统一改为 nan 安全色标（`nanpercentile(2,98)`）+ NaN 区中性灰 `#808080` + 标题标注完整度（topo0002 标 `finite 62.3% (319/512 rows)`）。
+
+#### 剩余风险 / 未处理项
+
+1. `TmatQPI` GPU 分支未实现（显式 `NotImplementedError`，接口保留）。
+2. `bare_lindhard` 在**奇数 nk** 时 q 网格存在半格残余偏差（既有、非本次引入，常用偶数 nk 不受影响）。
+3. L20（`AutoPPt_winnew_modified` 模块级 `input()`）与 22 条 ruff cosmetic 基线（`extract_k_type.py`）未指派；Low（25）项整体按用户要求暂缓。
+4. M15 的 marker 回退路径仅由合成测试覆盖（6 个真实文件均含标记）。
+5. `check_nanonis_sxm.py` 的 `_check_png_content` 像素自检偏脆弱（依赖 afmhot 无中性灰中调的假设，全 finite 文件余量仅 0.17–0.21），可能假报警；建议后续改为 `std > 阈值` 等更鲁棒判据。
 
 ## 一、统计总览
 
 | 严重程度 | 数量 | 说明 |
 |---------|------|------|
 | 🔴 High | 10 | 崩溃 / 输出结果错误 / 模块完全不可用（✅ 已修复 2026-09-01） |
-| 🟡 Medium | 19 | 特定输入或路径下结果错误、数据错配 |
+| 🟡 Medium | 19 | 特定输入或路径下结果错误、数据错配（✅ 已全部修复 2026-09-01） |
 | 🟢 Low | 25 | 隐患、资源泄漏、文档与实现不一致 |
 | **合计** | **54** | |
 
@@ -87,99 +150,99 @@
 
 ## 三、Medium（19）
 
-### M1. `TmatQPI` 方法缺少 `self` ✅
+### M1. `TmatQPI` 方法缺少 `self` ✅（已修复 2026-09-01，并实现 CPU 单杂质 T 矩阵 QPI）
 - **位置**：`stm/qpi_tmat.py:26`、`:32`
 - **现象**：`def _compute_tmat():` / `def calculate():` 定义在类体却无 `self`，实例调用抛 `TypeError`（已实测复现）。类本身是占位 stub。
 - **修复**：补 `self` 参数并实现逻辑。
 
-### M2. OpenMX PDOS 加载对两种目录布局均失效 ✅
+### M2. OpenMX PDOS 加载对两种目录布局均失效 ✅（已修复 2026-09-01）
 - **位置**：`dft/openmx/dos.py:66-103`
 - **现象**：两处不一致叠加，任何布局下 `pdos` 都是空或错误的：
   1. 代码 `sorted(dos_dir.glob("atom*"))` 假设 `atomN/` 子目录布局，但 OpenMX 4.0 手册（§23）显示 DosMain 产出的是**扁平带点文件名**（如 `*.PDOS.Tetrahedron.atom1.s1`）→ 找不到任何目录，`pdos` 静默为空；
   2. 即使按模块自身 docstring 的子目录布局（文件名 `s1`/`p1`/`d1`），分类正则 `re.search(r"\.s\d$", name)` 要求点前缀，无点文件名全部落入 `else` 被误标 `total`，且 `name[-2:]` 对 `p10` 等两位数索引生成错误键。实测：`s1/p1/d1/p10` 全部归类为 `total`。
 - **修复**：按真实扁平文件名 `*.atomN.orbital` 归类（原子序号与轨道从文件名提取），并同步修正 docstring；轨道键用完整序号（`name[1:]` 等）。
 
-### M3. `.dat` header 重组对非 Bias Spectroscopy 文件 KeyError ⚠️
+### M3. `.dat` header 重组对非 Bias Spectroscopy 文件 KeyError ⚠️（已修复 2026-09-01，含 3ds 同款错误守卫）
 - **位置**：`io/nanonis_loader.py:414-431`
 - **现象**：`_reform_dat_header` 无条件遍历 `header["Bias Spectroscopy"]`；`.dat` 不仅用于 Bias Spectroscopy（也有 Z 谱等），无该模块的文件在首次访问 `header` 时抛 `KeyError`。同文件 `_reform_3ds_header:542` 有 `if "Bias Spectroscopy" in self._raw_header` 保护，`.dat` 版本缺失。
 - **修复**：补上与 3ds 版本相同的保护。
 
-### M4. `bare_lindhard` q 坐标网格与 fftshift 后数据错位 ✅
+### M4. `bare_lindhard` q 坐标网格与 fftshift 后数据错位 ✅（已修复 2026-09-01）
 - **位置**：`dft/wannier90/bare_lindhard.py:452-453`
 - **现象**：`linspace(-0.5, 0.5, nk, endpoint=False)` 本身已以 q=0 为中心（q=0 在 `nk//2`），再 `fftshift` 一次把 q=0 移到索引 0；而数据 `chi_q` 在 `:448` 已 fftshift（q=-0.5 在索引 0）。数值实验（nk=4）确认两者错位半个 BZ，返回的 `q1_grid/q2_grid/qx_grid/qy_grid` 与数据逐像素错标。
 - **修复**：删除对 `q_vals` 的 fftshift（linspace 已居中）。
 
-### M5. `bare_lindhard` 分母符号约定翻转 Re χ0 ⚠️
+### M5. `bare_lindhard` 分母符号约定翻转 Re χ0 ⚠️（已修复 2026-09-01，统一标准约定）
 - **位置**：`dft/wannier90/bare_lindhard.py:180`（CPU）、`:368-370`（GPU）
 - **现象**：分母为 `ε_n(k+q) − ε_m(k) + iη`，是标准 Lindhard 分母 `ε_m(k) − ε_n(k+q) + iη` 的相反数（且无 ω）。虚部不变、实部符号翻转。若意图是标准约定，Re χ0 符号错误；若是作者自选约定，应在文档中注明。
 - **修复**：确认约定后统一（或改分母为 `eps_m − eps_n_shift + iη` 并注明）。
 
-### M6. 磁化率 CUDA 路径忽略轨道选择矩阵 ⚠️
+### M6. 磁化率 CUDA 路径忽略轨道选择矩阵 ⚠️（已修复 2026-09-01）
 - **位置**：`dft/wannier90/mlwf_susceptibility.py:182-213`（CPU 路径 `:315`、`:323` 有 `minit/mfin` 的 einsum 投影）
 - **现象**：CPU 路径应用 `minit`/`mfin` 投影，CUDA 路径 reshape 后直接 FFT，从不使用 `self._minit/_mfin` → 非单位选择矩阵时 GPU 结果静默错误（等价于 identity）。
 - **修复**：CUDA 路径 FFT 前做同样的 einsum 投影。
 
-### M7. 磁化率能量积分权重与实际网格间距不一致 ⚠️
+### M7. 磁化率能量积分权重与实际网格间距不一致 ⚠️（已修复 2026-09-01）
 - **位置**：`dft/wannier90/mlwf_susceptibility.py:167/231/252/368`
 - **现象**：`n_eps = round(|ω|/resolution)+1` 且 `eps = linspace(-|ω|, 0, n_eps)`，实际 dε = |ω|/(n_eps−1)；但最终归一化乘的是 `-|resolution|/(2π)`。当 |ω|/resolution 非整数时两者差几个百分点，积分幅度失真。
 - **修复**：统一用 `dε = np.abs(omega_limit)/(n_eps-1)` 做权重。
 
-### M8. STS / Linecut 段落形貌偏压用了残留变量 ✅
+### M8. STS / Linecut 段落形貌偏压用了残留变量 ✅（已修复 2026-09-01）
 - **位置**：`utils/AutoPPt_winnew_modified.py:1085`、`:1252`
 - **现象**：两处位于 `if topopath != "Topography Not Found"` 分支，本应使用刚读出的 `raw_data_topo`（`:1062`/`:1229`），却写成 `raw_data.header["bias"]` —— `raw_data` 是形貌循环（`:912`）残留的**最后一个 SXM** 对象 → STS/Linecut 页标注的形貌 `Vs=` 错误。
 - **修复**：改为 `raw_data_topo.header["bias"]`。
 
-### M9. `subtractMeanPlane` 扁平索引步长错误 ✅
+### M9. `subtractMeanPlane` 扁平索引步长错误 ✅（已修复 2026-09-01，改为复用 plot_funcs 实现）
 - **位置**：`utils/AutoPPt_winnew_modified.py:769-786`（`coordMatrix[i*xdim+j]`、`zVector[i*xdim+j]`）
 - **现象**：`matrix.shape = (xdim, ydim)` 行主序扁平下标应为 `i*ydim + j`，代码用 `i*xdim + j`；非方形图像（如 10×20）出现下标碰撞与空洞，拟合平面错误，且未命中的元素保持 0。该函数用于形貌总览盒。`plot_funcs.py:64-72` 的重写版已修正。
 - **修复**：改为 `i*ydim + j`，或直接复用 `plot_funcs.subtractMeanPlane`。
 
-### M10. `load_wout_file` Initial State 剔除条件用错变量 ⚠️
+### M10. `load_wout_file` Initial State 剔除条件用错变量 ⚠️（已修复 2026-09-01）
 - **位置**：`utils/monitor.py:233-236`
 - **现象**：`if len(spreads_data) > 1 and current_cycle == -1` —— `current_cycle` 保存的是**最后一个** cycle 编号（正常文件为 N≥0），条件恒为 False → Initial State 行从不剔除，`wannierise_spreads` 比文档声称的 `(num_cycle, num_wann, 1)` 多一行。
 - **修复**：维护独立布尔 `saw_initial_state` 标志，用它决定是否剔首行。
 
-### M11. `load_wout_file` od_data 无条件丢首项，与展宽数组错位 ⚠️
+### M11. `load_wout_file` od_data 无条件丢首项，与展宽数组错位 ⚠️（已修复 2026-09-01，二轮修复）
 - **位置**：`utils/monitor.py:239-240`
 - **现象**：`od_data` 无条件 `[1:]`，注释假设首项属 Initial State；但 Wannier90 的 `O_D=` 行只出现在各 Cycle（`:216` 要求 `<-- DLTA`），首项实为 Cycle 1。与 M10 叠加：spreads 多 1 行、od 少 1 行，二者长度错位 2，按行配对的下游代码全部错配。
 - **修复**：与 spreads 共用 `saw_initial_state` 标志；仅在确认首项属 Initial State 时剔除。
 
-### M12. `BackendArray` 忽略自身 backend 参数 ⚠️
+### M12. `BackendArray` 忽略自身 backend 参数 ⚠️（已修复 2026-09-01）
 - **位置**：`config.py:188-193`
 - **现象**：`self.xp = get_xp() if self.backend == "gpu" else _numpy_module` —— `get_xp()` 读全局 `BACKEND`。构造 `BackendArray(backend="gpu")` 且全局为 cpu（CuPy 实际可用）时，`self.backend == "gpu"` 但 `self.xp` 是 NumPy，`to_gpu()` 却用 `_cupy_module.asarray`，实例内部自相矛盾，"gpu" 被静默忽略。
 - **修复**：`self.xp = _cupy_module if (self.backend == "gpu" and _cupy_usable()) else _numpy_module`。
 
-### M13. `LatticeLoader` 的 (2,2) bvecs 路径必然崩溃 ⚠️
+### M13. `LatticeLoader` 的 (2,2) bvecs 路径必然崩溃 ⚠️（已修复 2026-09-01）
 - **位置**：`io/lattice_loader.py:97-101`（配合 `utils/lattice.py:173-174`、`:362-363`）
 - **现象**：`create_lattice(bvecs_array=(2,2))` 补零成 (3,3) 后 `b3=(0,0,0)` → `LATTICE._validate_matrix` 报 "bvecs is singular"；即使绕过，`_reciprocal_to_real` 也会因 `volume_rec = 0` 报 "linearly dependent"。docstring 明确声称支持 (2,2) 输入，实际该路径完全不可用。
 - **修复**：2D 输入给有限的离面分量（如 `b3=(0,0,1)`），或在 `_init_vectors` 对 2D 特判。
 
-### M14. 多段偏压扫描时 bias 标签列表短于数据轴 ⚠️
+### M14. 多段偏压扫描时 bias 标签列表短于数据轴 ⚠️（已修复 2026-09-01，抽出共享 build_bias_labels）
 - **位置**：`utils/AutoPPt_winnew_modified.py:183-192`（ShowMap）、`:243-258`（QPI）、`:317-332`（ShowMapI）；同样模式经 `plot_funcs.py:119-134/175-190/247-262` 影响 `nanonis_ppt_generator.py`
 - **现象**：标签用 `temp[1:]` 对段间重复点去重，长度 = Σsteps−(段数−1)；循环帧数用 `len(sweep_signal)`（= Points）。若 3ds 数据轴保留段间重复点，循环末尾 `f"{bias[n]:.2f}"` 抛 `IndexError`。单段扫描（最常见）不触发，多段才暴露。
 - **修复**：使标签长度与数据轴严格一致并加长度断言。
 
-### M15. SXM 二进制数据偏移启发式 ⚠️
+### M15. SXM 二进制数据偏移启发式 ⚠️（已验证 + 加固 2026-09-01：6 个真实文件新旧输出逐元素一致）
 - **位置**：`io/nanonis_loader.py:118-121`
 - **现象**：`:SCANIT_END:` 后固定"跳过 2 行 + 再 seek 2 字节"才开始读 `>f` 数据。SXM 规范中 header 与二进制之间只应有换行，该偏移与实际文件字节布局匹配与否未经任何校验，布局变化时整张图像静默错位（此加载器同时被 nanonispy 之外的地方复用）。
 - **修复**：参照 nanonispy 的实现逐字节定位（读到空行后开始 `fromfile`），并至少断言 `data.size ≥ 通道数×像素数×2`。
 
-### M16. 3DS 分块循环的边界情况 ⚠️
+### M16. 3DS 分块循环的边界情况 ⚠️（已修复 2026-09-01）
 - **位置**：`io/nanonis_loader.py:570-575`、`:619-626`
 - **现象**：`block_size = param_length + data_length` 由 header 推导；① header 缺字段导致 `block_size == 0` → `i // block_size` 除零且 `range(0, len, 0)` 抛错；② `raw_data` 长度超过 `total_pts` 时不截断，`n` 超出 `range(total_pixels)`，`params.loc[n]` 抛 `KeyError`、`grid[n]` 越界 `IndexError`；③ 尾部多余字节不是 `block_size` 整数倍时 `reshape((len(channels), pts_per_chan))` 尺寸不符抛错。
 - **修复**：`block_size <= 0` 时抛明确异常；循环上限用 `total_pixels * block_size` 并忽略/警告尾部多余字节。
 
-### M17. `.Band` 自旋极化体系被当作单一自旋，路径/能带翻倍 ⚠️
+### M17. `.Band` 自旋极化体系被当作单一自旋，路径/能带翻倍 ⚠️（已修复 2026-09-01）
 - **位置**：`dft/openmx/band.py:75-81`、`:135-171`
 - **现象**：`.Band` 首行为 `nband, 自旋自由度, μ(Hartree)`，数据段按 **spin 外循环、k-point 内循环**排列；代码忽略 `header[1]`，自旋极化（磁性体系）时每个 k 点出现两次，被串成一条路径 → `kpts_frac`/`bands` 变成 `(2·nkpts, ...)`，`dist` 在路径中点出现虚假的"跳回起点"大跳变，累计距离错误。参考：ASE 的 `read_band_file` 与 OpenMX 论坛对格式的说明。
 - **修复**：读取 `header[1]` 判断 `nspin`；自旋极化时按自旋拆分返回（如 `bands` 为 `(nspin, nk, nband)`），或至少检测到 `nspin>1` 时显式告警/抛错。
 
-### M18. ANG（埃）坐标被静默丢弃，无法回退 ⚠️
+### M18. ANG（埃）坐标被静默丢弃，无法回退 ⚠️（已修复 2026-09-01）
 - **位置**：`dft/openmx/parser.py:636-648`、`:786-797`
 - **现象**：`_parse_species_and_coordinates` 检测到 `Unit Ang` 后分支只写注释不做事，返回 `positions_frac=None`（仅 `positions_ang`）；`read_atomic_positions` 优先级 2/3 只判断 `positions_frac is not None`。Ang 是 OpenMX 输入最常见的坐标单位；当 `.out` 无 "final structure" 段（只解析 `.dat`、或计算未收敛）时直接 `RuntimeError("No atomic positions found")`——而 `self.avecs` 已可用，本可完成 `frac = cart @ inv(avecs)` 转换。
 - **修复**：在 `read_atomic_positions` 对 `positions_ang` 做 `positions_frac = positions_ang @ inv(avecs)` 转换后进入正常流程。
 
-### M19. 3DS 参数列的空串分裂与 param_length 不一致 ⚠️
+### M19. 3DS 参数列的空串分裂与 param_length 不一致 ⚠️（已修复 2026-09-01）
 - **位置**：`io/nanonis_loader.py:600-607`、`:622`
 - **现象**：`"".split(";")` 返回 `['']` 而非 `[]`——当 "Fixed parameters"/"Experiment parameters" 字段为空或缺失时，`param_columns` 混入空列，与 `# Parameters (4 byte)`（param_length）数量不一致。实测：param_length=1、columns=`['', 'Sweep (V)']` 时 `params.loc[n] = block[:1]` 被 pandas 广播到两列，参数写入错误列；param_length 更大时直接抛错。
 - **修复**：`[p for p in s.split(";") if p]` 过滤空串，并加 `len(param_columns) == param_length` 断言。
@@ -222,7 +285,7 @@
 
 1. **P0 — 立即**（核心功能完全不可用）：H1、H2（QPI 主链）、H3、H4（磁化率/裸 Lindhard 结果错误）。
 2. **P1 — 尽快**（常用功能静默错值）：H5、H6（晶格几何）、H7、H8（实验端偏压/崩溃）、H10（cube 原子坐标损坏）、M2、M8、M9（PDOS/PPT 标注）。
-3. **P2 — 常规**：其余 M 级（M3-M7、M10-M19）。
+3. **P2 — 常规**：其余 M 级（M3-M7、M10-M19）。✅ 已于 2026-09-01 全部完成。
 4. **P3 — 清理**：L 级（L1-L25），其中 L15 内存泄漏在批量跑图时值得优先。
 
 **补充建议**：

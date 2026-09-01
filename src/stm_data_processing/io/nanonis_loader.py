@@ -1,11 +1,14 @@
 """Python module that helps read the Nanonis files."""
 
+import logging
 import re
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class NanonisFileLoader:
@@ -71,8 +74,11 @@ class NanonisFileLoader:
     def _sxm_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
         """Load and parse .sxm file, extracting header and binary data.
 
-        Reads header until ":SCANIT_END:" marker, then extracts binary
-        data as big-endian floats. Header entries start with ":[key]:"
+        Reads header until ":SCANIT_END:" marker, then locates the start
+        of the binary payload via the Nanonis "\x1a\x04" code that sits
+        directly before the big-endian float data. Falls back to the
+        legacy heuristic (skip two lines, seek two bytes) with a warning
+        when the marker is not found. Header entries start with ":[key]:"
         followed by content lines.
 
         Args:
@@ -85,7 +91,6 @@ class NanonisFileLoader:
 
         Notes:
             - Header entries must start with ":[key]:" markers
-            - Skips 2 lines after header before reading binary data
             - Binary data read as big-endian 32-bit floats
             - Uses UTF-8 decoding with error replacement
 
@@ -115,16 +120,69 @@ class NanonisFileLoader:
                     # This is a content line
                     contents += decoded_line
 
-            # Skip two lines after header and move file pointer
-            for _ in range(2):
-                f.readline()
-            f.seek(2, 1)
+            header_end = f.tell()
+
+            # Locate the binary start marker. Only the few bytes right
+            # after the header are probed so that a coincidental
+            # occurrence deep inside the binary payload cannot be
+            # mistaken for the marker.
+            f.seek(header_end)
+            marker = b"\x1a\x04"
+            marker_pos = f.read(64).find(marker)
+            if marker_pos >= 0:
+                f.seek(header_end + marker_pos + len(marker))
+            else:
+                # Fall back to the legacy heuristic: skip two lines after
+                # the header and move the file pointer two more bytes.
+                logger.warning(
+                    "SXM binary start marker b'\\x1a\\x04' not found after "
+                    ":SCANIT_END: in %s; falling back to the legacy offset.",
+                    f_path,
+                )
+                f.seek(header_end)
+                for _ in range(2):
+                    f.readline()
+                f.seek(2, 1)
 
             # Read the binary data
             data = np.fromfile(f, dtype=">f")
 
+            # Sanity check: the payload must cover every channel in both
+            # scan directions; the data reformatter pads with NaN when it
+            # does not.
+            expected_min = self._expected_sxm_data_size(raw_header)
+            if data.size < expected_min:
+                logger.warning(
+                    "SXM data size (%d floats) is smaller than expected "
+                    "(%d); NaN padding will be applied downstream.",
+                    data.size,
+                    expected_min,
+                )
+
         return raw_header, data
 
+    @staticmethod
+    def _expected_sxm_data_size(raw_header: dict) -> int:
+        """Compute the expected number of floats in the SXM binary payload.
+
+        Derives channels * 2 directions * width * height from the raw
+        header entries SCAN_PIXELS and the DATA_INFO channel table.
+        Returns 0 when the header does not provide the required entries.
+
+        Args:
+            raw_header: Raw header dict as parsed by _sxm_loader.
+
+        Returns:
+            int: Expected float count; 0 when the header is incomplete.
+
+        """
+        try:
+            pixels = tuple(map(int, raw_header.get("SCAN_PIXELS", "0 0").split()))
+        except ValueError:
+            return 0
+        data_info = raw_header.get("DATA_INFO", "")
+        n_channels = sum(1 for line in data_info.split("\n") if line.strip()) - 1
+        return max(n_channels, 0) * 2 * pixels[0] * pixels[1]
     # def _reform_sxm_header(self) -> dict:
     #     """Reformats the raw header data from a .sxm file into a structured dictionary.
 
@@ -245,6 +303,10 @@ class NanonisFileLoader:
     def _reform_sxm_data(self) -> np.ndarray:
         """Reformats raw SXM data into structured array.
 
+        The backward scan rows are flipped horizontally (and every row
+        vertically for upward scans) on an explicit copy of the payload,
+        so calling this method never mutates self._raw_data.
+
         Note: This method should only be called after header is parsed.
         """
         self._ensure_header_parsed()
@@ -274,7 +336,12 @@ class NanonisFileLoader:
                 [raw_data, np.full(total_pts - raw_data.size, np.nan)],
             )
 
-        data = raw_data[:total_pts].reshape((len(channels) * 2, *pixels))
+        # The reshape is a view into self._raw_data; flipping rows in
+        # place would write back through the view and corrupt the raw
+        # buffer. Work on an explicit copy so _raw_data always stays
+        # pristine regardless of access order (the copy is one
+        # payload-sized buffer, not a duplicate of the whole file).
+        data = raw_data[:total_pts].reshape((len(channels) * 2, *pixels)).copy()
         for i in range(data.shape[0]):
             if i % 2 != 0:
                 data[i] = np.fliplr(data[i])
@@ -411,23 +478,24 @@ class NanonisFileLoader:
                             {key.split(">")[-1]: value.strip("\r\n").strip('"')},
                         )
 
-        for key, value in header["Bias Spectroscopy"].items():
-            if "MultiLine Settings" in key:
-                header["Bias Spectroscopy"].update(
-                    {
-                        "MultiLine Settings": pd.DataFrame(
-                            np.array(
-                                [
-                                    list(map(float, row.split(",")))
-                                    for row in value.split(";")
-                                ],
+        if "Bias Spectroscopy" in header:
+            for key, value in header["Bias Spectroscopy"].items():
+                if "MultiLine Settings" in key:
+                    header["Bias Spectroscopy"].update(
+                        {
+                            "MultiLine Settings": pd.DataFrame(
+                                np.array(
+                                    [
+                                        list(map(float, row.split(",")))
+                                        for row in value.split(";")
+                                    ],
+                                ),
+                                columns=key.split(":")[-1].split(","),
                             ),
-                            columns=key.split(":")[-1].split(","),
-                        ),
-                    },
-                )
-                header["Bias Spectroscopy"].pop(key)
-                break
+                        },
+                    )
+                    header["Bias Spectroscopy"].pop(key)
+                    break
         return header
 
     def _3ds_loader(self, f_path: str) -> tuple[dict, np.ndarray]:
@@ -539,7 +607,7 @@ class NanonisFileLoader:
                             {key.split(">")[-1]: value.strip("\r\n").strip('"')},
                         )
 
-        if "Bias Spectroscopy" in self._raw_header:
+        if "Bias Spectroscopy" in header:
             for key, value in header["Bias Spectroscopy"].items():
                 if "MultiLine Settings" in key:
                     header["Bias Spectroscopy"].update(
@@ -574,6 +642,25 @@ class NanonisFileLoader:
 
         block_size = param_length + data_length
 
+        required_fields = (
+            "# Parameters (4 byte)",
+            "Experiment size (bytes)",
+            "Points",
+        )
+        if block_size <= 0:
+            bad_fields = [
+                name
+                for name in required_fields
+                if name not in self._header or int(self._header[name]) <= 0
+            ]
+            error_msg = (
+                "3DS header does not define a usable data block: block_size = "
+                f"{block_size} (param_length = {param_length}, data_length = "
+                f"{data_length}). Missing or non-positive header field(s): "
+                f"{bad_fields}. Required fields are {list(required_fields)}."
+            )
+            raise ValueError(error_msg)
+
         # if "Grid dim" in self._header:
         #     grid_dim = self._parse_grid_dim(self._header["Grid dim"])
         # else:
@@ -597,28 +684,50 @@ class NanonisFileLoader:
 
         grid = np.empty((total_pixels, len(channels), pts_per_chan))
 
-        fixed_params = self._header.get("Fixed parameters", "").split(";")
-        exp_params = self._header.get("Experiment parameters", "").split(";")
+        fixed_params = [
+            p for p in self._header.get("Fixed parameters", "").split(";") if p
+        ]
+        exp_params = [
+            p for p in self._header.get("Experiment parameters", "").split(";") if p
+        ]
         param_columns = fixed_params + exp_params
+
+        if len(param_columns) != param_length:
+            error_msg = (
+                "3DS parameter layout mismatch: header '# Parameters (4 byte)' = "
+                f"{param_length} but 'Fixed parameters' + 'Experiment parameters' "
+                f"yield {len(param_columns)} column(s): {param_columns}. Refusing "
+                "to write parameter values into misaligned columns."
+            )
+            raise ValueError(error_msg)
 
         params = pd.DataFrame(
             index=range(total_pixels),
             columns=param_columns,
         )
 
-        if total_pts > self._raw_data.shape[0]:
+        raw_len = self._raw_data.shape[0]
+        if raw_len > total_pts:
+            logger.warning(
+                "3DS raw data (%d floats) exceeds expected total points (%d); "
+                "ignoring %d trailing float(s).",
+                raw_len,
+                total_pts,
+                raw_len - total_pts,
+            )
+        if total_pts > raw_len:
             data = np.concatenate(
                 [
                     self._raw_data,
-                    np.full(max(0, total_pts - len(self._raw_data)), np.nan),
+                    np.full(max(0, total_pts - raw_len), np.nan),
                 ],
             )
         else:
-            data = self._raw_data
+            data = self._raw_data[:total_pts]
 
-        for i in range(0, len(data), block_size):
-            n = i // block_size
-            block = data[i : i + block_size]
+        for n in range(total_pixels):
+            start = n * block_size
+            block = data[start : start + block_size]
             params.loc[n] = block[:param_length]
             grid[n] = block[param_length:block_size].reshape(
                 (len(channels), pts_per_chan),
@@ -907,6 +1016,11 @@ class NanonisFileLoader:
                 - For unsupported types: Returns empty list
 
         """
+        # Parse the header first so the getters below always read the
+        # cleaned, reformed header; the raw-header fallbacks keep quote
+        # stripping as a safety net for malformed inputs.
+        self._ensure_header_parsed()
+
         channel_getters = {
             "sxm": self._get_sxm_channels,
             "3ds": self._get_3ds_channels,
@@ -931,7 +1045,10 @@ class NanonisFileLoader:
                     ],
                 )
                 df.columns = df.iloc[0]
-                return df[1:]["Name"].tolist()
+                return [
+                    str(name).strip('"').strip()
+                    for name in df[1:]["Name"].tolist()
+                ]
             except (KeyError, IndexError, ValueError):
                 return []
         return []
@@ -941,7 +1058,10 @@ class NanonisFileLoader:
         if self._header is not None and "Channels" in self._header:
             return self._header["Channels"].split(";")
         if self._raw_header and "Channels" in self._raw_header:
-            return self._raw_header["Channels"].split(";")
+            return [
+                name.strip('"').strip()
+                for name in self._raw_header["Channels"].split(";")
+            ]
         return []
 
     def _get_dat_channels(self) -> list[str]:

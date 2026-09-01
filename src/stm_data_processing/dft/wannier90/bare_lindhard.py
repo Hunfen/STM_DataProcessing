@@ -23,7 +23,25 @@ logger = logging.getLogger(__name__)
 
 
 class BareLindhardCalculator:
-    """Class for calculating bare Lindhard susceptibility."""
+    """Bare Lindhard susceptibility calculator (static, omega = 0 limit).
+
+    Conventions
+    -----------
+    The retarded static Lindhard susceptibility is computed as
+
+        chi0(q) = (1/N_k) sum_k sum_{m,n} |<u_m(k)|u_n(k+q)>|^2
+                  * (f_m(k) - f_n(k+q)) / (eps_m(k) - eps_n(k+q) + i*eta)
+
+    where eps_m(k) is the energy of band m at k, f_m(k) is the Fermi-Dirac
+    occupation, eta > 0 is the broadening in eV and N_k is the number of
+    k-points. Only the omega = 0 (static) limit is implemented; the +i*eta
+    prescription selects the retarded response. For a monotone Fermi
+    occupation Re chi0(q) <= 0, so the static free-electron response carries
+    the standard negative sign. The k- and q-grids live on the primitive
+    Brillouin zone [-0.5, 0.5) x [-0.5, 0.5) in fractional reciprocal
+    coordinates; q=(0,0) sits at index nk//2 after the final fftshift in
+    calculate().
+    """
 
     def __init__(self, hamiltonian: MLWFHamiltonian, nk: int = 256, eta: float = 5e-3):
         if not isinstance(hamiltonian, MLWFHamiltonian):
@@ -82,6 +100,11 @@ class BareLindhardCalculator:
 
         so the weight is not a delta_mn and the intraband (m == n) terms
         contribute through f(eps_m(k)) - f(eps_m(k+q)).
+
+        Convention: the Lindhard denominator is eps_m(k) - eps_n(k+q) + i*eta
+        (retarded static response, omega = 0), matching the GPU path. With a
+        monotone Fermi occupation this makes Re chi0(q) <= 0, i.e. the static
+        free-electron response carries the standard negative sign.
 
         Parameters
         ----------
@@ -182,10 +205,11 @@ class BareLindhardCalculator:
                     )  # (n_q_chunk, num_kpts)
                     weight = np.abs(overlap) ** 2
 
-                    # Lindhard term
+                    # Lindhard term: standard convention
+                    # denominator = eps_m(k) - eps_n(k+q) + i*eta
                     numerator = f_m[None, :] - f_n  # (n_q_chunk, num_kpts)
                     denominator = (
-                        eps_n - eps_m[None, :] + 1j * self.eta
+                        eps_m[None, :] - eps_n + 1j * self.eta
                     )  # (n_q_chunk, num_kpts)
 
                     # Sum over k-points
@@ -208,6 +232,9 @@ class BareLindhardCalculator:
         """
         GPU-accelerated bare Lindhard susceptibility calculation using CuPy.
         Vectorized over q-points and k-points, but loops over band-pairs for memory efficiency.
+
+        Convention: the Lindhard denominator is eps_m(k) - eps_n(k+q) + i*eta
+        (retarded static response, omega = 0), matching the CPU path.
 
         Parameters
         ----------
@@ -373,10 +400,11 @@ class BareLindhardCalculator:
                     )  # shape: (q_chunk, num_kpts)
                     weight = cp.abs(overlap) ** 2
 
-                    # Calculate Lindhard term
+                    # Calculate Lindhard term: standard convention
+                    # denominator = eps_m(k) - eps_n(k+q) + i*eta
                     numerator = f_m[None, :] - f_n  # shape: (q_chunk, num_kpts)
                     denominator = (
-                        eps_n - eps_m[None, :] + 1j * self.eta
+                        eps_m[None, :] - eps_n + 1j * self.eta
                     )  # shape: (q_chunk, num_kpts)
 
                     # Sum over k-points
@@ -451,16 +479,18 @@ class BareLindhardCalculator:
                 precompute_weight=precompute_weight,
             )
 
-        # Apply fftshift to center q=(0,0) for visualization
-        # chi_q is indexed by integer q-points (0 to nk-1)
-        # Physical q=(0,0) is at index (nk//2, nk//2)
-        # fftshift moves q=(0,0) to the center of the array
+        # Apply fftshift to center q=(0,0) for visualization.
+        # The raw chi_q is in FFT order: integer index iq corresponds to the
+        # transfer q = iq/nk (mod 1), so q=(0,0) sits at index (0, 0).
+        # fftshift relocates q=(0,0) to index (nk//2, nk//2).
         chi_q = np.fft.fftshift(chi_q, axes=(0, 1))
 
-        # Generate coordinate grids that match the fftshifted data
-        # q=0 should be at the center of the grid
+        # Generate coordinate grids that match the fftshifted data.
+        # After fftshift, index j corresponds to q = -0.5 + j/nk (mod 1), which
+        # is exactly np.linspace(-0.5, 0.5, nk, endpoint=False) with q=0 at
+        # index nk//2. q_vals must NOT be fftshifted again, otherwise the grid
+        # mislabels the data by half a BZ (bug M4).
         q_vals = np.linspace(-0.5, 0.5, self.nk, endpoint=False)
-        q_vals = np.fft.fftshift(q_vals)  # Shift coordinate values to center q=0
         q1_grid, q2_grid = np.meshgrid(q_vals, q_vals, indexing="ij")
 
         # Convert to real-space q-grids if bvecs are available

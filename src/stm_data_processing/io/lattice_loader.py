@@ -38,7 +38,10 @@ class LatticeLoader:
         bvecs_array : np.ndarray, optional
             Directly provide reciprocal lattice vectors as a numpy array.
             Should be of shape (2, 2) for 2D systems or (3, 3) for 3D systems.
-            For 2D arrays, the third row and column will be filled with zeros.
+            For (2, 2) arrays, the in-plane vectors b1, b2 are embedded in the
+            xy-plane and the out-of-plane vector is set to b3 = (0, 0, 1)
+            1/Ångström (which implies a real-space out-of-plane vector
+            a3 = (0, 0, 2*pi) Ångström).
             Should contain vectors b1, b2, b3 in 1/Ångström.
             If both filename and bvecs_array are provided, bvecs_array takes precedence.
 
@@ -76,7 +79,10 @@ class LatticeLoader:
         bvecs_array : np.ndarray
             Reciprocal lattice vectors as a numpy array.
             Can be of shape (2, 2) for 2D systems or (3, 3) for 3D systems.
-            For 2D arrays, the third row and column will be filled with zeros.
+            For (2, 2) arrays, the in-plane vectors b1, b2 are embedded in the
+            xy-plane and the out-of-plane vector is set to b3 = (0, 0, 1)
+            1/Ångström (which implies a real-space out-of-plane vector
+            a3 = (0, 0, 2*pi) Ångström).
             Should contain vectors b1, b2, b3 in 1/Ångström.
 
         Returns
@@ -95,9 +101,13 @@ class LatticeLoader:
             raise TypeError("bvecs_array must be a numpy array")
 
         if bvecs_array.shape == (2, 2):
-            # Convert (2, 2) to (3, 3) by adding zeros for third dimension
+            # Embed the in-plane vectors in the xy-plane and set the
+            # out-of-plane vector to b3 = (0, 0, 1) so the reciprocal cell
+            # stays non-singular (a fully zero third row would make the
+            # lattice singular and break _validate_matrix/_reciprocal_to_real).
             bvecs = np.zeros((3, 3))
             bvecs[:2, :2] = bvecs_array
+            bvecs[2, 2] = 1.0
             return bvecs
         elif bvecs_array.shape == (3, 3):
             return bvecs_array.copy()

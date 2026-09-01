@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import cv2
@@ -8,6 +9,8 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 np.float = float
 np.int = int
+
+logger = logging.getLogger(__name__)
 
 
 def get_divider(file_path: Path) -> int:
@@ -60,14 +63,105 @@ def img_rotate_for_box(data, degree=90, zoom_pan=1):
 
 
 def subtractMeanPlane(matrix):
-    """Subtract the best-fit plane from the matrix."""
+    """Subtract the best-fit plane from the matrix (NaN-safe).
+
+    Interrupted Nanonis scans leave unmeasured regions as NaN. Only finite
+    pixels participate in the least-squares plane fit; the fitted plane is
+    then evaluated over the whole image and subtracted, so NaN pixels keep
+    their NaN values and the finite region keeps the usual plane-subtracted
+    result. If fewer than 3 finite points are available the original array
+    is returned unchanged (with a warning) instead of raising or returning
+    an all-NaN image.
+    """
     xdim, ydim = matrix.shape
     y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        logger.warning(
+            "subtractMeanPlane: only %d finite point(s); cannot fit a plane, "
+            "returning the input unchanged.",
+            n_finite,
+        )
+        return matrix.copy()
     A = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
-    b = matrix.ravel()
-    coeffs, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    coeffs, _, _, _ = np.linalg.lstsq(
+        A[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
     plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
-    return matrix - plane
+    return data - plane
+
+
+def finite_range(arr):
+    """Return (vmin, vmax) of the finite values, or (None, None) if none exist.
+
+    NaN-safe replacement for arr.min() / arr.max() in display-range
+    computations; used so interrupted scans (NaN regions) do not poison the
+    color scale.
+    """
+    vals = np.asarray(arr)[np.isfinite(arr)]
+    if vals.size == 0:
+        return None, None
+    return float(vals.min()), float(vals.max())
+
+
+def topo_colormap(name: str = "Blues_r"):
+    """Return a copy of the named colormap with a distinct NaN (bad) color.
+
+    Unmeasured regions of interrupted scans stay NaN; rendering them with a
+    dedicated color makes them identifiable instead of blending into the data
+    range (matplotlib renders NaN pixels with the colormap bad color).
+    """
+    cmap = plt.get_cmap(name).copy()
+    cmap.set_bad(color="#d9d9d9")
+    return cmap
+
+
+_SEGMENT_BIAS_HEADER = (
+    "Segment Start (V), Segment End (V), Settling (s), Integration (s), "
+    "Steps (xn), Lockin, Init. Settling (s)"
+)
+
+
+def _bias_from_segments(seg_bias, divider, dedup):
+    """Build bias labels (mV) from the per-segment ramp header entries."""
+    labels = []
+    for i, seg in enumerate(seg_bias):
+        p = seg.split(",")
+        ramp = np.linspace(float(p[0]), float(p[1]), int(p[4])) * 1000 / divider
+        labels.extend(ramp if i == 0 or not dedup else ramp[1:])
+    return np.asarray(labels, dtype=float)
+
+
+def build_bias_labels(raw_data, divider=1):
+    """Return one bias label (mV) per data frame, aligned with the sweep axis.
+
+    Nanonis 3DS files store the bias ramp of every sweep segment in the
+    header. Consecutive segments may share their boundary point, and the
+    on-disk sweep axis may keep or drop that duplicate, so the nominal
+    per-segment list is rebuilt (with or without boundary duplicates) until
+    its length matches the actual frame count. A final length assertion
+    guarantees the labels can be indexed by frame index; a mismatch raises a
+    descriptive ValueError instead of a later IndexError.
+    """
+    sweep_signal = np.asarray(raw_data.signals["sweep_signal"], dtype=float)
+    n_frames = len(sweep_signal)
+    try:
+        seg_bias = raw_data.header[_SEGMENT_BIAS_HEADER]
+        bias = _bias_from_segments(seg_bias, divider, dedup=True)
+        if len(bias) != n_frames:
+            # The sweep axis keeps the segment-boundary repeats.
+            bias = _bias_from_segments(seg_bias, divider, dedup=False)
+    except Exception:
+        # Header missing or unparseable: fall back to the sweep signal itself.
+        bias = sweep_signal * 1000 / divider
+    if len(bias) != n_frames:
+        raise ValueError(
+            f"Bias label length ({len(bias)}) does not match the number of "
+            f"data frames ({n_frames}); cannot annotate the map frames."
+        )
+    return bias
 
 
 # ---------- Single image plotting functions ----------
@@ -87,11 +181,15 @@ def plot_sxm_topo(topopath: Path, output_path: Path) -> None:
         ax.imshow(
             topo,
             origin="lower",
-            cmap="Blues_r",
+            cmap=topo_colormap("Blues_r"),
             extent=(0, size[0] * 1e9, 0, size[1] * 1e9),
         )
     else:
-        ax.imshow(topo, cmap="Blues_r", extent=(0, size[0] * 1e9, 0, size[1] * 1e9))
+        ax.imshow(
+            topo,
+            cmap=topo_colormap("Blues_r"),
+            extent=(0, size[0] * 1e9, 0, size[1] * 1e9),
+        )
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
@@ -114,22 +212,7 @@ def plot_map_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     divider = get_divider(mappath)
     raw_data = nap.read.Grid(str(mappath))
     # Extract bias list
-    try:
-        seg_bias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for seg in seg_bias:
-            p = seg.split(",")
-            temp = list(
-                np.linspace(float(p[0]), float(p[1]), int(p[4])) * 1000 / divider
-            )
-            if not bias:
-                bias.extend(temp)
-            else:
-                bias.extend(temp[1:])
-    except Exception:
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
 
     try:
         data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
@@ -142,7 +225,7 @@ def plot_map_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     ax.imshow(
         data,
         origin="lower",
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
         extent=(0, scan_range[0] * 1e9, 0, scan_range[1] * 1e9),
     )
     ax.text(
@@ -170,22 +253,7 @@ def plot_qpi_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     divider = get_divider(mappath)
     raw_data = nap.read.Grid(str(mappath))
 
-    try:
-        seg_bias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for seg in seg_bias:
-            p = seg.split(",")
-            temp = list(
-                np.linspace(float(p[0]), float(p[1]), int(p[4])) * 1000 / divider
-            )
-            if not bias:
-                bias.extend(temp)
-            else:
-                bias.extend(temp[1:])
-    except Exception:
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
 
     try:
         data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
@@ -197,10 +265,13 @@ def plot_qpi_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     fft2 = np.fft.fft2(data)
     shift2center = np.fft.fftshift(fft2)
     qpi2 = np.log(1 + np.abs(shift2center))
-    mean_val = np.mean(qpi2)
-    std_dev = np.std(qpi2)
-    vmin = np.min(qpi2)
-    vmax = mean_val + 1.5 * std_dev
+    if np.any(np.isfinite(qpi2)):
+        mean_val = float(np.nanmean(qpi2))
+        std_dev = float(np.nanstd(qpi2))
+        vmin = float(np.nanmin(qpi2))
+        vmax = mean_val + 1.5 * std_dev
+    else:
+        vmin, vmax = None, None
 
     range_qx = 2 * np.pi / (scan_range[0] * 1e9 / data.shape[1])
     range_qy = 2 * np.pi / (scan_range[1] * 1e9 / data.shape[0])
@@ -209,7 +280,7 @@ def plot_qpi_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     ax.imshow(
         qpi2,
         origin="lower",
-        cmap="gray_r",
+        cmap=topo_colormap("gray_r"),
         vmin=vmin,
         vmax=vmax,
         extent=(-range_qx / 2, range_qx / 2, -range_qy / 2, range_qy / 2),
@@ -242,22 +313,7 @@ def plot_map_current_bias(
     divider = get_divider(mappath)
     raw_data = nap.read.Grid(str(mappath))
 
-    try:
-        seg_bias = raw_data.header[
-            "Segment Start (V), Segment End (V), Settling (s), Integration (s), Steps (xn), Lockin, Init. Settling (s)"
-        ]
-        bias = []
-        for seg in seg_bias:
-            p = seg.split(",")
-            temp = list(
-                np.linspace(float(p[0]), float(p[1]), int(p[4])) * 1000 / divider
-            )
-            if not bias:
-                bias.extend(temp)
-            else:
-                bias.extend(temp[1:])
-    except Exception:
-        bias = raw_data.signals["sweep_signal"] * 1000 / divider
+    bias = build_bias_labels(raw_data, divider)
 
     data = raw_data.signals["Current (A)"][:, :, n]
     if smooth:
@@ -268,7 +324,7 @@ def plot_map_current_bias(
     ax.imshow(
         data,
         origin="lower",
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
         extent=(0, scan_range[0] * 1e9, 0, scan_range[1] * 1e9),
     )
     ax.text(
@@ -350,9 +406,9 @@ def plot_sts(stspath: Path, topopath: Path, output_dir: Path, smooth: bool = Fal
     ax_topo.imshow(
         topo2,
         origin="lower" if direction == "up" else "upper",
-        cmap="Blues_r",
-        vmin=topo.min(),
-        vmax=topo.max(),
+        cmap=topo_colormap("Blues_r"),
+        vmin=finite_range(topo)[0],
+        vmax=finite_range(topo)[1],
         extent=extent,
     )
     ax_topo.plot(X, Y, "ro", markersize=3)
@@ -400,14 +456,14 @@ def plot_linecut(lcpath: Path, topopath: Path, output_dir: Path, smooth: bool = 
         extent=(bias[0], bias[-1], 0, L),
         aspect="auto",
         origin="lower",
-        cmap="rainbow",
+        cmap=topo_colormap("rainbow"),
         interpolation="none",
     )
     ax1.tick_params(axis="both", which="major", pad=1)
     ax1.set_xlabel("Bias (mV)", fontdict={"family": "Arial", "size": 8}, labelpad=0.3)
     ax1.set_ylabel("Length(nm)", fontdict={"family": "Arial", "size": 8}, labelpad=0.3)
 
-    offset = 0.25 * np.mean(lcdata[0])
+    offset = 0.25 * np.nanmean(lcdata[0])
     cmap = plt.get_cmap("brg")
     colors = [cmap(i) for i in np.linspace(0, 1, len(lcdata))]
     for i, spec in enumerate(lcdata):
@@ -487,9 +543,9 @@ def plot_linecut(lcpath: Path, topopath: Path, output_dir: Path, smooth: bool = 
     ax_mark.imshow(
         topo2,
         origin="lower" if direction == "up" else "upper",
-        cmap="Blues_r",
-        vmin=topo.min(),
-        vmax=topo.max(),
+        cmap=topo_colormap("Blues_r"),
+        vmin=finite_range(topo)[0],
+        vmax=finite_range(topo)[1],
         extent=extent,
     )
     ax_mark.plot(X, Y, "ko", fillstyle="none", markersize=5)
