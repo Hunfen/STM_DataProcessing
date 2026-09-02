@@ -281,7 +281,7 @@ class BornQPI:
                 V=self.V,
                 nq=self.nk,
                 eta=self.eta,
-                normalize=True,
+                normalize=False,  # Born QPI is stored unnormalized
                 bands=None,
             )
 
@@ -303,7 +303,7 @@ class BornQPI:
         metadata = {
             "module_type": "born",
             "eta": self.eta,
-            "normalize": True,
+            "normalize": False,  # Born QPI is stored unnormalized
             "nq": nk,
             "energy_range": energy_array,
             "bands": None,

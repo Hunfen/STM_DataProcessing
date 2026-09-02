@@ -169,10 +169,21 @@ class Wannier90HRLoader:
         out_file = folder / f"{seedname}.out"
 
         lattice_obj = None
-        if wout_file.exists():
-            lattice_obj = LatticeLoader.create_lattice(filename=wout_file)
-        elif out_file.exists():
-            lattice_obj = LatticeLoader.create_lattice(filename=out_file)
+        try:
+            if wout_file.exists():
+                lattice_obj = LatticeLoader.create_lattice(filename=wout_file)
+            elif out_file.exists():
+                lattice_obj = LatticeLoader.create_lattice(filename=out_file)
+        except ValueError:
+            # The output file exists but the reciprocal vectors could not be
+            # parsed (e.g. a legacy .wout without b_3). The HR data is still
+            # usable, so degrade to bvecs=None instead of crashing load().
+            logger.warning(
+                "[Wannier90HRLoader] Failed to parse reciprocal vectors from %s; "
+                "continuing without bvecs.",
+                wout_file if wout_file.exists() else out_file,
+            )
+            return None
 
         return None if lattice_obj is None else lattice_obj.bvecs
 

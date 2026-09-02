@@ -58,11 +58,13 @@ def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
            `-- p10
 
     The total DOS file is recognized as <System>.DOS or <System>.DOS.*
-    (excluding PDOS files).  Each DOS file contains three whitespace-separated
-    columns:
+    (excluding PDOS files).  Each DOS file contains either three
+    whitespace-separated columns (non-spin-polarized):
     - Energy (eV)
     - DOS (states/eV)
     - Integrated DOS (IDOS)
+    or five columns (spin-polarized/LSDA, named E, DOS_up, DOS_dn,
+    IDOS_up, IDOS_dn).
 
     Lines starting with '#' are treated as comments.
 
@@ -97,9 +99,22 @@ def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
     dos: dict = {"total": None, "pdos": {}}
 
     def _load_df(path: Path) -> pd.DataFrame:
-        return pd.read_csv(
-            path, sep=r"\s+", comment="#", names=["E", "DOS", "IDOS"]
+        # Probe the first data line's column count: spin-polarized (LSDA) DOS
+        # files have 5 columns (E, DOS_up, DOS_dn, IDOS_up, IDOS_dn), while
+        # non-spin files have 3 (E, DOS, IDOS).
+        ncols = 3
+        with path.open("r") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    ncols = len(stripped.split())
+                    break
+        names = (
+            ["E", "DOS_up", "DOS_dn", "IDOS_up", "IDOS_dn"]
+            if ncols == 5
+            else ["E", "DOS", "IDOS"]
         )
+        return pd.read_csv(path, sep=r"\s+", comment="#", names=names)
 
     def _store_pdos(atom: int, kind: str, key: str, df: pd.DataFrame) -> None:
         entry = dos["pdos"].setdefault(

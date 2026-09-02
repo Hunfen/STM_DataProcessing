@@ -78,7 +78,11 @@ def save_qpi_to_h5(
         )
 
         if bands is not None:
-            f.attrs["bands"] = "all" if bands == "all" else np.array(bands, dtype=int)
+            f.attrs["bands"] = (
+                "all"
+                if isinstance(bands, str) and bands == "all"
+                else np.array(bands, dtype=int)
+            )
         if bvecs is not None:
             f.create_dataset("bvecs", data=bvecs)
             logger.info("  Saved 'bvecs'.")

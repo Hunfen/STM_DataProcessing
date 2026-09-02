@@ -41,6 +41,16 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
 
     # D orbital names in order
     d_orbital_names = ["d3z^2-r^2", "dx^2-y^2", "dxy", "dxz", "dyz"]
+    # F orbital names in order (real spherical harmonics, 7 per shell)
+    f_orbital_names = [
+        "fz^3",
+        "fxz^2",
+        "fyz^2",
+        "fxyz",
+        "fz(x^2-y^2)",
+        "fx(x^2-3y^2)",
+        "fy(3x^2-y^2)",
+    ]
 
     column_names = []
 
@@ -67,6 +77,12 @@ def _generate_orbital_column_names(openmx_parser: OpenMX) -> list[str]:
         for d_idx in range(d_count):
             for d_name in d_orbital_names:
                 column_names.append(f"{atom_idx}-{element}-{d_idx}{d_name}")
+
+        # Add f orbitals
+        f_count = orbitals.get("f", 0)
+        for f_idx in range(f_count):
+            for f_name in f_orbital_names:
+                column_names.append(f"{atom_idx}-{element}-{f_idx}{f_name}")
 
     return column_names
 
@@ -140,9 +156,10 @@ def compute_spectral_function(
         Element symbol (e.g., 'C') to project onto. If specified, only orbitals
         belonging to this element are included.
     atom_index : int, optional
-        Specific atom index as labeled in the OpenMX output column headers (typically 1-based,
-        e.g., the '1' in 'C1_s'). If specified, only orbitals from this atom are included.
-        If both `element` and `atom_index` are None, all orbitals are summed.
+        Specific atom index (0-based, matching the column naming convention
+        '<atom_index>-<element>-<orbital>', e.g. the '0' in '0-C-s'). If
+        specified, only orbitals from this atom are included. If both
+        `element` and `atom_index` are None, all orbitals are summed.
     nk : int, default 512
         Number of grid points along the k-path axis.
     ne : int, default 512
@@ -268,6 +285,8 @@ def read_unfold_orbup(file_path: str, openmx_parser: OpenMX) -> pd.DataFrame:
     - s orbitals: 0s, 1s, ..., (n-1)s
     - p orbitals: 0px, 0py, 0pz, 1px, 1py, 1pz, ..., (n-1)px, (n-1)py, (n-1)pz
     - d orbitals: 0d3z^2-r^2, 0dx^2-y^2, 0dxy, 0dxz, 0dyz, ..., (n-1)dyz
+    - f orbitals: 0fz^3, 0fxz^2, 0fyz^2, 0fxyz, 0fz(x^2-y^2),
+      0fx(x^2-3y^2), 0fy(3x^2-y^2), ..., (n-1)fy(3x^2-y^2)
     """
 
     # Read the file

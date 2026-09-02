@@ -2,7 +2,6 @@
 
 
 import logging
-import platform
 import shutil
 import sys
 from datetime import datetime
@@ -56,8 +55,18 @@ logger = logging.getLogger(__name__)
 
 # ---------- File processing helper functions ----------
 def get_creation_time(file_path):
+    """Return the file creation time as a Unix timestamp.
+
+    Prefers st_birthtime, the true creation time where the platform exposes
+    it (macOS, Windows, and Linux with Python >= 3.12 via statx). Falls back
+    to st_ctime, which on Linux is the inode change time rather than the
+    creation time, so the returned timestamp is then approximate.
+    """
     stat = Path(file_path).stat()
-    return stat.st_birthtime if platform.system() == "Darwin" else stat.st_ctime
+    birthtime = getattr(stat, "st_birthtime", None)
+    if birthtime is not None:
+        return birthtime
+    return stat.st_ctime
 
 
 def sort_files_by_creation_time(files):
@@ -318,7 +327,9 @@ def main() -> None:
                     pic = slide.shapes.add_picture(
                         str(Storagepath / "boxtemp.tif"), Cm(22), Cm(0)
                     )
-                    pic.rotation = angle_ppt
+                    # L17: match the marker-plot convention (AutoPPt): a "down"
+                    # scan stores rows flipped, so the box rotates the other way.
+                    pic.rotation = angle_ppt if direction == "up" else -angle_ppt
 
         # ---- spectrum ----
         if DatFiles:
@@ -647,6 +658,9 @@ def main() -> None:
         # Clean up temporary files related to the folder
         for f in Storagepath.glob("*temp*.tif"):  # 改为 *temp*.tif
             f.unlink(missing_ok=True)
+        (Storagepath / "animation_map.gif").unlink(missing_ok=True)
+        (Storagepath / "animation_QPI.gif").unlink(missing_ok=True)
+        (Storagepath / "animation_mapI.gif").unlink(missing_ok=True)
         shutil.rmtree(str(Storagepath / "folder_map"), ignore_errors=True)
         shutil.rmtree(str(Storagepath / "folder_QPI"), ignore_errors=True)
         shutil.rmtree(str(Storagepath / "folder_mapI"), ignore_errors=True)

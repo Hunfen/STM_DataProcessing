@@ -244,7 +244,8 @@ def fermi(e, mu: float = 0, T: float = 1.5):
         Fermi-Dirac occupation numbers.
     """
     if T <= 1e-12:
-        return (e < mu).astype(float)
+        # T=0 step function; use <= to match the fermi_cuda boundary at e == mu.
+        return np.where(e <= mu, 1.0, 0.0)
     kT = T * 8.617333262145e-5
     x = (e - mu) / kT
     return expit(-x)

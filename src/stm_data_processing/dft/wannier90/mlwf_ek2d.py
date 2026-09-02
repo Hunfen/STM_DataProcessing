@@ -303,6 +303,12 @@ class EK2DCalculator:
             logger.info("Using CPU calculation...")
             e, _ = self._compute_eigen(self.ham)
 
+        if raw_output:
+            # Bug L9 fix: honor the documented raw_output contract and return
+            # the bare eigenvalue array (N, num_wann) before any reshape,
+            # dictionary wrapping, or post-processing.
+            return e
+
         # Reshape to (num_wann, nk, nk)
         # eigvalsh returns eigenvalues in ascending order, shape (N, num_wann)
         e = e.T.reshape((self.num_wann, self.nk, self.nk))

@@ -13,7 +13,7 @@
 >
 > - 涉及 10 个源文件：`qpi_born.py`、`qpi_jdos.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`mlwf_susceptibility.py`、`lattice_operations.py`、`plot_funcs.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`。
 > - CPU 性能：BornQPI 的 CPU QPI 由 `np.roll` 双循环改为 FFT 相关定理（nk=32 提速 58×、nk=64 提速 207×）；`bare_lindhard` 向量化（nk=16 提速 158×）；`mlwf_susceptibility` 逆 FFT 方向修正并复用计划；`mlwf_ek2d` 本征分解加缓存。
-> - Medium（19）项已于同日全部处理完毕（见下节）；Low（25）项**尚未处理**，仍待后续。
+> - Medium（19）项已于同日全部处理完毕（见下节）；Low（25）项已于 2026-09-02 全部处理完毕（见下节），并顺带清零 `extract_k_type.py` 的 22 条 ruff cosmetic 基线（`ruff check src` 全树 0 错误）。
 
 ### Medium 全部修复（2026-09-01）
 
@@ -70,13 +70,24 @@
 - 二维：改用 `2025-07-14/Grid Spectroscopy001.3ds`（**90×400、Points 7**、14 通道，全部像素已采集）→ 7 个 bias 切片（10.0/6.7/3.3/0.0/−3.3/−6.7/−10.0 mV）各出一张 90×400 的 dI/dV map + 多子图总览。基于 `2025-10-24/Grid Spectroscopy008.3ds`（未扫完）的旧图已删除。
 - 预览图统一改为 nan 安全色标（`nanpercentile(2,98)`）+ NaN 区中性灰 `#808080` + 标题标注完整度（topo0002 标 `finite 62.3% (319/512 rows)`）。
 
+### Low 全部修复（2026-09-02）
+
+> 本报告 **25 个 Low 级 bug（L1–L25）已全部处理完毕**，并顺带清零 `extract_k_type.py` 的 22 条 ruff cosmetic 基线（`ruff check src` 全树 **0 错误**）。改动经 AgentTeams `stm-low-risk-cleanup`（4 名 `deepseek-v4-flash` 编码成员 + 2 名 `deepseek-v4-pro` 评审成员 + 1 名集成成员）执行：10 个实现任务 + 10 轮独立评审**全部 PASS**（0 轮 needs_revision/reject），集成验收通过。
+>
+> - 涉及 18 个文件：`qpi_born.py`、`qpi_io.py`、`w90hr_loader.py`、`btk.py`、`miscellaneous.py`、`vortex_num.py`、`mlwf_susceptibility.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`lattice_operations.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`、`parser.py`、`dos.py`、`unfolding.py`、`extract_k_type.py`、`scripts/regression/check_nanonis_sxm.py`。
+> - 剩余风险项同步处理：② `bare_lindhard` 奇数 nk 半格偏差已修复（q 网格改 `fftshift(fftfreq(nk))`，偶 nk 不变、奇 nk 修正）；④ M15 marker 回退路径补真实数据回归（6 个真实 `.sxm` 剥离标记副本，回退与 marker 路径逐元素一致）；⑤ `check_nanonis_sxm` 像素自检判据加固（`std > 阈值` 等鲁棒判据，去掉 afmhot 无中性灰假设）。
+> - 集成验收：8 套回归脚本全部 exit 0；`ruff check src` "All checks passed!"（22 条基线清零）；39/39 模块导入冒烟通过（含 qpi_tmat、pyfftw 回退、L20 `__main__` 守卫无阻塞）。
+> - **TmatQPI GPU 分支按用户要求本轮明确不做**（`qpi_tmat.py` 未改动，接口保留）。
+
 #### 剩余风险 / 未处理项
 
-1. `TmatQPI` GPU 分支未实现（显式 `NotImplementedError`，接口保留）。
-2. `bare_lindhard` 在**奇数 nk** 时 q 网格存在半格残余偏差（既有、非本次引入，常用偶数 nk 不受影响）。
-3. L20（`AutoPPt_winnew_modified` 模块级 `input()`）与 22 条 ruff cosmetic 基线（`extract_k_type.py`）未指派；Low（25）项整体按用户要求暂缓。
-4. M15 的 marker 回退路径仅由合成测试覆盖（6 个真实文件均含标记）。
-5. `check_nanonis_sxm.py` 的 `_check_png_content` 像素自检偏脆弱（依赖 afmhot 无中性灰中调的假设，全 finite 文件余量仅 0.17–0.21），可能假报警；建议后续改为 `std > 阈值` 等更鲁棒判据。
+1. `TmatQPI` GPU 分支未实现（显式 `NotImplementedError`，接口保留；**用户明确本轮不做**）。
+2. ~~`bare_lindhard` 奇数 nk 半格偏差~~ ✅ 已修复（2026-09-02，q 网格改 `fftshift(fftfreq(nk))`）。
+3. ~~L20 模块级 `input()` 与 22 条 ruff cosmetic 基线~~ ✅ 已处理（2026-09-02：L20 移入 `__main__` 守卫；基线清零，`ruff check src` 0 错误）。
+4. ~~M15 marker 回退路径仅合成测试覆盖~~ ✅ 已补真实数据回归（2026-09-02，6 真实 `.sxm` 剥离标记副本验证）。
+5. ~~`_check_png_content` 像素自检偏脆弱~~ ✅ 已加固（2026-09-02，`std > 阈值` 等鲁棒判据）。
+
+已记录的非阻塞备注（不影响交付，建议后续真实数据校验）：① OpenMX f 轨道列名顺序与规范 m 序有出入（仓库无真实 f 数据，消费方按 element/atom_index 求和、顺序无关）；② AutoPPt/nanonis_ppt_generator 的 L17 旋转符号是物理约定依赖，与现有 origin 逻辑自洽；③ `check_nanonis_sxm` 的 `finite_frac` 判据对 near-gray 像素为保守近似（最差 topo0019 diff 0.227，距 0.3 阈值余量 ~0.073），主判据（非白/std）裕量充足；④ `extract_k_type.py` `__main__` 保留 3 处中文 CLI 输出（既有、不触发 ruff，语言策略的面向用户输出合理边界）。
 
 ## 一、统计总览
 
@@ -84,7 +95,7 @@
 |---------|------|------|
 | 🔴 High | 10 | 崩溃 / 输出结果错误 / 模块完全不可用（✅ 已修复 2026-09-01） |
 | 🟡 Medium | 19 | 特定输入或路径下结果错误、数据错配（✅ 已全部修复 2026-09-01） |
-| 🟢 Low | 25 | 隐患、资源泄漏、文档与实现不一致 |
+| 🟢 Low | 25 | 隐患、资源泄漏、文档与实现不一致（✅ 已全部修复 2026-09-02） |
 | **合计** | **54** | |
 
 **最严重的结论**：README 快速开始的三个核心 QPI 类中，`JDOSQPI` 与 `BornQPI` 在当前代码状态下**构造/调用即崩溃**；`bare_lindhard.py` 的 CPU 路径多重错误叠加后默认参数下结果**恒为零**；`mlwf_susceptibility.py` 默认 CPU 路径把逆 FFT 做成了正 FFT，**结果量级差 nk² 倍**。
@@ -249,7 +260,7 @@
 
 ---
 
-## 四、Low（25）
+## 四、Low（25）✅ 已全部修复（2026-09-02，见修复状态节）
 
 | # | 位置 | 问题 | 修复建议 |
 |---|------|------|----------|

@@ -5,7 +5,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pyfftw
+
+try:
+    import pyfftw
+except ImportError:
+    # pyfftw is optional: without it the module must still load and the
+    # numpy.fft fallback branch in _compute_imag_chi takes over (bug L8 fix).
+    pyfftw = None
 
 from stm_data_processing.config import get_backend, get_xp
 from stm_data_processing.dft.wannier90.mlwf_gk import GreenFunction
@@ -209,10 +215,14 @@ class SusceptibilityCalculator_wang2012:
 
         MAX_GPU_MEMORY_FRACTION = 0.75
         mem_pool = self.xp.get_default_memory_pool()
-        mem_pool.set_limit(size=int(24 * 1024**3 * MAX_GPU_MEMORY_FRACTION))
+        # Query the actual device memory instead of hardcoding 24 GB
+        # (bug L6 fix): mem_info returns (free, total) in bytes.
+        _, total_device_mem = cp.cuda.Device().mem_info
+        mem_pool.set_limit(size=int(total_device_mem * MAX_GPU_MEMORY_FRACTION))
 
         logger.info(
-            f"[CUDA] Memory pool limit set to {MAX_GPU_MEMORY_FRACTION * 100:.0f}% of 24GB"
+            f"[CUDA] Memory pool limit set to {MAX_GPU_MEMORY_FRACTION * 100:.0f}% "
+            f"of {total_device_mem / 1024**3:.1f} GB device memory"
         )
 
         n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
@@ -317,9 +327,7 @@ class SusceptibilityCalculator_wang2012:
         d_eps = |omega_limit| / (n_eps - 1) as the integration weight
         (bug M7 fix), not the requested resolution.
         """
-        import importlib.util
-
-        PYFFTW_AVAILABLE = importlib.util.find_spec("pyfftw") is not None
+        PYFFTW_AVAILABLE = pyfftw is not None
         if not PYFFTW_AVAILABLE:
             logger.warning("pyFFTW not available, falling back to numpy.fft")
 
@@ -347,7 +355,10 @@ class SusceptibilityCalculator_wang2012:
                 if hasattr(os, "sched_getaffinity")
                 else os.cpu_count()
             )
-            num_threads = 10
+            # Cap at 10 threads instead of overwriting the affinity-derived
+            # count (bug L7 fix): keep the intended cap on large hosts while
+            # honoring machines with fewer cores.
+            num_threads = min(num_threads, 10)
 
             logger.info(f"[CPU] Using {num_threads} threads, nk={nk}, num_wann={nw}")
 

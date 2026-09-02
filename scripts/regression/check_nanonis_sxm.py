@@ -12,6 +12,11 @@ must be element-wise identical (including NaN positions) to the legacy
 reference implementation. The script also compares against nanonispy and
 writes one Z(forward) topography PNG per file for manual inspection.
 
+Every real file carries the b"\x1a\x04" marker, so the fallback to the
+legacy offset (skip two lines, seek two bytes) is additionally exercised
+on marker-stripped copies written to tmp_verify/: the copy must load the
+identical payload and emit the fallback warning.
+
 Run from the repository root:
 
     .venv/bin/python scripts/regression/check_nanonis_sxm.py
@@ -20,6 +25,7 @@ Exits with a non-zero status when any check fails. The real data files are
 only ever opened for reading.
 """
 
+import logging
 import os
 import sys
 import tempfile
@@ -54,6 +60,9 @@ SXM_FILES = [
 
 PNG_DIR = Path(__file__).resolve().parents[2] / "tmp_verify" / "m15_sxm"
 
+# Marker-stripped copies that exercise the legacy-offset fallback path.
+FALLBACK_DIR = Path(__file__).resolve().parents[2] / "tmp_verify" / "m15_fallback"
+
 
 def old_sxm_raw(f_path: str) -> np.ndarray:
     """Legacy reference: skip 2 lines + seek 2 bytes, then read >f4 floats."""
@@ -72,10 +81,13 @@ def old_sxm_raw(f_path: str) -> np.ndarray:
 def _check_png_content(png_path: Path, expected_finite: float) -> None:
     """Verify a rendered topography PNG is not blank and matches finite ratio.
 
-    Crops the axes interior (skipping the title band and the colour bar),
-    then classifies pixels as data-coloured / NaN-gray / background-white.
-    Requires the data-coloured fraction to be non-zero and to roughly match
-    the finite ratio of the underlying data.
+    Crops the axes interior (skipping the title band and the colour bar)
+    and checks colormap-independent statistics: the non-white fraction must
+    be non-zero, the pixel-value spread (std) must rule out a blank or flat
+    rendering, and the finite-pixel fraction must roughly match the finite
+    ratio of the underlying data. The NaN pixels are rendered as the neutral
+    gray #808080; they are classified only approximately, so the check does
+    not depend on the colormap having no gray midtones.
     """
     import matplotlib.image as mpimg
 
@@ -83,27 +95,38 @@ def _check_png_content(png_path: Path, expected_finite: float) -> None:
     h, w = rgb.shape[:2]
     crop = rgb[int(h * 0.15) : int(h * 0.92), int(w * 0.05) : int(w * 0.78), :3]
     r, g, b = crop[..., 0], crop[..., 1], crop[..., 2]
-    # The afmhot colormap never produces a neutral mid-gray (only black
-    # and white), so the #808080 NaN colour is uniquely identifiable in
-    # RGB space, whereas a grayscale test would collide with orange
-    # midtones.
+    near_white = (r > 0.92) & (g > 0.92) & (b > 0.92)
+    coloured = ~near_white
+    coloured_frac = float(coloured.mean())
+
+    # Colormap-independent non-blank checks: a blank image (all white) has a
+    # tiny non-white fraction, and a flat image (single solid colour, e.g. an
+    # all-NaN rendering) has a tiny pixel std. Measured on real files: std is
+    # 0.26-0.40 for any finite data and ~0.04 for an all-NaN flat rendering,
+    # so 0.1 separates the two with a wide margin.
+    data_std = float(np.std(crop[coloured])) if coloured.any() else 0.0
+    assert coloured_frac > 0.05, (
+        f"rendered image is blank: non-white fraction {coloured_frac:.3f}"
+    )
+    assert data_std > 0.1, (
+        f"rendered image is flat: pixel std {data_std:.4f}"
+    )
+
+    # NaN pixels are rendered as neutral gray #808080; classify them only
+    # approximately (antialiasing may produce near-gray pixels elsewhere).
     neutral = (
         (np.abs(r - g) < 0.08) & (np.abs(g - b) < 0.08) & (np.abs(r - b) < 0.08)
     )
-    near_white = (r > 0.92) & (g > 0.92) & (b > 0.92)
     near_bad = neutral & (r > 0.42) & (r < 0.58)  # NaN gray #808080
-    coloured = (~near_white) & (~near_bad)
-    coloured_frac = float(coloured.mean())
-    assert coloured_frac > 0.1, (
-        f"rendered image is blank: data-coloured fraction {coloured_frac:.3f}"
-    )
-    assert abs(coloured_frac - expected_finite) < 0.25, (
-        f"data-coloured fraction {coloured_frac:.3f} does not match "
+    finite_pixels = coloured & (~near_bad)
+    finite_frac = float(finite_pixels.mean())
+    assert abs(finite_frac - expected_finite) < 0.3, (
+        f"finite pixel fraction {finite_frac:.3f} does not match "
         f"finite ratio {expected_finite:.3f}"
     )
     print(
-        f"  pixel self-check: data-coloured {coloured_frac:.3f} vs "
-        f"finite {expected_finite:.3f} OK"
+        f"  pixel self-check: finite pixels {finite_frac:.3f} vs "
+        f"finite {expected_finite:.3f} OK (std {data_std:.4f})"
     )
 
 
@@ -247,6 +270,74 @@ def check_file(f_path: str) -> None:
     _check_png_content(out_png, finite_ratio)
 
 
+class _RecordCapture(logging.Handler):
+    """Collect log messages emitted while the handler is attached."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record.getMessage())
+
+
+def check_fallback_path(f_path: str) -> None:
+    """Exercise the legacy-offset fallback on a marker-stripped copy.
+
+    All real files carry the b"\x1a\x04" binary start marker, so the
+    marker-locating path is what runs in production. To cover the fallback
+    (legacy skip-two-lines + seek-two-bytes offset), copy the file to
+    tmp_verify with the two marker bytes replaced by b"\x00\x00" and verify
+    the loader still returns the identical payload - it can only do so via
+    the fallback - and that the fallback warning was emitted. The real data
+    directory is only ever read.
+    """
+    src = Path(f_path)
+    name = src.name
+    FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
+    dst = FALLBACK_DIR / name
+
+    raw = src.read_bytes()
+    header_end = raw.index(b":SCANIT_END:") + len(b":SCANIT_END:")
+    line_end = raw.index(b"\n", header_end)
+    marker_pos = raw.find(b"\x1a\x04", line_end)
+    assert marker_pos >= 0, f"{name}: b'\x1a\x04' marker not found"
+    assert raw[line_end + 1 : marker_pos] == b"\n\n", (
+        f"{name}: unexpected bytes before the marker: {raw[line_end + 1 : marker_pos]!r}"
+    )
+    # Replace the two marker bytes in place (same length) so the header and
+    # the payload offset are untouched.
+    stripped = raw[:marker_pos] + b"\x00\x00" + raw[marker_pos + 2 :]
+    assert b"\x1a\x04" not in stripped[line_end : line_end + 64], (
+        f"{name}: marker still present in the probed window"
+    )
+    dst.write_bytes(stripped)
+
+    capture = _RecordCapture()
+    loader_logger = logging.getLogger("stm_data_processing.io.nanonis_loader")
+    loader_logger.addHandler(capture)
+    try:
+        fallback_loader = NanonisFileLoader(str(dst))
+    finally:
+        loader_logger.removeHandler(capture)
+
+    original_loader = NanonisFileLoader(f_path)
+    assert np.array_equal(
+        fallback_loader._raw_data, original_loader._raw_data, equal_nan=True
+    ), f"{name}: fallback payload differs from the marker path"
+    # The fallback output must also equal the legacy reference on the copy.
+    assert np.array_equal(
+        fallback_loader._raw_data, old_sxm_raw(str(dst)), equal_nan=True
+    ), f"{name}: fallback payload differs from the legacy reference"
+    assert any("falling back to the legacy offset" in msg for msg in capture.records), (
+        f"{name}: fallback warning was not emitted"
+    )
+    print(
+        f"  fallback path: marker stripped -> identical payload "
+        f"({fallback_loader._raw_data.size} floats), legacy offset + warning OK"
+    )
+
+
 def main() -> int:
     """Run every regression check; return a process exit code."""
     files = SXM_FILES if len(sys.argv) == 1 else sys.argv[1:]
@@ -256,17 +347,22 @@ def main() -> int:
             return 2
 
     failed = 0
+    checks = 0
     for f_path in files:
-        try:
-            check_file(f_path)
-            print(f"[PASS] {Path(f_path).name}")
-        except Exception as exc:  # report every failing check
-            failed += 1
-            print(f"[FAIL] {Path(f_path).name}: {exc}")
-            traceback.print_exc()
+        for check, label in (
+            (check_file, Path(f_path).name),
+            (check_fallback_path, f"{Path(f_path).name} fallback path"),
+        ):
+            checks += 1
+            try:
+                check(f_path)
+                print(f"[PASS] {label}")
+            except Exception as exc:  # report every failing check
+                failed += 1
+                print(f"[FAIL] {label}: {exc}")
+                traceback.print_exc()
 
-    total = len(files)
-    print(f"{total - failed}/{total} files passed")
+    print(f"{checks - failed}/{checks} checks passed")
     return 1 if failed else 0
 
 

@@ -69,6 +69,24 @@ class CubeFile:
         for line in data_lines:
             values.extend(float(x) for x in line.split())
 
+        # Validate the value count: the declared grid is authoritative.
+        expected = ngrid[0] * ngrid[1] * ngrid[2]
+        if len(values) < expected:
+            raise ValueError(
+                f"Cube file {path} declares {ngrid[0]}x{ngrid[1]}x{ngrid[2]} "
+                f"= {expected} grid values but only {len(values)} were found"
+            )
+        if len(values) > expected:
+            # Trailing padding on the last line is tolerated; values beyond
+            # the declared grid are ignored.
+            logger.warning(
+                "Cube file %s has %d grid values, %d declared; ignoring the excess",
+                path,
+                len(values),
+                expected,
+            )
+            values = values[:expected]
+
         # Fill 3D array
         idx = 0
         for n1 in range(ngrid[0]):

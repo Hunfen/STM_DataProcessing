@@ -152,7 +152,7 @@ class OpenMX:
         Path to OpenMX .dat file
     atomic_species : dict or None
         Dictionary containing parsed atomic species information
-        Format: {element_label: {'element': str, 'orbitals': {'s': int, 'p': int, 'd': int}}}
+        Format: {element_label: {'element': str, 'orbitals': {'s': int, 'p': int, 'd': int, 'f': int}}}
     n_species : int or None
         Number of valid atomic species (real elements only)
     n_atoms : float or None
@@ -423,19 +423,20 @@ class OpenMX:
     @staticmethod
     def _parse_orbital_basis_static(basis_info: str, element: str) -> dict | None:
         """
-        Parse orbital basis string to extract s, p, d orbital counts.
+        Parse orbital basis string to extract s, p, d, f orbital counts.
 
         Parameters
         ----------
         basis_info : str
-            Basis string like "C6.0-s3p2d2" or "Li8.0-s3p2d1"
+            Basis string like "C6.0-s3p2d2" or "La8.0-s3p2d2f1"
         element : str
             Element symbol for validation
 
         Returns
         -------
         dict or None
-            Dictionary with 's', 'p', 'd' keys and integer values, or None if parsing fails
+            Dictionary with 's', 'p', 'd', 'f' keys and integer values, or
+            None if parsing fails
         """
         try:
             # Split on '-' to separate element part from orbital part
@@ -445,13 +446,14 @@ class OpenMX:
             orbital_part = basis_info.split("-", 1)[1]
 
             # Initialize orbital counts
-            orbitals = {"s": 0, "p": 0, "d": 0}
+            orbitals = {"s": 0, "p": 0, "d": 0, "f": 0}
 
-            # Parse s, p, d orbitals using regex
-            # Look for patterns like s3, p2, d2
+            # Parse s, p, d, f orbitals using regex
+            # Look for patterns like s3, p2, d2, f1
             s_match = re.search(r"s(\d+)", orbital_part)
             p_match = re.search(r"p(\d+)", orbital_part)
             d_match = re.search(r"d(\d+)", orbital_part)
+            f_match = re.search(r"f(\d+)", orbital_part)
 
             if s_match:
                 orbitals["s"] = int(s_match.group(1))
@@ -459,6 +461,8 @@ class OpenMX:
                 orbitals["p"] = int(p_match.group(1))
             if d_match:
                 orbitals["d"] = int(d_match.group(1))
+            if f_match:
+                orbitals["f"] = int(f_match.group(1))
 
             return orbitals
 
@@ -510,13 +514,31 @@ class OpenMX:
         dict
             Dictionary with 'positions_frac' and 'elements' keys, or None values if not found.
         """
-        # Find the final structure section
-        start_idx = -1
+        # Find the final structure section: take the LAST occurrence (a run
+        # may print it several times; the converged structure is the last
+        # one), matching _parse_fermi_level's last-match behavior.
+        header_idx = -1
         for i, line in enumerate(lines):
             if "Fractional coordinates of the final structure" in line:
-                # Look for the actual data lines after the header
-                start_idx = i + 3  # Skip the header lines
-                break
+                header_idx = i
+
+        if header_idx == -1:
+            return {"positions_frac": None, "elements": None}
+
+        # Locate the data start by line content (the first line with an atom
+        # index, an element and three numeric coordinates) instead of a fixed
+        # header offset, which is brittle to formatting changes.
+        start_idx = -1
+        for i in range(header_idx + 1, len(lines)):
+            parts = lines[i].strip().split()
+            if len(parts) < 5 or not parts[0].isdigit():
+                continue
+            try:
+                float(parts[2]), float(parts[3]), float(parts[4])
+            except ValueError:
+                continue
+            start_idx = i
+            break
 
         if start_idx == -1:
             return {"positions_frac": None, "elements": None}
@@ -670,7 +692,7 @@ class OpenMX:
             Each species dictionary contains:
             - 'label': original label from first column
             - 'element': validated element symbol
-            - 'orbitals': dict with 's', 'p', 'd' orbital counts
+            - 'orbitals': dict with 's', 'p', 'd', 'f' orbital counts
 
         Raises
         ------

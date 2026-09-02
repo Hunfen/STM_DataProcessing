@@ -87,6 +87,10 @@ class BTK:
             Normalized conductance sigma(E, T).
         """
         E = np.asarray(E)
+        if T <= 0:
+            # Zero temperature limit: avoid division by zero in 1/(kB*T).
+            return self.sigma_zero_T(E)
+
         sigma0 = self.sigma_zero_T(E)
 
         beta = 1 / (kB * T)

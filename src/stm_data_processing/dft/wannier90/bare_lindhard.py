@@ -8,7 +8,9 @@ import psutil
 from stm_data_processing.config import BACKEND
 from stm_data_processing.dft.wannier90.mlwf_ek2d import EK2DCalculator
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
 from stm_data_processing.utils.miscellaneous import (
+    extend_qpi,
     fermi,
     fermi_cuda,
     frac_to_real_2d,
@@ -40,7 +42,10 @@ class BareLindhardCalculator:
     the standard negative sign. The k- and q-grids live on the primitive
     Brillouin zone [-0.5, 0.5) x [-0.5, 0.5) in fractional reciprocal
     coordinates; q=(0,0) sits at index nk//2 after the final fftshift in
-    calculate().
+    calculate(). The returned q-grid is the discrete FFT frequency grid
+    fftshift(fftfreq(nk)), which matches the fftshifted data for both even
+    and odd nk; np.linspace(-0.5, 0.5, nk, endpoint=False) is only
+    equivalent for even nk and mislabels odd-nk data by half a grid step.
     """
 
     def __init__(self, hamiltonian: MLWFHamiltonian, nk: int = 256, eta: float = 5e-3):
@@ -454,6 +459,33 @@ class BareLindhardCalculator:
         orbital_select: list[int] | None = None,
         output_path: str | None = None,
     ):
+        """Compute the static bare Lindhard susceptibility chi0(q).
+
+        Parameters
+        ----------
+        q_range : tuple[float, float], optional
+            (qmin, qmax) fractional reciprocal-space window in units of the
+            reciprocal lattice vectors. If given, the fftshifted primitive-BZ
+            result is periodically extended and cropped to [qmin, qmax) via
+            extend_qpi (bug L10 fix).
+        temperature : float, default 4.2
+            Temperature in K used for the Fermi-Dirac occupation.
+        orbital_select : list[int], optional
+            Indices of the orbitals to include in the susceptibility sum.
+            Defaults to all orbitals.
+        output_path : str, optional
+            If given, saves the fftshifted primitive-BZ result to an HDF5
+            file before any q_range cropping (bug L10 fix).
+
+        Returns
+        -------
+        dict
+            'data': fftshifted chi0(q) with q=(0,0) at index (nk//2, nk//2);
+            'q1_grid', 'q2_grid': fractional grids matching the data (the
+            discrete FFT frequency grid, correct for even and odd nk);
+            'qx_grid', 'qy_grid': real-space reciprocal grids (None if
+            bvecs is None); 'metadata': dict of calculation parameters.
+        """
         orb_sel = orbital_select or list(range(self.num_wann))
         orb_sel = np.array(orb_sel, dtype=int)
 
@@ -485,13 +517,37 @@ class BareLindhardCalculator:
         # fftshift relocates q=(0,0) to index (nk//2, nk//2).
         chi_q = np.fft.fftshift(chi_q, axes=(0, 1))
 
-        # Generate coordinate grids that match the fftshifted data.
-        # After fftshift, index j corresponds to q = -0.5 + j/nk (mod 1), which
-        # is exactly np.linspace(-0.5, 0.5, nk, endpoint=False) with q=0 at
-        # index nk//2. q_vals must NOT be fftshifted again, otherwise the grid
+        # Generate coordinate grids that match the fftshifted data. After
+        # fftshift, index j carries the discrete frequency
+        # fftshift(fftfreq(nk))[j] with q=0 at index nk//2. For even nk this
+        # equals np.linspace(-0.5, 0.5, nk, endpoint=False); for odd nk the
+        # linspace grid is offset by half a grid step (1/(2*nk)) and would
+        # mislabel the data, so the FFT frequency grid is used (odd-nk risk
+        # fix). q_vals must NOT be fftshifted again, otherwise the grid
         # mislabels the data by half a BZ (bug M4).
-        q_vals = np.linspace(-0.5, 0.5, self.nk, endpoint=False)
+        q_vals = np.fft.fftshift(np.fft.fftfreq(self.nk))
         q1_grid, q2_grid = np.meshgrid(q_vals, q_vals, indexing="ij")
+
+        # Save the primitive-BZ result before any q_range cropping.
+        if output_path is not None:
+            save_susceptibility_to_h5(
+                susceptibility=chi_q,
+                output_path=output_path,
+                module_type="bare_Lindhard",
+                bvecs=self.ham.bvecs,
+                eta=self.eta,
+                nq=self.nk,
+            )
+
+        # Optionally extend/crop to the requested q-window.
+        if q_range is not None:
+            logger.info(
+                f"Extending susceptibility to fractional q-range: "
+                f"[{q_range[0]}, {q_range[1]})"
+            )
+            chi_q, q1_grid, q2_grid = extend_qpi(
+                chi_q, q1_grid, q2_grid, q_range[0], q_range[1]
+            )
 
         # Convert to real-space q-grids if bvecs are available
         qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, self.ham.bvecs)

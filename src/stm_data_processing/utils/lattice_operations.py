@@ -148,8 +148,12 @@ class LatticeOperations:
                 u_f = self._wrap_centered(u)
                 v_f = self._wrap_centered(v)
 
+                # Symmetric boundary condition: accept the full wrapped window
+                # [-0.5, 0.5). The tolerance only guards numerical noise slightly
+                # below -0.5, so points near the upper edge [0.5-tol, 0.5) are no
+                # longer silently dropped (mirroring the -0.5 side).
                 if not (
-                    -0.5 - tol <= u_f < 0.5 - tol and -0.5 - tol <= v_f < 0.5 - tol
+                    -0.5 - tol <= u_f < 0.5 and -0.5 - tol <= v_f < 0.5
                 ):
                     continue
 
@@ -274,6 +278,14 @@ class LatticeOperations:
         -------
         sorted_polygon : ndarray of shape (2, N)
             Polygon vertices sorted in clockwise order (column-wise).
+
+        Notes
+        -----
+        This centroid-angle sort is only guaranteed to produce the correct
+        boundary order for **convex** polygons. For concave polygons the
+        centroid may lie outside the polygon or the angular ordering may not
+        match the true vertex order, which would break downstream ray-casting
+        routines. Current callers only pass convex Brillouin-zone polygons.
         """
         p = np.asarray(polygon, dtype=float)
 
@@ -415,7 +427,14 @@ def create_polygon_mask(qx_grid, qy_grid, polygon, eps=1e-12):
 
 
 def _sort_polygon_clockwise_external(polygon):
-    """External version of _sort_polygon_clockwise for standalone use."""
+    """External version of _sort_polygon_clockwise for standalone use.
+
+    Notes
+    -----
+    Same convex-only limitation as `LatticeOperations._sort_polygon_clockwise`:
+    the centroid-angle sort is only guaranteed correct for convex polygons;
+    concave polygons may produce a vertex order that breaks ray-casting.
+    """
     p = np.asarray(polygon, dtype=float)
 
     if p.shape[0] != 2:

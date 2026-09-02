@@ -1,38 +1,54 @@
 import csv
 import re
+from pathlib import Path
 
 pdf_text = ""
 
 
-# ---------- 解析核心 ----------
+# ---------- Core parsing ----------
 def parse_thermocouple_table(text):
     """
-    从PDF文本解析K型热电偶分度表，返回 {温度(°C): 电压(mV)} 字典。
-    策略：每一行末尾都重复了该行的基准温度（整数），
-    提取它之后，行内剩余的数字均为电压值（取前10个）。
+    Parse a K-type thermocouple calibration table from PDF text.
+
+    Returns a {temperature (deg C): voltage (mV)} dict. Each data row ends
+    with its base temperature as an integer; the decimal numbers before it
+    are the voltages for base_temp, base_temp+1, ..., up to 10 columns.
+    Rows with fewer voltage columns are written with the columns present
+    instead of being dropped, and trailing integers outside the K-type
+    temperature range are rejected so the tail regex never mistakes the
+    fractional part of a decimal voltage for a temperature (e.g. 41.276
+    must not yield 276).
     """
     data = {}
     for line in text.splitlines():
         line = line.strip()
-        # 跳过标题、表格标记等无关行
+        # Skip headers, table markers and other unrelated lines.
         if not line or line.startswith(("=", "<", "#", "10. Appendix", "MULTIPROBE")):
             continue
 
-        # 1. 提取行尾的基准温度（允许前后空格）
-        tail_match = re.search(r"(-?\d+)\s*$", line)
+        # 1. Extract the trailing base temperature (allowing surrounding spaces).
+        #    The negative lookbehind rejects integers that are the fractional
+        #    part of a trailing decimal voltage (e.g. the "276" in "41.276").
+        tail_match = re.search(r"(?<![.\d])(-?\d+)\s*$", line)
         if not tail_match:
             continue
         base_temp = int(tail_match.group(1))
+        # Plausibility check: the base temperature must lie in the K-type
+        # thermocouple range (deg C). Out-of-range values mean the tail regex
+        # caught some other trailing integer (e.g. a page number or year).
+        if not (-270 <= base_temp <= 1372):
+            continue
 
-        # 2. 去掉行尾温度，得到电压数据部分
+        # 2. Strip the trailing temperature to get the voltage data part.
         body = line[: tail_match.start()]
 
-        # 3. 提取所有带小数点的数字（允许缺少前导零，如 ".039"）
+        # 3. Extract all decimal numbers (allowing a missing leading zero,
+        #    e.g. ".039").
         voltage_strs = re.findall(r"-?\d*\.\d+", body)
-        if len(voltage_strs) < 10:
-            continue  # 数据不完整，跳过（例如OCR噪声行）
 
-        # 4. 只取头10个电压，依次对应 base_temp, base_temp+1, ..., base_temp+9
+        # 4. Use all available voltage columns (at most 10), mapped to
+        #    base_temp, base_temp+1, ... Rows with fewer than 10 columns are
+        #    written with the columns present instead of being dropped.
         for i, v_str in enumerate(voltage_strs[:10]):
             data[base_temp + i] = float(v_str)
 
@@ -40,23 +56,23 @@ def parse_thermocouple_table(text):
 
 
 def fix_first_row(data):
-    # -270°C 对应 -6.458 mV
+    # -270 deg C corresponds to -6.458 mV.
     if -270 not in data:
         data[-270] = -6.458
     return data
 
 
 def save_csv(data, filename="thermocouple.csv"):
-    with open(filename, "w", newline="", encoding="utf-8") as f:
+    with Path(filename).open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Temperature_C", "EMF_mV"])
-        # 按温度升序
+        # Sort by ascending temperature.
         for temp in sorted(data.keys()):
             writer.writerow([temp, data[temp]])
 
 
 if __name__ == "__main__":
-    # 解析
+    # Parse the table.
     data = parse_thermocouple_table(pdf_text)
     data = fix_first_row(data)
 
@@ -64,9 +80,9 @@ if __name__ == "__main__":
     print("CSV已生成: thermocouple.csv")
     print(f"共包含 {len(data)} 个温度点。")
 
-    # 显示前几行示例
-    print("\n示例数据（前10行）:")
-    with open("thermocouple.csv") as f:
+    # Show the first few sample rows.
+    print("\n示例数据 (前10行):")
+    with Path("thermocouple.csv").open() as f:
         for i, line in enumerate(f):
             if i < 11:
                 print(line.strip())
