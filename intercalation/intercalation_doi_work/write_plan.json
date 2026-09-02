@@ -1,0 +1,6635 @@
+{
+ "new_collections": [
+  {
+   "name": "K",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Rb",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Cs",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Mg",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Al",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Sr/Ba",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Ga",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Er",
+   "parentCollection": "CYS4DBUL"
+  },
+  {
+   "name": "Mo",
+   "parentCollection": "CYS4DBUL"
+  }
+ ],
+ "items_create": [
+  {
+   "ref": "11",
+   "doi": "10.1063/1.4984958",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Berry phase shift from 2π to π in bilayer graphene by Li-intercalation and sequential desorption",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "110",
+    "issue": "23",
+    "pages": "233106",
+    "date": "2017-06",
+    "DOI": "10.1063/1.4984958",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Ryota",
+      "lastName": "Akiyama"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuma",
+      "lastName": "Takano"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yukihiro",
+      "lastName": "Endo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Satoru",
+      "lastName": "Ichinokura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ryosuke",
+      "lastName": "Nakanishi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kentaro",
+      "lastName": "Nomura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shuji",
+      "lastName": "Hasegawa"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "13",
+   "doi": "10.1016/0038-1098(81)90799-7",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity of the graphite intercalation compounds KHgC8 and RbHgC8: Evidence from specific heat",
+    "publicationTitle": "Solid State Communications",
+    "journalAbbreviation": "Solid State Communications",
+    "volume": "38",
+    "issue": "2",
+    "pages": "103-107",
+    "date": "1981-04",
+    "DOI": "10.1016/0038-1098(81)90799-7",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Grayson Alexander"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "David P.",
+      "lastName": "Goshorn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Daniel",
+      "lastName": "Guerard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipe",
+      "lastName": "Lagrange"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mohamed",
+      "lastName": "El Makrini"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "David G.",
+      "lastName": "Onn"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "14",
+   "doi": "10.1103/physrevb.44.10248",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Theory of the upper critical field in graphite intercalation compounds",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "44",
+    "issue": "18",
+    "pages": "10248-10255",
+    "date": "1991-11",
+    "DOI": "10.1103/physrevb.44.10248",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Radi A.",
+      "lastName": "Jishi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. S.",
+      "lastName": "Dresselhaus"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Chaiken"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "15",
+   "doi": "10.1103/physrevb.45.12465",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity in graphite intercalation compounds",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "45",
+    "issue": "21",
+    "pages": "12465-12469",
+    "date": "1992-06",
+    "DOI": "10.1103/physrevb.45.12465",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "R. A.",
+      "lastName": "Jishi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. S.",
+      "lastName": "Dresselhaus"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "76",
+   "doi": "10.1038/ncomms5224",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Approaching the limits of transparency and conductivity in graphitic materials through lithium intercalation",
+    "publicationTitle": "Nature Communications",
+    "journalAbbreviation": "Nat Commun",
+    "volume": "5",
+    "issue": "1",
+    "pages": "4224",
+    "date": "2014-07",
+    "DOI": "10.1038/ncomms5224",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Wenzhong",
+      "lastName": "Bao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jiayu",
+      "lastName": "Wan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiaogang",
+      "lastName": "Han"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xinghan",
+      "lastName": "Cai"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hongli",
+      "lastName": "Zhu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dohun",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dakang",
+      "lastName": "Ma"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yunlu",
+      "lastName": "Xu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jeremy N.",
+      "lastName": "Munday"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H. Dennis",
+      "lastName": "Drew"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael S.",
+      "lastName": "Fuhrer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Liangbing",
+      "lastName": "Hu"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "89",
+   "doi": "10.1038/s41598-020-57982-z",
+   "target": "K2C35XUC",
+   "element": "Au",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "The morphology of an intercalated Au layer with its effect on the Dirac point of graphene",
+    "publicationTitle": "Scientific Reports",
+    "journalAbbreviation": "Sci Rep",
+    "volume": "10",
+    "issue": "1",
+    "pages": "1042",
+    "date": "2020-01",
+    "DOI": "10.1038/s41598-020-57982-z",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Amirhossein",
+      "lastName": "Bayani"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Karin",
+      "lastName": "Larsson"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "90",
+   "doi": "10.1021/acsomega.0c01985",
+   "target": "K2C35XUC",
+   "element": "Au",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of Au Atoms into SiC(0001)/Buffer Interfaces–A First-Principles Density Functional Theory Study",
+    "publicationTitle": "ACS Omega",
+    "journalAbbreviation": "ACS Omega",
+    "volume": "5",
+    "issue": "24",
+    "pages": "14842-14846",
+    "date": "2020-06",
+    "DOI": "10.1021/acsomega.0c01985",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Amirhossein",
+      "lastName": "Bayani"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Karin",
+      "lastName": "Larsson"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "91",
+   "doi": "10.1016/j.susc.2015.04.021",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Multi-layer and multi-component intercalation at the graphene/Ir(111) interface",
+    "publicationTitle": "Surface Science",
+    "journalAbbreviation": "Surface Science",
+    "volume": "639",
+    "issue": "",
+    "pages": "70-74",
+    "date": "2015-09",
+    "DOI": "10.1016/j.susc.2015.04.021",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Maciej",
+      "lastName": "Bazarnik"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Régis",
+      "lastName": "Decker"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jens",
+      "lastName": "Brede"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Roland",
+      "lastName": "Wiesendanger"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "97",
+   "doi": "10.1016/0038-1098(89)90933-2",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity of graphite intercalation compound with lithium C2Li",
+    "publicationTitle": "Solid State Communications",
+    "journalAbbreviation": "Solid State Communications",
+    "volume": "69",
+    "issue": "9",
+    "pages": "921-923",
+    "date": "1989-03",
+    "DOI": "10.1016/0038-1098(89)90933-2",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "I.T.",
+      "lastName": "Belash"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.D.",
+      "lastName": "Bronnikov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "O.V.",
+      "lastName": "Zharikov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.V.",
+      "lastName": "Pal'nichenko"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "98",
+   "doi": "10.1016/0038-1098(87)90355-3",
+   "target": "9L9KRFW5",
+   "element": "Na",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "On the superconductivity of graphite intercalation compounds with sodium",
+    "publicationTitle": "Solid State Communications",
+    "journalAbbreviation": "Solid State Communications",
+    "volume": "64",
+    "issue": "12",
+    "pages": "1445-1447",
+    "date": "1987-12",
+    "DOI": "10.1016/0038-1098(87)90355-3",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "I.T.",
+      "lastName": "Belash"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.D.",
+      "lastName": "Bronnikov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "O.V.",
+      "lastName": "Zharikov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.V.",
+      "lastName": "Palnichenko"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "118",
+   "doi": "10.1088/2053-1583/aa702c",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Key role of rotated domains in oxygen intercalation at graphene on Ni(1 1 1)",
+    "publicationTitle": "2D Materials",
+    "journalAbbreviation": "2D Mater.",
+    "volume": "4",
+    "issue": "2",
+    "pages": "025106",
+    "date": "2017-05",
+    "DOI": "10.1088/2053-1583/aa702c",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Luca",
+      "lastName": "Bignardi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Paolo",
+      "lastName": "Lacovig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matteo M",
+      "lastName": "Dalmiglio"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Fabrizio",
+      "lastName": "Orlando"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Aliakbar",
+      "lastName": "Ghafari"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Luca",
+      "lastName": "Petaccia"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alessandro",
+      "lastName": "Baraldi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rosanna",
+      "lastName": "Larciprete"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Silvano",
+      "lastName": "Lizzit"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "122",
+   "doi": "10.1103/physrevb.91.245411",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic and geometric structure of graphene/SiC(0001) decoupled by lithium intercalation",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "91",
+    "issue": "24",
+    "pages": "245411",
+    "date": "2015-06",
+    "DOI": "10.1103/physrevb.91.245411",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Bisti"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Profeta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H.",
+      "lastName": "Vita"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Donarelli"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Perrozzi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P. M.",
+      "lastName": "Sheverdyaeva"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Moras"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Horn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Ottaviano"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "133",
+   "doi": "10.1039/c4cp04025b",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "The influence of intercalated oxygen on the properties of graphene on polycrystalline Cu under various environmental conditions",
+    "publicationTitle": "Phys. Chem. Chem. Phys.",
+    "journalAbbreviation": "Phys. Chem. Chem. Phys.",
+    "volume": "16",
+    "issue": "47",
+    "pages": "25989-26003",
+    "date": "2014",
+    "DOI": "10.1039/c4cp04025b",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Raoul",
+      "lastName": "Blume"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Piran R.",
+      "lastName": "Kidambi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bernhard C.",
+      "lastName": "Bayer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Robert S.",
+      "lastName": "Weatherup"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Zhu-Jun",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Gisela",
+      "lastName": "Weinberg"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marc-Georg",
+      "lastName": "Willinger"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mark",
+      "lastName": "Greiner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stephan",
+      "lastName": "Hofmann"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Axel",
+      "lastName": "Knop-Gericke"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Robert",
+      "lastName": "Schlögl"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "136",
+   "doi": "10.1103/physrevb.76.064510",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electron-phonon interaction in graphite intercalation compounds",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "76",
+    "issue": "6",
+    "pages": "064510",
+    "date": "2007-08",
+    "DOI": "10.1103/physrevb.76.064510",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Lilia",
+      "lastName": "Boeri"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Giovanni B.",
+      "lastName": "Bachelet"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matteo",
+      "lastName": "Giantomassi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ole K.",
+      "lastName": "Andersen"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "137",
+   "doi": "10.1080/01614947408079631",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "CATALYTIC PROPERTIES OF ALKALI METAL-GRAPHITE INTERCALATION COMPOUNDS",
+    "publicationTitle": "Catalysis Reviews",
+    "journalAbbreviation": "Catalysis Reviews",
+    "volume": "10",
+    "issue": "1",
+    "pages": "243-280",
+    "date": "1974-01",
+    "DOI": "10.1080/01614947408079631",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M. A. M.",
+      "lastName": "Boersma"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "139",
+   "doi": "10.1021/acscatal.2c00803",
+   "target": "RV4XYK6H",
+   "element": "H",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Following the Kinetics of Undercover Catalysis with APXPS and the Role of Hydrogen as an Intercalation Promoter",
+    "publicationTitle": "ACS Catalysis",
+    "journalAbbreviation": "ACS Catal.",
+    "volume": "12",
+    "issue": "16",
+    "pages": "9897-9907",
+    "date": "2022-08",
+    "DOI": "10.1021/acscatal.2c00803",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Virginia",
+      "lastName": "Boix"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mattia",
+      "lastName": "Scardamaglia"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tamires",
+      "lastName": "Gallo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Giulio",
+      "lastName": "D’Acunto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marie Døvre",
+      "lastName": "Strømsheim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Filippo",
+      "lastName": "Cavalca"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Suyun",
+      "lastName": "Zhu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Andrey",
+      "lastName": "Shavorskiy"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Joachim",
+      "lastName": "Schnadt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jan",
+      "lastName": "Knudsen"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "177",
+   "doi": "10.1103/physrevb.92.081409",
+   "target": "P2PTPXCI",
+   "element": "N",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Charge neutrality in epitaxial graphene on<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\"><mml:mrow><mml:mn>6</mml:mn><mml:mi>H</mml:mi></mml:mrow></mml:math>-SiC(0001) via nitrogen intercalation",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "92",
+    "issue": "8",
+    "pages": "081409",
+    "date": "2015-08",
+    "DOI": "10.1103/physrevb.92.081409",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Nuala M.",
+      "lastName": "Caffrey"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rickard",
+      "lastName": "Armiento"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rositsa",
+      "lastName": "Yakimova"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Igor A.",
+      "lastName": "Abrikosov"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "180",
+   "doi": "10.1103/physrevb.74.094507",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Possibility of superconductivity in graphite intercalated with alkaline earths investigated with density functional theory",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "74",
+    "issue": "9",
+    "pages": "094507",
+    "date": "2006-09",
+    "DOI": "10.1103/physrevb.74.094507",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Matteo",
+      "lastName": "Calandra"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Francesco",
+      "lastName": "Mauri"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "183",
+   "doi": "10.1103/physrevlett.108.149701",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Comment on “Electronic Structure of Superconducting<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:msub><mml:mi>KC</mml:mi><mml:mn>8</mml:mn></mml:msub></mml:math>and Nonsuperconducting<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:msub><mml:mi>LiC</mml:mi><mml:mn>6</mml:mn></mml:msub></mml:math>Graphite Intercalation Compounds: Evidence for a Graphene-Sheet-Driven Superconducting State”",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "108",
+    "issue": "14",
+    "pages": "149701",
+    "date": "2012-04",
+    "DOI": "10.1103/physrevlett.108.149701",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Calandra"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Attaccalite"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Profeta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Mauri"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "234",
+   "doi": "10.1103/physrevmaterials.4.124005",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Growth and stability of Pb intercalated phases under graphene on SiC",
+    "publicationTitle": "Physical Review Materials",
+    "journalAbbreviation": "Phys. Rev. Materials",
+    "volume": "4",
+    "issue": "12",
+    "pages": "124005",
+    "date": "2020-12",
+    "DOI": "10.1103/physrevmaterials.4.124005",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Chen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P. A.",
+      "lastName": "Thiel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E.",
+      "lastName": "Conrad"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. C.",
+      "lastName": "Tringides"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "244",
+   "doi": "10.1103/physrevb.107.045408",
+   "target": "PFZAQ3GR",
+   "element": "Dy",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Targeted Dy intercalation under graphene/SiC for tuning its electronic band structure",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "107",
+    "issue": "4",
+    "pages": "045408",
+    "date": "2023-01",
+    "DOI": "10.1103/physrevb.107.045408",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Chen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Han"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Kolmer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Hall"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Hupalo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. W.",
+      "lastName": "Evans"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. C.",
+      "lastName": "Tringides"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "265",
+   "doi": "10.1063/5.0160088",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Enumeration of Moiré patterns of a hexagonal twisted bilayer: Applications to intercalated transition metals",
+    "publicationTitle": "Journal of Applied Physics",
+    "volume": "134",
+    "issue": "14",
+    "pages": "144301",
+    "date": "2023-10",
+    "DOI": "10.1063/5.0160088",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Matthew",
+      "lastName": "Ciesler"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Damien",
+      "lastName": "West"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shengbai",
+      "lastName": "Zhang"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "290",
+   "doi": "10.1007/s12274-012-0215-4",
+   "target": "PID8AW7M",
+   "element": "Si",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "An exchange intercalation mechanism for the formation of a two-dimensional Si structure underneath graphene",
+    "publicationTitle": "Nano Research",
+    "journalAbbreviation": "Nano Res.",
+    "volume": "5",
+    "issue": "5",
+    "pages": "352-360",
+    "date": "2012-05",
+    "DOI": "10.1007/s12274-012-0215-4",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yi",
+      "lastName": "Cui"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Junfeng",
+      "lastName": "Gao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Li",
+      "lastName": "Jin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jijun",
+      "lastName": "Zhao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dali",
+      "lastName": "Tan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Qiang",
+      "lastName": "Fu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xinhe",
+      "lastName": "Bao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "292",
+   "doi": "10.1038/srep11378",
+   "target": "CAVWIWSY",
+   "element": "Fe",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Growth from behind: Intercalation-growth of two-dimensional FeO moiré structure underneath of metal-supported graphene",
+    "publicationTitle": "Scientific Reports",
+    "journalAbbreviation": "Sci Rep",
+    "volume": "5",
+    "issue": "1",
+    "pages": "11378",
+    "date": "2015-06",
+    "DOI": "10.1038/srep11378",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Arjun",
+      "lastName": "Dahal"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matthias",
+      "lastName": "Batzill"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "305",
+   "doi": "10.1016/j.progsurf.2018.07.001",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Functionalization of 2D materials by intercalation",
+    "publicationTitle": "Progress in Surface Science",
+    "journalAbbreviation": "Progress in Surface Science",
+    "volume": "94",
+    "issue": "1",
+    "pages": "1-20",
+    "date": "2019-02",
+    "DOI": "10.1016/j.progsurf.2018.07.001",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Daukiya"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.N.",
+      "lastName": "Nair"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Cranney"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Vonau"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Hajjar-Garreau"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Aubel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Simon"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "312",
+   "doi": "10.1088/0953-8984/26/39/394004",
+   "target": "CAVWIWSY",
+   "element": "Fe",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Local tunnel magnetoresistance of an iron intercalated graphene-based heterostructure",
+    "publicationTitle": "Journal of Physics: Condensed Matter",
+    "journalAbbreviation": "J. Phys.: Condens. Matter",
+    "volume": "26",
+    "issue": "39",
+    "pages": "394004",
+    "date": "2014-09",
+    "DOI": "10.1088/0953-8984/26/39/394004",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "R",
+      "lastName": "Decker"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M",
+      "lastName": "Bazarnik"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N",
+      "lastName": "Atodiresei"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "V",
+      "lastName": "Caciuc"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S",
+      "lastName": "Blügel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R",
+      "lastName": "Wiesendanger"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "316",
+   "doi": "10.1103/physrevb.64.035405",
+   "target": "QZIQ4LED",
+   "element": "Cu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of copper underneath a monolayer of graphite on Ni(111)",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "64",
+    "issue": "3",
+    "pages": "035405",
+    "date": "2001-06",
+    "DOI": "10.1103/physrevb.64.035405",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yu. S.",
+      "lastName": "Dedkov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. M.",
+      "lastName": "Shikin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "V. K.",
+      "lastName": "Adamchuk"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S. L.",
+      "lastName": "Molodtsov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Laubschat"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Bauer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Kaindl"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "345",
+   "doi": "10.1080/00018730110113644",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation compounds of graphite",
+    "publicationTitle": "Advances in Physics",
+    "journalAbbreviation": "Advances in Physics",
+    "volume": "51",
+    "issue": "1",
+    "pages": "1-186",
+    "date": "2002-01",
+    "DOI": "10.1080/00018730110113644",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M. S.",
+      "lastName": "Dresselhaus"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Dresselhaus"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "357",
+   "doi": "10.1016/0304-5102(82)80022-9",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Catalysis by graphite intercalation compounds",
+    "publicationTitle": "Journal of Molecular Catalysis",
+    "journalAbbreviation": "Journal of Molecular Catalysis",
+    "volume": "15",
+    "issue": "3",
+    "pages": "275-296",
+    "date": "1982-06",
+    "DOI": "10.1016/0304-5102(82)80022-9",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Lawrence B.",
+      "lastName": "Ebert"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "391",
+   "doi": "10.1016/j.carbon.2019.10.070",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Structure of superconducting Ca-intercalated bilayer Graphene/SiC studied using total-reflection high-energy positron diffraction",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "157",
+    "issue": "",
+    "pages": "857-862",
+    "date": "2020-02",
+    "DOI": "10.1016/j.carbon.2019.10.070",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Endo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Fukaya"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "I.",
+      "lastName": "Mochizuki"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Takayama"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Hyodo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Hasegawa"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "392",
+   "doi": "10.1088/1361-648x/aaccc4",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Weak localization in bilayer graphene with Li-intercalation/desorption",
+    "publicationTitle": "Journal of Physics: Condensed Matter",
+    "journalAbbreviation": "J. Phys.: Condens. Matter",
+    "volume": "30",
+    "issue": "30",
+    "pages": "305701",
+    "date": "2018-07",
+    "DOI": "10.1088/1361-648x/aaccc4",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Y",
+      "lastName": "Endo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S",
+      "lastName": "Ichinokura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R",
+      "lastName": "Akiyama"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A",
+      "lastName": "Takayama"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K",
+      "lastName": "Sugawara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K",
+      "lastName": "Nomura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T",
+      "lastName": "Takahashi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S",
+      "lastName": "Hasegawa"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "394",
+   "doi": "10.1093/oso/9780195128277.001.0001",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "book",
+    "title": "Graphite Intercalation Compounds and Applications",
+    "volume": "",
+    "issue": "",
+    "pages": "",
+    "date": "2003-04",
+    "DOI": "10.1093/oso/9780195128277.001.0001",
+    "publisher": "Oxford University Press",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Toshiaki",
+      "lastName": "Enoki"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Morinobu",
+      "lastName": "Endo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Masatsugu",
+      "lastName": "Suzuki"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "412",
+   "doi": "10.1103/physrevlett.51.430",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Three-Dimensional Energy Band in Graphite and Lithium-Intercalated Graphite",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "51",
+    "issue": "5",
+    "pages": "430-433",
+    "date": "1983-08",
+    "DOI": "10.1103/physrevlett.51.430",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Th.",
+      "lastName": "Fauster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F. J.",
+      "lastName": "Himpsel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. E.",
+      "lastName": "Fischer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E. W.",
+      "lastName": "Plummer"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "419",
+   "doi": "10.1088/1361-6528/ab261f",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Spontaneous intercalation of Ga and In bilayers during plasma-assisted molecular beam epitaxy growth of GaN on graphene on SiC",
+    "publicationTitle": "Nanotechnology",
+    "journalAbbreviation": "Nanotechnology",
+    "volume": "30",
+    "issue": "37",
+    "pages": "375602",
+    "date": "2019-06",
+    "DOI": "10.1088/1361-6528/ab261f",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Nathaniel",
+      "lastName": "Feldberg"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Oleksii",
+      "lastName": "Klymov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Núria",
+      "lastName": "Garro"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ana",
+      "lastName": "Cros"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nicolas",
+      "lastName": "Mollard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hanako",
+      "lastName": "Okuno"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marion",
+      "lastName": "Gruart"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bruno",
+      "lastName": "Daudin"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "429",
+   "doi": "10.1002/pssr.202300336",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Room Temperature Ferromagnetism in Graphene/SiC(0001) System Intercalated by Fe and Co",
+    "publicationTitle": "physica status solidi (RRL) – Rapid Research Letters",
+    "journalAbbreviation": "Physica Rapid Research Ltrs",
+    "volume": "18",
+    "issue": "3",
+    "pages": "2300336",
+    "date": "2023-11",
+    "DOI": "10.1002/pssr.202300336",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Sergei O.",
+      "lastName": "Filnov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dmitry A.",
+      "lastName": "Estyunin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ilya I.",
+      "lastName": "Klimovskikh"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tatiana P.",
+      "lastName": "Estyunina"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vladimir A.",
+      "lastName": "Golyashov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anton S.",
+      "lastName": "Tarasov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nikolay N.",
+      "lastName": "Kosyrev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vasily A.",
+      "lastName": "Komarov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Gennady S.",
+      "lastName": "Patrin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anna A.",
+      "lastName": "Rybkina"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Oleg",
+      "lastName": "Yu Vilkov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alexander M.",
+      "lastName": "Shikin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Oleg E.",
+      "lastName": "Tereshchenko"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ratibor G.",
+      "lastName": "Chumakov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alexey M.",
+      "lastName": "Lebedev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Artem G.",
+      "lastName": "Rybkin"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "485",
+   "doi": "10.1103/physrevlett.98.067002",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Enhancement of Superconductivity and Evidence of Structural Instability in Intercalated Graphite\n                    <mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">\n                      <mml:msub>\n                        <mml:mi>CaC</mml:mi>\n                        <mml:mn>6</mml:mn>\n                      </mml:msub>\n                    </mml:math>\n                    under High Pressure",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "98",
+    "issue": "6",
+    "pages": "067002",
+    "date": "2007-02",
+    "DOI": "10.1103/physrevlett.98.067002",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Gauzzi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Takashima"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N.",
+      "lastName": "Takeshita"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Terakura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H.",
+      "lastName": "Takagi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N.",
+      "lastName": "Emery"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Hérold"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Lagrange"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Loupias"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "491",
+   "doi": "10.1002/adma.202502412",
+   "target": "GCLKI4JV",
+   "element": "Bi",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Bismuthene Under Cover: Graphene Intercalation of a Large Gap Quantum Spin Hall Insulator",
+    "publicationTitle": "Advanced Materials",
+    "journalAbbreviation": "Advanced Materials",
+    "volume": "37",
+    "issue": "33",
+    "pages": "2502412",
+    "date": "2025-05",
+    "DOI": "10.1002/adma.202502412",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Lukas",
+      "lastName": "Gehrig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Cedric",
+      "lastName": "Schmitt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jonas",
+      "lastName": "Erhardt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bing",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tim",
+      "lastName": "Wagner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Martin",
+      "lastName": "Kamp"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Simon",
+      "lastName": "Moser"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ralph",
+      "lastName": "Claessen"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "539",
+   "doi": "10.1021/nn303548z",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Oxygen Intercalation under Graphene on Ir(111): Energetics, Kinetics, and the Role of Graphene Edges",
+    "publicationTitle": "ACS Nano",
+    "journalAbbreviation": "ACS Nano",
+    "volume": "6",
+    "issue": "11",
+    "pages": "9951-9963",
+    "date": "2012-10",
+    "DOI": "10.1021/nn303548z",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Elin",
+      "lastName": "Grånäs"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jan",
+      "lastName": "Knudsen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ulrike A.",
+      "lastName": "Schröder"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Timm",
+      "lastName": "Gerber"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Carsten",
+      "lastName": "Busse"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mohammad A.",
+      "lastName": "Arman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Karina",
+      "lastName": "Schulte"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jesper N.",
+      "lastName": "Andersen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thomas",
+      "lastName": "Michely"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "551",
+   "doi": "10.1016/j.physe.2019.113746",
+   "target": "RV4XYK6H",
+   "element": "H",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Enhanced Raman spectra of hydrogen-intercalated quasi-free-standing monolayer graphene on 4H-SiC(0001)",
+    "publicationTitle": "Physica E: Low-dimensional Systems and Nanostructures",
+    "journalAbbreviation": "Physica E: Low-dimensional Systems and Nanostructures",
+    "volume": "117",
+    "issue": "",
+    "pages": "113746",
+    "date": "2020-03",
+    "DOI": "10.1016/j.physe.2019.113746",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Grodecki"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Jagiełło"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Dobrowolski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Czołak"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "I.",
+      "lastName": "Jóźwik"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Ciuk"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "554",
+   "doi": "10.1016/j.apsusc.2020.148612",
+   "target": "NEWKEY:Mg",
+   "element": "Mg",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Magnesium-intercalated graphene on SiC: Highly n-doped air-stable bilayer graphene at extreme displacement fields",
+    "publicationTitle": "Applied Surface Science",
+    "journalAbbreviation": "Applied Surface Science",
+    "volume": "541",
+    "issue": "",
+    "pages": "148612",
+    "date": "2021-03",
+    "DOI": "10.1016/j.apsusc.2020.148612",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Antonija",
+      "lastName": "Grubišić-Čabo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jimmy C.",
+      "lastName": "Kotsakidis"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuefeng",
+      "lastName": "Yin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anton",
+      "lastName": "Tadich"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matthew",
+      "lastName": "Haldon"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sean",
+      "lastName": "Solari"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Iolanda",
+      "lastName": "Di Bernardo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kevin M.",
+      "lastName": "Daniels"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "John",
+      "lastName": "Riley"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Eric",
+      "lastName": "Huwald"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mark T.",
+      "lastName": "Edmonds"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rachael",
+      "lastName": "Myers-Ward"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nikhil V.",
+      "lastName": "Medhekar"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D. Kurt",
+      "lastName": "Gaskill"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael S.",
+      "lastName": "Fuhrer"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "555",
+   "doi": "10.1103/physrevb.80.075431",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Angle-resolved photoemission study of the graphite intercalation compound<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:mrow><mml:msub><mml:mrow><mml:mtext>KC</mml:mtext></mml:mrow><mml:mn>8</mml:mn></mml:msub></mml:mrow></mml:math>: A key to graphene",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "80",
+    "issue": "7",
+    "pages": "075431",
+    "date": "2009-08",
+    "DOI": "10.1103/physrevb.80.075431",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Grüneis"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Attaccalite"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Rubio"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D. V.",
+      "lastName": "Vyalikh"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S. L.",
+      "lastName": "Molodtsov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Fink"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Follath"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "W.",
+      "lastName": "Eberhardt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "B.",
+      "lastName": "Büchner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Pichler"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "560",
+   "doi": "10.3390/ma14247706",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Surface Transport Properties of Pb-Intercalated Graphene",
+    "publicationTitle": "Materials",
+    "journalAbbreviation": "Materials",
+    "volume": "14",
+    "issue": "24",
+    "pages": "7706",
+    "date": "2021-12",
+    "DOI": "10.3390/ma14247706",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Markus",
+      "lastName": "Gruschwitz"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chitran",
+      "lastName": "Ghosal"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ting-Hsuan",
+      "lastName": "Shen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Susanne",
+      "lastName": "Wolff"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thomas",
+      "lastName": "Seyller"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Christoph",
+      "lastName": "Tegenkamp"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "564",
+   "doi": "10.1016/0008-6223(75)90040-8",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of lithium into graphite and other carbons",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "13",
+    "issue": "4",
+    "pages": "337-345",
+    "date": "1975-08",
+    "DOI": "10.1016/0008-6223(75)90040-8",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Guerard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Herold"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "578",
+   "doi": "10.1016/j.carbon.2020.02.025",
+   "target": "K2C35XUC",
+   "element": "Au",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Au intercalation under epitaxial graphene on Ru(0001): The role of graphene edges",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "162",
+    "issue": "",
+    "pages": "292-299",
+    "date": "2020-06",
+    "DOI": "10.1016/j.carbon.2020.02.025",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Günther"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.O.",
+      "lastName": "Menteş"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Reichelt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E.",
+      "lastName": "Miniussi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "B.",
+      "lastName": "Santos"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Baraldi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Locatelli"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "590",
+   "doi": "10.1016/s0008-6223(96)00109-1",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Graphite intercalation compounds of lanthanide metals prepared in molten chlorides",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "34",
+    "issue": "12",
+    "pages": "1591-1593",
+    "date": "1996",
+    "DOI": "10.1016/s0008-6223(96)00109-1",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Hagiwara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Ito"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Ito"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "605",
+   "doi": "10.1016/j.carbon.2023.01.029",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Thermodynamics and kinetics of Pb intercalation under graphene on SiC(0001)",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "205",
+    "issue": "",
+    "pages": "336-344",
+    "date": "2023-03",
+    "DOI": "10.1016/j.carbon.2023.01.029",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yong",
+      "lastName": "Han"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marek",
+      "lastName": "Kolmer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael C.",
+      "lastName": "Tringides"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "James W.",
+      "lastName": "Evans"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "662",
+   "doi": "10.1088/1361-6528/aae8c9",
+   "target": "5XLC549M",
+   "element": "Co",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Structural, chemical, and magnetic properties of cobalt intercalated graphene on silicon carbide",
+    "publicationTitle": "Nanotechnology",
+    "journalAbbreviation": "Nanotechnology",
+    "volume": "30",
+    "issue": "2",
+    "pages": "025702",
+    "date": "2018-11",
+    "DOI": "10.1088/1361-6528/aae8c9",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "R",
+      "lastName": "Hönig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P",
+      "lastName": "Roese"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K",
+      "lastName": "Shamout"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T",
+      "lastName": "Ohkochi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "U",
+      "lastName": "Berges"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C",
+      "lastName": "Westphal"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "673",
+   "doi": "10.1063/1.3682303",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic structures of an epitaxial graphene monolayer on SiC(0001) after metal intercalation (metal = Al, Ag, Au, Pt, and Pd): A first-principles study",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "100",
+    "issue": "6",
+    "pages": "063115",
+    "date": "2012-02",
+    "DOI": "10.1063/1.3682303",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Chia-Hsiu",
+      "lastName": "Hsu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wen-Huan",
+      "lastName": "Lin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vidvuds",
+      "lastName": "Ozolins"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Feng-Chuan",
+      "lastName": "Chuang"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "683",
+   "doi": "10.1063/1.3653241",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of metal islands and films at the interface of epitaxially grown graphene and Ru(0001) surfaces",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "99",
+    "issue": "16",
+    "pages": "163107",
+    "date": "2011-10",
+    "DOI": "10.1063/1.3653241",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Li",
+      "lastName": "Huang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yi",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lida",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Min",
+      "lastName": "Gao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wenyan",
+      "lastName": "Xu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yande",
+      "lastName": "Que"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Haitao",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yeliang",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shixuan",
+      "lastName": "Du"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H.-J.",
+      "lastName": "Gao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "695",
+   "doi": "10.1002/admi.202300014",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity of K‐Intercalated Epitaxial Bilayer Graphene",
+    "publicationTitle": "Advanced Materials Interfaces",
+    "journalAbbreviation": "Adv Materials Inter",
+    "volume": "10",
+    "issue": "11",
+    "pages": "2300014",
+    "date": "2023-03",
+    "DOI": "10.1002/admi.202300014",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Tobias",
+      "lastName": "Huempfner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Felix",
+      "lastName": "Otto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Roman",
+      "lastName": "Forker"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Paul",
+      "lastName": "Müller"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Torsten",
+      "lastName": "Fritz"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "725",
+   "doi": "10.1016/j.apsusc.2021.151345",
+   "target": "ZMNVSY5D",
+   "element": "Pt",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Platinum silicide formation on selected semiconductors surfaces via thermal annealing and intercalation",
+    "publicationTitle": "Applied Surface Science",
+    "journalAbbreviation": "Applied Surface Science",
+    "volume": "572",
+    "issue": "",
+    "pages": "151345",
+    "date": "2022-01",
+    "DOI": "10.1016/j.apsusc.2021.151345",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Idczak"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Owczarek"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Markowski"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "729",
+   "doi": "10.1016/j.jallcom.2006.08.061",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Energetic evaluation of possible stacking structures of Li-intercalation in graphite using a first-principle pseudopotential calculation",
+    "publicationTitle": "Journal of Alloys and Compounds",
+    "journalAbbreviation": "Journal of Alloys and Compounds",
+    "volume": "439",
+    "issue": "1-2",
+    "pages": "258-267",
+    "date": "2007-07",
+    "DOI": "10.1016/j.jallcom.2006.08.061",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yoji",
+      "lastName": "Imai"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Akio",
+      "lastName": "Watanabe"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "736",
+   "doi": "10.1103/physrevb.25.4583",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity of graphite intercalation compounds with alkali-metal amalgams",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "25",
+    "issue": "7",
+    "pages": "4583-4592",
+    "date": "1982-04",
+    "DOI": "10.1103/physrevb.25.4583",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yasuhiro",
+      "lastName": "Iye"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sei-ichi",
+      "lastName": "Tanuma"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "764",
+   "doi": "10.1103/physrevb.28.112",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Model for superconductivity in graphite intercalation compounds",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "28",
+    "issue": "1",
+    "pages": "112-116",
+    "date": "1983-07",
+    "DOI": "10.1103/physrevb.28.112",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Al-Jishi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "792",
+   "doi": "10.1016/j.physc.2007.04.035",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Synthesis and superconducting properties of graphite compounds intercalated with Ca:C6Ca",
+    "publicationTitle": "Physica C: Superconductivity and its Applications",
+    "journalAbbreviation": "Physica C: Superconductivity and its Applications",
+    "volume": "460-462",
+    "issue": "",
+    "pages": "152-153",
+    "date": "2007-09",
+    "DOI": "10.1016/j.physc.2007.04.035",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Kazuo",
+      "lastName": "Kadowaki"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takeshi",
+      "lastName": "Nabemoto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takashi",
+      "lastName": "Yamamoto"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "793",
+   "doi": "10.1103/physrevlett.50.123",
+   "target": "G6KSSEBR",
+   "element": "Eu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic and Magnetic Properties of Europium-Intercalated Graphite",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "50",
+    "issue": "2",
+    "pages": "123-126",
+    "date": "1983-01",
+    "DOI": "10.1103/physrevlett.50.123",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Kaindl"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Feldhaus"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "U.",
+      "lastName": "Ladewig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K. H.",
+      "lastName": "Frank"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "795",
+   "doi": "10.1039/d0nr04464d",
+   "target": "NEWKEY:Al",
+   "element": "Al",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Nanoscale phenomena ruling deposition and intercalation of AlN at the graphene/SiC interface",
+    "publicationTitle": "Nanoscale",
+    "journalAbbreviation": "Nanoscale",
+    "volume": "12",
+    "issue": "37",
+    "pages": "19470-19476",
+    "date": "2020",
+    "DOI": "10.1039/d0nr04464d",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Anelia",
+      "lastName": "Kakanakova-Georgieva"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Gueorgui K.",
+      "lastName": "Gueorguiev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Davide G.",
+      "lastName": "Sangiovanni"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nattamon",
+      "lastName": "Suwannaharn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ivan G.",
+      "lastName": "Ivanov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ildikó",
+      "lastName": "Cora"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Béla",
+      "lastName": "Pécz"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Giuseppe",
+      "lastName": "Nicotra"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Filippo",
+      "lastName": "Giannazzo"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "806",
+   "doi": "10.1038/s41928-017-0010-z",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "On-chip intercalated-graphene inductors for next-generation radio frequency electronics",
+    "publicationTitle": "Nature Electronics",
+    "journalAbbreviation": "Nat Electron",
+    "volume": "1",
+    "issue": "1",
+    "pages": "46-51",
+    "date": "2018-01",
+    "DOI": "10.1038/s41928-017-0010-z",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Jiahao",
+      "lastName": "Kang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuji",
+      "lastName": "Matsumoto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiang",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Junkai",
+      "lastName": "Jiang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xuejun",
+      "lastName": "Xie"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Keisuke",
+      "lastName": "Kawamoto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Munehiro",
+      "lastName": "Kenmoku"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jae Hwan",
+      "lastName": "Chu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wei",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Junfa",
+      "lastName": "Mao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kazuyoshi",
+      "lastName": "Ueno"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kaustav",
+      "lastName": "Banerjee"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "808",
+   "doi": "10.1002/adfm.202109839",
+   "target": "RV4XYK6H",
+   "element": "H",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Periodic Nanoarray of Graphene pn‐Junctions on Silicon Carbide Obtained by Hydrogen Intercalation",
+    "publicationTitle": "Advanced Functional Materials",
+    "journalAbbreviation": "Adv Funct Materials",
+    "volume": "32",
+    "issue": "18",
+    "pages": "2109839",
+    "date": "2022-01",
+    "DOI": "10.1002/adfm.202109839",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Hrag",
+      "lastName": "Karakachian"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipp",
+      "lastName": "Rosenzweig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T. T. Nhung",
+      "lastName": "Nguyen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bharti",
+      "lastName": "Matta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alexei A.",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rositsa",
+      "lastName": "Yakimova"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thiagarajan",
+      "lastName": "Balasubramanian"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Zamin",
+      "lastName": "Mamiyev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Christoph",
+      "lastName": "Tegenkamp"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Craig M.",
+      "lastName": "Polley"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ulrich",
+      "lastName": "Starke"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "838",
+   "doi": "10.1016/j.carbon.2019.12.032",
+   "target": "XRVP2C3Z",
+   "element": "In",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Effects of two kinds of intercalated In films on quasi-free-standing monolayer graphene formed above SiC(0001)",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "159",
+    "issue": "",
+    "pages": "229-235",
+    "date": "2020-04",
+    "DOI": "10.1016/j.carbon.2019.12.032",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Hidong",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nyamaa",
+      "lastName": "Tsogtbaatar"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bolortsetseg",
+      "lastName": "Tuvdendorj"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Altaibaatar",
+      "lastName": "Lkhagvasuren"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jae M.",
+      "lastName": "Seo"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "840",
+   "doi": "10.1103/physrevlett.99.027001",
+   "target": "NEWKEY:Sr/Ba",
+   "element": "Sr/Ba",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity in Heavy Alkaline-Earth Intercalated Graphites",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "99",
+    "issue": "2",
+    "pages": "027001",
+    "date": "2007-07",
+    "DOI": "10.1103/physrevlett.99.027001",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "J. S.",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Boeri"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. R.",
+      "lastName": "O’Brien"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F. S.",
+      "lastName": "Razavi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R. K.",
+      "lastName": "Kremer"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "845",
+   "doi": "10.1103/physrevlett.96.217002",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Specific Heat of the Ca-Intercalated Graphite Superconductor<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:msub><mml:mi>CaC</mml:mi><mml:mn>6</mml:mn></mml:msub></mml:math>",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "96",
+    "issue": "21",
+    "pages": "217002",
+    "date": "2006-06",
+    "DOI": "10.1103/physrevlett.96.217002",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "J. S.",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R. K.",
+      "lastName": "Kremer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Boeri"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F. S.",
+      "lastName": "Razavi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "852",
+   "doi": "10.1016/j.carbon.2016.07.010",
+   "target": "CYUJX6PT",
+   "element": "Ge",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Origin of ambipolar graphene doping induced by the ordered Ge film intercalated on SiC(0001)",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "108",
+    "issue": "",
+    "pages": "154-164",
+    "date": "2016-11",
+    "DOI": "10.1016/j.carbon.2016.07.010",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Hidong",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Otgonbayar",
+      "lastName": "Dugerjav"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Altaibaatar",
+      "lastName": "Lkhagvasuren"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jae M.",
+      "lastName": "Seo"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "863",
+   "doi": "10.1103/physrevb.87.195401",
+   "target": "NEWKEY:Rb",
+   "element": "Rb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Direct evidence for a metallic interlayer band in Rb-intercalated bilayer graphene",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "87",
+    "issue": "19",
+    "pages": "195401",
+    "date": "2013-05",
+    "DOI": "10.1103/physrevb.87.195401",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Kleeman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Sugawara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Sato"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Takahashi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "864",
+   "doi": "10.1088/0953-8984/28/20/204001",
+   "target": "NEWKEY:Cs",
+   "element": "Cs",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Enhancement of electron–phonon coupling in Cs-overlayered intercalated bilayer graphene",
+    "publicationTitle": "Journal of Physics: Condensed Matter",
+    "journalAbbreviation": "J. Phys.: Condens. Matter",
+    "volume": "28",
+    "issue": "20",
+    "pages": "204001",
+    "date": "2016-04",
+    "DOI": "10.1088/0953-8984/28/20/204001",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "J",
+      "lastName": "Kleeman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K",
+      "lastName": "Sugawara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T",
+      "lastName": "Sato"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T",
+      "lastName": "Takahashi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "865",
+   "doi": "10.7566/jpsj.83.124715",
+   "target": "NEWKEY:Rb",
+   "element": "Rb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Anisotropic Electron–Phonon Coupling in Rb-Intercalated Bilayer Graphene",
+    "publicationTitle": "Journal of the Physical Society of Japan",
+    "journalAbbreviation": "J. Phys. Soc. Jpn.",
+    "volume": "83",
+    "issue": "12",
+    "pages": "124715",
+    "date": "2014-12",
+    "DOI": "10.7566/jpsj.83.124715",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "James",
+      "lastName": "Kleeman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Katsuaki",
+      "lastName": "Sugawara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takafumi",
+      "lastName": "Sato"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takashi",
+      "lastName": "Takahashi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "868",
+   "doi": "10.1021/acsnano.6b05982",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Spin–Orbit Coupling Induced Gap in Graphene on Pt(111) with Intercalated Pb Monolayer",
+    "publicationTitle": "ACS Nano",
+    "journalAbbreviation": "ACS Nano",
+    "volume": "11",
+    "issue": "1",
+    "pages": "368-374",
+    "date": "2017-01",
+    "DOI": "10.1021/acsnano.6b05982",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Ilya I.",
+      "lastName": "Klimovskikh"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mikhail M.",
+      "lastName": "Otrokov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vladimir Yu.",
+      "lastName": "Voroshnin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Daria",
+      "lastName": "Sostina"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Luca",
+      "lastName": "Petaccia"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Giovanni",
+      "lastName": "Di Santo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sangeeta",
+      "lastName": "Thakur"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Evgueni V.",
+      "lastName": "Chulkov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alexander M.",
+      "lastName": "Shikin"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "871",
+   "doi": "10.1143/jpsj.46.1945",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Susceptibility Fluctuation in Superconducting First Stage Potassium Graphite Intercalation Compound near Transition Temperature",
+    "publicationTitle": "Journal of the Physical Society of Japan",
+    "journalAbbreviation": "J. Phys. Soc. Jpn.",
+    "volume": "46",
+    "issue": "6",
+    "pages": "1945-1946",
+    "date": "1979-06",
+    "DOI": "10.1143/jpsj.46.1945",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Mototada",
+      "lastName": "Kobayashi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ikuji",
+      "lastName": "Tsujikawa"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "883",
+   "doi": "10.1016/0378-4363(80)90286-7",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity in graphite-alkali metal intercalation compounds",
+    "publicationTitle": "Physica B+C",
+    "journalAbbreviation": "Physica B+C",
+    "volume": "99",
+    "issue": "1-4",
+    "pages": "503-508",
+    "date": "1980-01",
+    "DOI": "10.1016/0378-4363(80)90286-7",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Koike"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H.",
+      "lastName": "Suematsu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Higuchi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Tanuma"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "884",
+   "doi": "10.1016/0022-3697(80)90067-0",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity in the graphite-potassium intercalation compound C8K",
+    "publicationTitle": "Journal of Physics and Chemistry of Solids",
+    "journalAbbreviation": "Journal of Physics and Chemistry of Solids",
+    "volume": "41",
+    "issue": "10",
+    "pages": "1111-1118",
+    "date": "1980",
+    "DOI": "10.1016/0022-3697(80)90067-0",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yoji",
+      "lastName": "Koike"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sei-ichi",
+      "lastName": "Tanuma"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hiroyoshi",
+      "lastName": "Suematsu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kohei",
+      "lastName": "Higuchi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "886",
+   "doi": "10.1021/acs.jpcc.2c01332",
+   "target": "M67S6HKS",
+   "element": "Gd",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Highly Asymmetric Graphene Layer Doping and Band Structure Manipulation in Rare Earth–Graphene Heterostructure by Targeted Bonding of the Intercalated Gadolinium",
+    "publicationTitle": "The Journal of Physical Chemistry C",
+    "journalAbbreviation": "J. Phys. Chem. C",
+    "volume": "126",
+    "issue": "15",
+    "pages": "6863-6873",
+    "date": "2022-03",
+    "DOI": "10.1021/acs.jpcc.2c01332",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Marek",
+      "lastName": "Kolmer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Benjamin",
+      "lastName": "Schrunk"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Myron",
+      "lastName": "Hupalo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Joseph",
+      "lastName": "Hall"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shen",
+      "lastName": "Chen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jianhua",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Cai-Zhuang",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Adam",
+      "lastName": "Kaminski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael C.",
+      "lastName": "Tringides"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "899",
+   "doi": "10.1021/acs.chemmater.0c01729",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Freestanding n-Doped Graphene via Intercalation of Calcium and Magnesium into the Buffer Layer–SiC(0001) Interface",
+    "publicationTitle": "Chemistry of Materials",
+    "journalAbbreviation": "Chem. Mater.",
+    "volume": "32",
+    "issue": "15",
+    "pages": "6464-6482",
+    "date": "2020-07",
+    "DOI": "10.1021/acs.chemmater.0c01729",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Jimmy C.",
+      "lastName": "Kotsakidis"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Antonija",
+      "lastName": "Grubišić-Čabo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuefeng",
+      "lastName": "Yin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anton",
+      "lastName": "Tadich"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rachael L.",
+      "lastName": "Myers-Ward"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matthew",
+      "lastName": "DeJarld"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shojan P.",
+      "lastName": "Pavunny"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marc",
+      "lastName": "Currie"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kevin M.",
+      "lastName": "Daniels"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chang",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mark T.",
+      "lastName": "Edmonds"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nikhil V.",
+      "lastName": "Medhekar"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D. Kurt",
+      "lastName": "Gaskill"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Amadeo L.",
+      "lastName": "Vázquez de Parga"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael S.",
+      "lastName": "Fuhrer"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "901",
+   "doi": "10.1063/1.4914161",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "New X-ray insight into oxygen intercalation in epitaxial graphene grown on 4<i>H</i>-SiC(0001)",
+    "publicationTitle": "Journal of Applied Physics",
+    "volume": "117",
+    "issue": "10",
+    "pages": "105301",
+    "date": "2015-03",
+    "DOI": "10.1063/1.4914161",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Kowalski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Tokarczyk"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Dąbrowski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Ciepielewski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Możdżonek"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "W.",
+      "lastName": "Strupiński"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. M.",
+      "lastName": "Baranowski"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "981",
+   "doi": "10.1021/jp208747q",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Lithium Intercalation Induced Decoupling of Epitaxial Graphene on SiC(0001): Electronic Property and Dynamic Process",
+    "publicationTitle": "The Journal of Physical Chemistry C",
+    "journalAbbreviation": "J. Phys. Chem. C",
+    "volume": "115",
+    "issue": "48",
+    "pages": "23992-23997",
+    "date": "2011-11",
+    "DOI": "10.1021/jp208747q",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yuanchang",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Gang",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jia",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jian",
+      "lastName": "Wu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bing-Lin",
+      "lastName": "Gu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wenhui",
+      "lastName": "Duan"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "985",
+   "doi": "10.1021/ja5113657",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Role of Cooperative Interactions in the Intercalation of Heteroatoms between Graphene and a Metal Substrate",
+    "publicationTitle": "Journal of the American Chemical Society",
+    "journalAbbreviation": "J. Am. Chem. Soc.",
+    "volume": "137",
+    "issue": "22",
+    "pages": "7099-7103",
+    "date": "2015-05",
+    "DOI": "10.1021/ja5113657",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Geng",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Haitao",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lida",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yi",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Li",
+      "lastName": "Huang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wenyan",
+      "lastName": "Xu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shixuan",
+      "lastName": "Du"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Min",
+      "lastName": "Ouyang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Andrea C.",
+      "lastName": "Ferrari"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hong-Jun",
+      "lastName": "Gao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1023",
+   "doi": "10.1103/physrevb.100.121407",
+   "target": "M67S6HKS",
+   "element": "Gd",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Introducing strong correlation effects into graphene by gadolinium intercalation",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "100",
+    "issue": "12",
+    "pages": "121407",
+    "date": "2019-09",
+    "DOI": "10.1103/physrevb.100.121407",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Link"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Forti"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Stöhr"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Küster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Rösner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Hirschmeier"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Chen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Avila"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. C.",
+      "lastName": "Asensio"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. A.",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T. O.",
+      "lastName": "Wehling"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. I.",
+      "lastName": "Lichtenstein"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. I.",
+      "lastName": "Katsnelson"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "U.",
+      "lastName": "Starke"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1067",
+   "doi": "10.1016/j.carbon.2019.09.061",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Charge-neutral epitaxial graphene on 6H–SiC(0001) via FeSi intercalation",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "156",
+    "issue": "",
+    "pages": "187-193",
+    "date": "2020-01",
+    "DOI": "10.1016/j.carbon.2019.09.061",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Xingyun",
+      "lastName": "Luo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Guojun",
+      "lastName": "Liang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiucai",
+      "lastName": "Sun"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yanlu",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Fapeng",
+      "lastName": "Yu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lei",
+      "lastName": "Wei"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiufeng",
+      "lastName": "Cheng"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Li",
+      "lastName": "Sun"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xian",
+      "lastName": "Zhao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1069",
+   "doi": "10.3390/molecules27249004",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Regulating the Electronic Structure of Freestanding Graphene on SiC by Ge/Sn Intercalation: A Theoretical Study",
+    "publicationTitle": "Molecules",
+    "journalAbbreviation": "Molecules",
+    "volume": "27",
+    "issue": "24",
+    "pages": "9004",
+    "date": "2022-12",
+    "DOI": "10.3390/molecules27249004",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Xingyun",
+      "lastName": "Luo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Guojun",
+      "lastName": "Liang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yanlu",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Fapeng",
+      "lastName": "Yu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xian",
+      "lastName": "Zhao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1088",
+   "doi": "10.1016/0378-4363(80)90282-x",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of rare earth metals in graphite",
+    "publicationTitle": "Physica B+C",
+    "journalAbbreviation": "Physica B+C",
+    "volume": "99",
+    "issue": "1-4",
+    "pages": "481-485",
+    "date": "1980-01",
+    "DOI": "10.1016/0378-4363(80)90282-x",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Mohamed",
+      "lastName": "El Makrini"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Daniel",
+      "lastName": "Guérard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philippe",
+      "lastName": "Lagrange"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Albert",
+      "lastName": "Hérold"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1132",
+   "doi": "10.1103/physrevresearch.4.023250",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Momentum microscopy of Pb-intercalated graphene on SiC: Charge neutrality and electronic structure of interfacial Pb",
+    "publicationTitle": "Physical Review Research",
+    "journalAbbreviation": "Phys. Rev. Research",
+    "volume": "4",
+    "issue": "2",
+    "pages": "023250",
+    "date": "2022-06",
+    "DOI": "10.1103/physrevresearch.4.023250",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Bharti",
+      "lastName": "Matta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipp",
+      "lastName": "Rosenzweig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Olaf",
+      "lastName": "Bolkenbaas"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kathrin",
+      "lastName": "Küster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ulrich",
+      "lastName": "Starke"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1139",
+   "doi": "10.1080/09500839.2010.487473",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity in Ca-intercalated bilayer graphene",
+    "publicationTitle": "Philosophical Magazine Letters",
+    "journalAbbreviation": "Philosophical Magazine Letters",
+    "volume": "90",
+    "issue": "10",
+    "pages": "731-738",
+    "date": "2010-07",
+    "DOI": "10.1080/09500839.2010.487473",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "I.I.",
+      "lastName": "Mazin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.V.",
+      "lastName": "Balatsky"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1154",
+   "doi": "10.1016/0038-1098(80)90285-9",
+   "target": "CAVWIWSY",
+   "element": "Fe",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Dielectric response and intraband plasmon dispersion in stage-1 FeCl3 intercalated graphite",
+    "publicationTitle": "Solid State Communications",
+    "journalAbbreviation": "Solid State Communications",
+    "volume": "33",
+    "issue": "9",
+    "pages": "937-940",
+    "date": "1980-03",
+    "DOI": "10.1016/0038-1098(80)90285-9",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "E.J.",
+      "lastName": "Mele"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.J.",
+      "lastName": "Ritsko"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1164",
+   "doi": "10.1039/c9cp03846a",
+   "target": "NEWKEY:Mo",
+   "element": "Mo",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Growth of highly oriented MoS\n                    <sub>2</sub>\n                    <i>via</i>\n                    an intercalation process in the graphene/SiC(0001) system",
+    "publicationTitle": "Physical Chemistry Chemical Physics",
+    "journalAbbreviation": "Phys. Chem. Chem. Phys.",
+    "volume": "21",
+    "issue": "37",
+    "pages": "20641-20646",
+    "date": "2019",
+    "DOI": "10.1039/c9cp03846a",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Paweł Piotr",
+      "lastName": "Michałowski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Piotr",
+      "lastName": "Knyps"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Paweł",
+      "lastName": "Ciepielewski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Piotr A.",
+      "lastName": "Caban"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ewa",
+      "lastName": "Dumiszewska"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Grzegorz",
+      "lastName": "Kowalski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mateusz",
+      "lastName": "Tokarczyk"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jacek M.",
+      "lastName": "Baranowski"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1203",
+   "doi": "10.1103/physrevb.94.075427",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Noble-metal intercalation process leading to a protected adatom in a graphene hollow site",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "94",
+    "issue": "7",
+    "pages": "075427",
+    "date": "2016-08",
+    "DOI": "10.1103/physrevb.94.075427",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Narayanan Nair"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Cranney"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Jiang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Hajjar-Garreau"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Aubel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Vonau"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Florentin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E.",
+      "lastName": "Denys"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.-L.",
+      "lastName": "Bocquet"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Simon"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1234",
+   "doi": "10.1016/j.ultramic.2017.05.010",
+   "target": "ZTBKP9RR",
+   "element": "Sn",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Metal-dielectric transition in Sn-intercalated graphene on SiC(0001)",
+    "publicationTitle": "Ultramicroscopy",
+    "journalAbbreviation": "Ultramicroscopy",
+    "volume": "183",
+    "issue": "",
+    "pages": "49-54",
+    "date": "2017-12",
+    "DOI": "10.1016/j.ultramic.2017.05.010",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Y.R.",
+      "lastName": "Niu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.A.",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Yakimova"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1278",
+   "doi": "10.1021/acs.jpcc.7b00314",
+   "target": "QZIQ4LED",
+   "element": "Cu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Theoretical Study of Cu Intercalation through a Defect in Zero-Layer Graphene on SiC Surface",
+    "publicationTitle": "The Journal of Physical Chemistry C",
+    "journalAbbreviation": "J. Phys. Chem. C",
+    "volume": "121",
+    "issue": "13",
+    "pages": "7294-7302",
+    "date": "2017-03",
+    "DOI": "10.1021/acs.jpcc.7b00314",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yuuichi",
+      "lastName": "Orimoto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kohei",
+      "lastName": "Otsuka"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kazuma",
+      "lastName": "Yagyu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hiroshi",
+      "lastName": "Tochihara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takayuki",
+      "lastName": "Suzuki"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuriko",
+      "lastName": "Aoki"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1297",
+   "doi": "10.1103/physrevlett.106.187002",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic Structure of Superconducting<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:msub><mml:mi>KC</mml:mi><mml:mn>8</mml:mn></mml:msub></mml:math>and Nonsuperconducting<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mml:msub><mml:mi>LiC</mml:mi><mml:mn>6</mml:mn></mml:msub></mml:math>Graphite Intercalation Compounds: Evidence for a Graphene-Sheet-Driven Superconducting State",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "106",
+    "issue": "18",
+    "pages": "187002",
+    "date": "2011-05",
+    "DOI": "10.1103/physrevlett.106.187002",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Z.-H.",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Camacho"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. H.",
+      "lastName": "Upton"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. V.",
+      "lastName": "Fedorov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C. A.",
+      "lastName": "Howard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Ellerby"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Valla"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1300",
+   "doi": "10.1103/physrevlett.108.149702",
+   "target": "NEWKEY:K",
+   "element": "K",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Pan<i>et al.</i>Reply:",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "108",
+    "issue": "14",
+    "pages": "149702",
+    "date": "2012-04",
+    "DOI": "10.1103/physrevlett.108.149702",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Z.-H.",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. V.",
+      "lastName": "Fedorov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C. A.",
+      "lastName": "Howard"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Ellerby"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Valla"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1341",
+   "doi": "10.1038/ncomms3772",
+   "target": "NEWKEY:Cs",
+   "element": "Cs",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "The mechanism of caesium intercalation of graphene",
+    "publicationTitle": "Nature Communications",
+    "journalAbbreviation": "Nat Commun",
+    "volume": "4",
+    "issue": "1",
+    "pages": "2772",
+    "date": "2013-11",
+    "DOI": "10.1038/ncomms3772",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Petrović"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "I.",
+      "lastName": "Šrut Rakić"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Runte"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Busse"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. T.",
+      "lastName": "Sadowski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Lazić"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "I.",
+      "lastName": "Pletikosić"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Z.-H.",
+      "lastName": "Pan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Milun"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "P.",
+      "lastName": "Pervan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N.",
+      "lastName": "Atodiresei"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Brako"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Šokčević"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Valla"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Michely"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Kralj"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1357",
+   "doi": "10.1103/physrevlett.50.761",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Prediction of Electronic Interlayer States in Graphite and Reinterpretation of Alkali Bands in Graphite Intercalation Compounds",
+    "publicationTitle": "Physical Review Letters",
+    "journalAbbreviation": "Phys. Rev. Lett.",
+    "volume": "50",
+    "issue": "10",
+    "pages": "761-764",
+    "date": "1983-03",
+    "DOI": "10.1103/physrevlett.50.761",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Posternak"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Baldereschi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. J.",
+      "lastName": "Freeman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E.",
+      "lastName": "Wimmer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Weinert"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1359",
+   "doi": "10.1063/1.3168502",
+   "target": "K2C35XUC",
+   "element": "Au",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Surface intercalation of gold underneath a graphene monolayer on SiC(0001) studied by scanning tunneling microscopy and spectroscopy",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "94",
+    "issue": "26",
+    "pages": "263115",
+    "date": "2009-06",
+    "DOI": "10.1063/1.3168502",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "B.",
+      "lastName": "Premlal"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Cranney"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Vonau"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Aubel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Casterman"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. M.",
+      "lastName": "De Souza"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Simon"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1369",
+   "doi": "10.1016/j.carbon.2004.03.014",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Co-intercalation into graphite of lithium and sodium with an alkaline earth metal",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "42",
+    "issue": "8-9",
+    "pages": "1825-1831",
+    "date": "2004",
+    "DOI": "10.1016/j.carbon.2004.03.014",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Sébastien",
+      "lastName": "Pruvost"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Claire",
+      "lastName": "Hérold"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Albert",
+      "lastName": "Hérold"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philippe",
+      "lastName": "Lagrange"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1411",
+   "doi": "10.1088/0022-3727/43/37/374009",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Structural and electronic properties of epitaxial graphene on SiC(0 0 0 1): a review of growth, characterization, transfer doping and hydrogen intercalation",
+    "publicationTitle": "Journal of Physics D: Applied Physics",
+    "journalAbbreviation": "J. Phys. D: Appl. Phys.",
+    "volume": "43",
+    "issue": "37",
+    "pages": "374009",
+    "date": "2010-09",
+    "DOI": "10.1088/0022-3727/43/37/374009",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "C",
+      "lastName": "Riedl"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C",
+      "lastName": "Coletti"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "U",
+      "lastName": "Starke"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1423",
+   "doi": "10.1021/nl2019855",
+   "target": "RV4XYK6H",
+   "element": "H",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Epitaxial Graphene Transistors: Enhancing Performance via Hydrogen Intercalation",
+    "publicationTitle": "Nano Letters",
+    "journalAbbreviation": "Nano Lett.",
+    "volume": "11",
+    "issue": "9",
+    "pages": "3875-3880",
+    "date": "2011-08",
+    "DOI": "10.1021/nl2019855",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Joshua A.",
+      "lastName": "Robinson"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matthew",
+      "lastName": "Hollander"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Michael",
+      "lastName": "LaBella"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kathleen A.",
+      "lastName": "Trumbull"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Randall",
+      "lastName": "Cavalero"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "David W.",
+      "lastName": "Snyder"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1425",
+   "doi": "10.1039/c8cp01032c",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Unveiling the atomistic mechanisms for oxygen intercalation in a strongly interacting graphene–metal interface",
+    "publicationTitle": "Physical Chemistry Chemical Physics",
+    "journalAbbreviation": "Phys. Chem. Chem. Phys.",
+    "volume": "20",
+    "issue": "19",
+    "pages": "13370-13378",
+    "date": "2018",
+    "DOI": "10.1039/c8cp01032c",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Carlos",
+      "lastName": "Romero-Muñiz"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ana",
+      "lastName": "Martín-Recio"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Pablo",
+      "lastName": "Pou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "José M.",
+      "lastName": "Gómez-Rodríguez"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Rubén",
+      "lastName": "Pérez"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1475",
+   "doi": "10.1002/admi.202300471",
+   "target": "TXT3UESN",
+   "element": "Pb",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Domain Boundary Formation Within an Intercalated Pb Monolayer Featuring Charge‐Neutral Epitaxial Graphene",
+    "publicationTitle": "Advanced Materials Interfaces",
+    "journalAbbreviation": "Adv Materials Inter",
+    "volume": "10",
+    "issue": "27",
+    "pages": "2300471",
+    "date": "2023-07",
+    "DOI": "10.1002/admi.202300471",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Philip",
+      "lastName": "Schädlich"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chitran",
+      "lastName": "Ghosal"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Monja",
+      "lastName": "Stettner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bharti",
+      "lastName": "Matta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Susanne",
+      "lastName": "Wolff"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Franziska",
+      "lastName": "Schölzel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Peter",
+      "lastName": "Richter"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mark",
+      "lastName": "Hutter"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anja",
+      "lastName": "Haags"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sabine",
+      "lastName": "Wenzel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Zamin",
+      "lastName": "Mamiyev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Julian",
+      "lastName": "Koch"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Serguei",
+      "lastName": "Soubatch"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipp",
+      "lastName": "Rosenzweig"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Craig",
+      "lastName": "Polley"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Frank Stefan",
+      "lastName": "Tautz"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Christian",
+      "lastName": "Kumpf"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kathrin",
+      "lastName": "Küster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ulrich",
+      "lastName": "Starke"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thomas",
+      "lastName": "Seyller"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Francois C.",
+      "lastName": "Bocquet"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Christoph",
+      "lastName": "Tegenkamp"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1482",
+   "doi": "10.1038/s41467-024-45816-9",
+   "target": "GCLKI4JV",
+   "element": "Bi",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Achieving environmental stability in an atomically thin quantum spin Hall insulator via graphene intercalation",
+    "publicationTitle": "Nature Communications",
+    "journalAbbreviation": "Nat Commun",
+    "volume": "15",
+    "issue": "1",
+    "pages": "1486",
+    "date": "2024-02",
+    "DOI": "10.1038/s41467-024-45816-9",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Cedric",
+      "lastName": "Schmitt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jonas",
+      "lastName": "Erhardt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipp",
+      "lastName": "Eck"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Matthias",
+      "lastName": "Schmitt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kyungchan",
+      "lastName": "Lee"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philipp",
+      "lastName": "Keßler"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tim",
+      "lastName": "Wagner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Merit",
+      "lastName": "Spring"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bing",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stefan",
+      "lastName": "Enzner"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Martin",
+      "lastName": "Kamp"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vedran",
+      "lastName": "Jovic"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chris",
+      "lastName": "Jozwiak"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Aaron",
+      "lastName": "Bostwick"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Eli",
+      "lastName": "Rotenberg"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Timur",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Cephise",
+      "lastName": "Cacho"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tien-Lin",
+      "lastName": "Lee"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Giorgio",
+      "lastName": "Sangiovanni"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Simon",
+      "lastName": "Moser"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ralph",
+      "lastName": "Claessen"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1490",
+   "doi": "10.1103/physrevb.90.235437",
+   "target": "G6KSSEBR",
+   "element": "Eu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Europium underneath graphene on Ir(111): Intercalation mechanism, magnetism, and band structure",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "90",
+    "issue": "23",
+    "pages": "235437",
+    "date": "2014-12",
+    "DOI": "10.1103/physrevb.90.235437",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Stefan",
+      "lastName": "Schumacher"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Felix",
+      "lastName": "Huttmann"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marin",
+      "lastName": "Petrović"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Christian",
+      "lastName": "Witt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Daniel F.",
+      "lastName": "Förster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chi",
+      "lastName": "Vo-Van"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Johann",
+      "lastName": "Coraux"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Antonio J.",
+      "lastName": "Martínez-Galera"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Violetta",
+      "lastName": "Sessi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ignacio",
+      "lastName": "Vergara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Reinhard",
+      "lastName": "Rückamp"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Markus",
+      "lastName": "Grüninger"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nicolas",
+      "lastName": "Schleheck"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Frank",
+      "lastName": "Meyer zu Heringdorf"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philippe",
+      "lastName": "Ohresser"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marko",
+      "lastName": "Kralj"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tim O.",
+      "lastName": "Wehling"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thomas",
+      "lastName": "Michely"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1492",
+   "doi": "10.1021/nl402797j",
+   "target": "G6KSSEBR",
+   "element": "Eu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "The Backside of Graphene: Manipulating Adsorption by Intercalation",
+    "publicationTitle": "Nano Letters",
+    "journalAbbreviation": "Nano Lett.",
+    "volume": "13",
+    "issue": "11",
+    "pages": "5013-5019",
+    "date": "2013-10",
+    "DOI": "10.1021/nl402797j",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Stefan",
+      "lastName": "Schumacher"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tim O.",
+      "lastName": "Wehling"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Predrag",
+      "lastName": "Lazić"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Sven",
+      "lastName": "Runte"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Daniel F.",
+      "lastName": "Förster"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Carsten",
+      "lastName": "Busse"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marin",
+      "lastName": "Petrović"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marko",
+      "lastName": "Kralj"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stefan",
+      "lastName": "Blügel"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nicolae",
+      "lastName": "Atodiresei"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Vasile",
+      "lastName": "Caciuc"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Thomas",
+      "lastName": "Michely"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1533",
+   "doi": "10.1063/1.4961633",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Room temperature deintercalation of alkali metal atoms from epitaxial graphene by formation of charge-transfer complexes",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "109",
+    "issue": "8",
+    "pages": "081603",
+    "date": "2016-08",
+    "DOI": "10.1063/1.4961633",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "H.-C.",
+      "lastName": "Shin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S. J.",
+      "lastName": "Ahn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H. W.",
+      "lastName": "Kim"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y.",
+      "lastName": "Moon"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K. B.",
+      "lastName": "Rai"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S. H.",
+      "lastName": "Woo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. R.",
+      "lastName": "Ahn"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1553",
+   "doi": "10.1016/j.carbon.2014.04.033",
+   "target": "PID8AW7M",
+   "element": "Si",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic and structural properties of graphene-based metal-semiconducting heterostructures engineered by silicon intercalation",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "76",
+    "issue": "",
+    "pages": "27-39",
+    "date": "2014-09",
+    "DOI": "10.1016/j.carbon.2014.04.033",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.G.",
+      "lastName": "Silly"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "D’Angelo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Besson"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y.J.",
+      "lastName": "Dappe"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Kubsky"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "F.",
+      "lastName": "Nicolas"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Pierucci"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Thomasset"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1554",
+   "doi": "10.1002/sia.5574",
+   "target": "PID8AW7M",
+   "element": "Si",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic properties of zero‐layer graphene on 6H‐SiC(0001) substrate decoupled by silicon intercalation",
+    "publicationTitle": "Surface and Interface Analysis",
+    "journalAbbreviation": "Surface &amp; Interface Analysis",
+    "volume": "46",
+    "issue": "12-13",
+    "pages": "1273-1277",
+    "date": "2014-05",
+    "DOI": "10.1002/sia.5574",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M. G.",
+      "lastName": "Silly"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Y. J.",
+      "lastName": "Dappe"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1576",
+   "doi": "10.1063/1.4893750",
+   "target": "RV4XYK6H",
+   "element": "H",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Hydrogen intercalation of single and multiple layer graphene synthesized on Si-terminated SiC(0001) surface",
+    "publicationTitle": "Journal of Applied Physics",
+    "volume": "116",
+    "issue": "8",
+    "pages": "083502",
+    "date": "2014-08",
+    "DOI": "10.1063/1.4893750",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Jakub",
+      "lastName": "Sołtys"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jacek",
+      "lastName": "Piechota"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Maria",
+      "lastName": "Ptasinska"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stanisław",
+      "lastName": "Krukowski"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1590",
+   "doi": "10.1134/1.1778462",
+   "target": "J8XK3NBF",
+   "element": "Ag",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of silver atoms under a graphite monolayer on Ni(111)",
+    "publicationTitle": "Physics of the Solid State",
+    "journalAbbreviation": "Phys. Solid State",
+    "volume": "46",
+    "issue": "7",
+    "pages": "1340-1348",
+    "date": "2004-07",
+    "DOI": "10.1134/1.1778462",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "A. G.",
+      "lastName": "Starodubov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M. A.",
+      "lastName": "Medvetskii"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. M.",
+      "lastName": "Shikin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "V. K.",
+      "lastName": "Adamchuk"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1593",
+   "doi": "10.1103/physrevb.94.085431",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of graphene on SiC(0001) via ion implantation",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "94",
+    "issue": "8",
+    "pages": "085431",
+    "date": "2016-08",
+    "DOI": "10.1103/physrevb.94.085431",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Alexander",
+      "lastName": "Stöhr"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stiven",
+      "lastName": "Forti"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stefan",
+      "lastName": "Link"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Alexei A.",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Klaus",
+      "lastName": "Kern"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ulrich",
+      "lastName": "Starke"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hadj M.",
+      "lastName": "Benia"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1603",
+   "doi": "10.1016/0379-6779(83)90005-x",
+   "target": "G6KSSEBR",
+   "element": "Eu",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Magnetic properties of europium-graphite intercalation compound C6Eu",
+    "publicationTitle": "Synthetic Metals",
+    "journalAbbreviation": "Synthetic Metals",
+    "volume": "8",
+    "issue": "1-2",
+    "pages": "23-30",
+    "date": "1983-12",
+    "DOI": "10.1016/0379-6779(83)90005-x",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "H.",
+      "lastName": "Suematsu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Ohmatsu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Sakakibara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Date"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Masatsugu",
+      "lastName": "Suzuki"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1604",
+   "doi": "10.1063/1.3582814",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Fabrication of Li-intercalated bilayer graphene",
+    "publicationTitle": "AIP Advances",
+    "volume": "1",
+    "issue": "2",
+    "pages": "022103",
+    "date": "2011-04",
+    "DOI": "10.1063/1.3582814",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Sugawara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Kanetani"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Sato"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Takahashi"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1617",
+   "doi": "10.1021/ja102398n",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Chemistry under Cover: Tuning Metal−Graphene Interaction by Reactive Intercalation",
+    "publicationTitle": "Journal of the American Chemical Society",
+    "journalAbbreviation": "J. Am. Chem. Soc.",
+    "volume": "132",
+    "issue": "23",
+    "pages": "8175-8179",
+    "date": "2010-05",
+    "DOI": "10.1021/ja102398n",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Peter",
+      "lastName": "Sutter"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jerzy T.",
+      "lastName": "Sadowski"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Eli A.",
+      "lastName": "Sutter"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1661",
+   "doi": "10.1088/1361-648x/aa88fb",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Superconductivity at 7.4 K in few layer graphene by Li-intercalation",
+    "publicationTitle": "Journal of Physics: Condensed Matter",
+    "journalAbbreviation": "J. Phys.: Condens. Matter",
+    "volume": "29",
+    "issue": "44",
+    "pages": "445701",
+    "date": "2017-10",
+    "DOI": "10.1088/1361-648x/aa88fb",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Anand P",
+      "lastName": "Tiwari"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Soohyeon",
+      "lastName": "Shin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Eunhee",
+      "lastName": "Hwang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Soon-Gil",
+      "lastName": "Jung"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Tuson",
+      "lastName": "Park"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hyoyoung",
+      "lastName": "Lee"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1672",
+   "doi": "10.1070/pu1993v036n11abeh002180",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation by atoms of a two-dimensional graphite film on a metal",
+    "publicationTitle": "Physics-Uspekhi",
+    "journalAbbreviation": "Phys.-Usp.",
+    "volume": "36",
+    "issue": "11",
+    "pages": "1053-1067",
+    "date": "1993-11",
+    "DOI": "10.1070/pu1993v036n11abeh002180",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "A Ya",
+      "lastName": "Tontegode"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E V",
+      "lastName": "Rut'kov"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1701",
+   "doi": "10.1088/2053-1583/1/2/025002",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Sequential oxygen and alkali intercalation of epitaxial graphene on Ir(111): enhanced many-body effects and formation of\n                    <i>pn</i>\n                    -interfaces",
+    "publicationTitle": "2D Materials",
+    "journalAbbreviation": "2D Mater.",
+    "volume": "1",
+    "issue": "2",
+    "pages": "025002",
+    "date": "2014-08",
+    "DOI": "10.1088/2053-1583/1/2/025002",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Søren",
+      "lastName": "Ulstrup"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Mie",
+      "lastName": "Andersen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Marco",
+      "lastName": "Bianchi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lucas",
+      "lastName": "Barreto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Bjørk",
+      "lastName": "Hammer"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Liv",
+      "lastName": "Hornekær"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Philip",
+      "lastName": "Hofmann"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1722",
+   "doi": "10.1038/srep17700",
+   "target": "CYUJX6PT",
+   "element": "Ge",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Atomically precise semiconductor—graphene and hBN interfaces by Ge intercalation",
+    "publicationTitle": "Scientific Reports",
+    "journalAbbreviation": "Sci Rep",
+    "volume": "5",
+    "issue": "1",
+    "pages": "17700",
+    "date": "2015-12",
+    "DOI": "10.1038/srep17700",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "N. I.",
+      "lastName": "Verbitskiy"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. V.",
+      "lastName": "Fedorov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "G.",
+      "lastName": "Profeta"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Stroppa"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Petaccia"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "B.",
+      "lastName": "Senkovskiy"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Nefedov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Wöll"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D. Yu.",
+      "lastName": "Usachov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D. V.",
+      "lastName": "Vyalikh"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L. V.",
+      "lastName": "Yashina"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A. A.",
+      "lastName": "Eliseev"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Pichler"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Grüneis"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1731",
+   "doi": "10.1088/1367-2630/12/12/125015",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "A low-energy electron microscopy and x-ray photo-emission electron microscopy study of Li intercalated into graphene on SiC(0001)",
+    "publicationTitle": "New Journal of Physics",
+    "journalAbbreviation": "New J. Phys.",
+    "volume": "12",
+    "issue": "12",
+    "pages": "125015",
+    "date": "2010-12",
+    "DOI": "10.1088/1367-2630/12/12/125015",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "C",
+      "lastName": "Virojanadara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A A",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S",
+      "lastName": "Watcharinyanon"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R",
+      "lastName": "Yakimova"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L I",
+      "lastName": "Johansson"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1742",
+   "doi": "10.1103/physrevb.94.245421",
+   "target": "PID8AW7M",
+   "element": "Si",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Graphene/SiC(0001) interface structures induced by Si intercalation and their influence on electronic properties of graphene",
+    "publicationTitle": "Physical Review B",
+    "journalAbbreviation": "Phys. Rev. B",
+    "volume": "94",
+    "issue": "24",
+    "pages": "245421",
+    "date": "2016-12",
+    "DOI": "10.1103/physrevb.94.245421",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Anton",
+      "lastName": "Visikovskiy"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shin-ichi",
+      "lastName": "Kimoto"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takashi",
+      "lastName": "Kajiwara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Masamichi",
+      "lastName": "Yoshimura"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Takushi",
+      "lastName": "Iimori"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Fumio",
+      "lastName": "Komori"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Satoru",
+      "lastName": "Tanaka"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1744",
+   "doi": "10.1063/1.4868119",
+   "target": "5XLC549M",
+   "element": "Co",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Cobalt intercalation at the graphene/iridium(111) interface: Influence of rotational domains, wrinkles, and atomic steps",
+    "publicationTitle": "Applied Physics Letters",
+    "volume": "104",
+    "issue": "10",
+    "pages": "101602",
+    "date": "2014-03",
+    "DOI": "10.1063/1.4868119",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Vlaic"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Kimouche"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J.",
+      "lastName": "Coraux"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "B.",
+      "lastName": "Santos"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Locatelli"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N.",
+      "lastName": "Rougemaille"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1745",
+   "doi": "10.1103/physrevmaterials.1.053406",
+   "target": "5XLC549M",
+   "element": "Co",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalating cobalt between graphene and iridium (111): Spatially dependent kinetics from the edges",
+    "publicationTitle": "Physical Review Materials",
+    "journalAbbreviation": "Phys. Rev. Materials",
+    "volume": "1",
+    "issue": "5",
+    "pages": "053406",
+    "date": "2017-10",
+    "DOI": "10.1103/physrevmaterials.1.053406",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Sergio",
+      "lastName": "Vlaic"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Nicolas",
+      "lastName": "Rougemaille"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Amina",
+      "lastName": "Kimouche"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Benito Santos",
+      "lastName": "Burgos"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Andrea",
+      "lastName": "Locatelli"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Johann",
+      "lastName": "Coraux"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1771",
+   "doi": "10.1088/1674-1056/abe22c",
+   "target": "CYUJX6PT",
+   "element": "Ge",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation of germanium oxide beneath large-area and high-quality epitaxial graphene on Ir(111) substrate*",
+    "publicationTitle": "Chinese Physics B",
+    "journalAbbreviation": "Chinese Phys. B",
+    "volume": "30",
+    "issue": "4",
+    "pages": "048102",
+    "date": "2021-03",
+    "DOI": "10.1088/1674-1056/abe22c",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Xueyan",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hui",
+      "lastName": "Guo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jianchen",
+      "lastName": "Lu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hongliang",
+      "lastName": "Lu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiao",
+      "lastName": "Lin"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chengmin",
+      "lastName": "Shen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lihong",
+      "lastName": "Bao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shixuan",
+      "lastName": "Du"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hong-Jun",
+      "lastName": "Gao"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1824",
+   "doi": "10.1039/c1cp00014d",
+   "target": "CAVWIWSY",
+   "element": "Fe",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Electronic structure and magnetic properties of the graphene/Fe/Ni(111) intercalation-like system",
+    "publicationTitle": "Physical Chemistry Chemical Physics",
+    "journalAbbreviation": "Phys. Chem. Chem. Phys.",
+    "volume": "13",
+    "issue": "16",
+    "pages": "7534",
+    "date": "2011",
+    "DOI": "10.1039/c1cp00014d",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "M.",
+      "lastName": "Weser"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "E. N.",
+      "lastName": "Voloshina"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Horn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yu. S.",
+      "lastName": "Dedkov"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1859",
+   "doi": "10.1016/j.progsurf.2021.100637",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Advances in two-dimensional heterostructures by mono-element intercalation underneath epitaxial graphene",
+    "publicationTitle": "Progress in Surface Science",
+    "journalAbbreviation": "Progress in Surface Science",
+    "volume": "96",
+    "issue": "3",
+    "pages": "100637",
+    "date": "2021-08",
+    "DOI": "10.1016/j.progsurf.2021.100637",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Songhao",
+      "lastName": "Wu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Quanzhen",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Huixia",
+      "lastName": "Yang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuanxiao",
+      "lastName": "Ma"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Teng",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Liwei",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hong-Jun",
+      "lastName": "Gao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yeliang",
+      "lastName": "Wang"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1861",
+   "doi": "10.1016/j.carbon.2015.11.002",
+   "target": "F8SJ2EX8",
+   "element": "O",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Detaching graphene from copper substrate by oxidation-assisted water intercalation",
+    "publicationTitle": "Carbon",
+    "journalAbbreviation": "Carbon",
+    "volume": "98",
+    "issue": "",
+    "pages": "138-143",
+    "date": "2016-03",
+    "DOI": "10.1016/j.carbon.2015.11.002",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Ruizhe",
+      "lastName": "Wu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lin",
+      "lastName": "Gan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xuewu",
+      "lastName": "Ou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Qicheng",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Zhengtang",
+      "lastName": "Luo"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1864",
+   "doi": "10.1103/physrevmaterials.5.024006",
+   "target": "NEWKEY:Ga",
+   "element": "Ga",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Liquid metal intercalation of epitaxial graphene: Large-area gallenene layer fabrication through gallium self-propagation at ambient conditions",
+    "publicationTitle": "Physical Review Materials",
+    "journalAbbreviation": "Phys. Rev. Materials",
+    "volume": "5",
+    "issue": "2",
+    "pages": "024006",
+    "date": "2021-02",
+    "DOI": "10.1103/physrevmaterials.5.024006",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Wundrack"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "D.",
+      "lastName": "Momeni"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "W.",
+      "lastName": "Dempwolf"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "N.",
+      "lastName": "Schmidt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "K.",
+      "lastName": "Pierz"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L.",
+      "lastName": "Michaliszyn"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H.",
+      "lastName": "Spende"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Schmidt"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "H. W.",
+      "lastName": "Schumacher"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Stosch"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "A.",
+      "lastName": "Bakin"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1912",
+   "doi": "10.1088/1674-1056/acbc6a",
+   "target": "NEWKEY:Er",
+   "element": "Er",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Er intercalation and its impact on transport properties of epitaxial graphene",
+    "publicationTitle": "Chinese Physics B",
+    "journalAbbreviation": "Chinese Phys. B",
+    "volume": "32",
+    "issue": "6",
+    "pages": "066103",
+    "date": "2023-05",
+    "DOI": "10.1088/1674-1056/acbc6a",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Mingmin",
+      "lastName": "Yang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yong",
+      "lastName": "Duan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wenxia",
+      "lastName": "Kong"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jinzhe",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jianxin",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Qun",
+      "lastName": "Cai"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1938",
+   "doi": "10.1007/978-3-642-75270-4",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "book",
+    "title": "Graphite Intercalation Compounds I",
+    "volume": "",
+    "issue": "",
+    "pages": "",
+    "date": "1990",
+    "DOI": "10.1007/978-3-642-75270-4",
+    "publisher": "Springer Berlin Heidelberg"
+   }
+  },
+  {
+   "ref": "1941",
+   "doi": "10.1147/jrd.2011.2143570",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Nanoscale 3-D $(E, k_{x}, k_{y})$ band structure imaging on graphene and intercalated graphene",
+    "publicationTitle": "IBM Journal of Research and Development",
+    "journalAbbreviation": "IBM J. Res. &amp; Dev.",
+    "volume": "55",
+    "issue": "4",
+    "pages": "6:1-6:6",
+    "date": "2011-07",
+    "DOI": "10.1147/jrd.2011.2143570",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "A. A.",
+      "lastName": "Zakharov"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C.",
+      "lastName": "Virojanadara"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "S.",
+      "lastName": "Watcharinyanon"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "R.",
+      "lastName": "Yakimova"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "L. I.",
+      "lastName": "Johansson"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1947",
+   "doi": "10.1016/j.cplett.2018.05.014",
+   "target": "A77J76WZ",
+   "element": "Ca",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Calcium intercalation underneath N-layer graphene on 6H-SiC(0001)",
+    "publicationTitle": "Chemical Physics Letters",
+    "journalAbbreviation": "Chemical Physics Letters",
+    "volume": "703",
+    "issue": "",
+    "pages": "33-38",
+    "date": "2018-07",
+    "DOI": "10.1016/j.cplett.2018.05.014",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Yuxi",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hanjie",
+      "lastName": "Zhang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yiliang",
+      "lastName": "Cai"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Junjie",
+      "lastName": "Song"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dan",
+      "lastName": "Qiao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Qiaoyue",
+      "lastName": "Chen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Fang",
+      "lastName": "Hu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Peng",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kaikai",
+      "lastName": "Huang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Pimo",
+      "lastName": "He"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1970",
+   "doi": "10.1021/acs.jpcc.8b05370",
+   "target": "CAVWIWSY",
+   "element": "Fe",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Intercalation Mechanisms of Fe Atoms underneath A Graphene Monolayer on Ru(0001)",
+    "publicationTitle": "The Journal of Physical Chemistry C",
+    "journalAbbreviation": "J. Phys. Chem. C",
+    "volume": "122",
+    "issue": "40",
+    "pages": "22903-22910",
+    "date": "2018-09",
+    "DOI": "10.1021/acs.jpcc.8b05370",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Peng",
+      "lastName": "Zhao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Pengju",
+      "lastName": "Ren"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "C. J. Kees-Jan",
+      "lastName": "Weststrate"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yuqun",
+      "lastName": "Xu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dong-Bo",
+      "lastName": "Cao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Hongwei",
+      "lastName": "Xiang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jian",
+      "lastName": "Xu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yong",
+      "lastName": "Yang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Yong-Wang",
+      "lastName": "Li"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "J. W. Hans",
+      "lastName": "Niemantsverdriet"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xiaodong",
+      "lastName": "Wen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xin",
+      "lastName": "Yu"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1977",
+   "doi": "10.1038/s41586-020-2241-9",
+   "target": "CYS4DBUL",
+   "element": "general",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "Engineering covalently bonded 2D layered materials by self-intercalation",
+    "publicationTitle": "Nature",
+    "journalAbbreviation": "Nature",
+    "volume": "581",
+    "issue": "7807",
+    "pages": "171-177",
+    "date": "2020-05",
+    "DOI": "10.1038/s41586-020-2241-9",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "Xiaoxu",
+      "lastName": "Zhao"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Peng",
+      "lastName": "Song"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Chengcai",
+      "lastName": "Wang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Anders C.",
+      "lastName": "Riis-Jensen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wei",
+      "lastName": "Fu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Ya",
+      "lastName": "Deng"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Dongyang",
+      "lastName": "Wan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Lixing",
+      "lastName": "Kang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Shoucong",
+      "lastName": "Ning"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Jiadong",
+      "lastName": "Dan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "T.",
+      "lastName": "Venkatesan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Zheng",
+      "lastName": "Liu"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Wu",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kristian S.",
+      "lastName": "Thygesen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Xin",
+      "lastName": "Luo"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Stephen J.",
+      "lastName": "Pennycook"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "Kian Ping",
+      "lastName": "Loh"
+     }
+    ]
+   }
+  },
+  {
+   "ref": "1987",
+   "doi": "10.1007/s11433-012-4796-4",
+   "target": "BCJ4F6X5",
+   "element": "Li",
+   "item": {
+    "itemType": "journalArticle",
+    "title": "First-principles study of lithium intercalated bilayer graphene",
+    "publicationTitle": "Science China Physics, Mechanics and Astronomy",
+    "journalAbbreviation": "Sci. China Phys. Mech. Astron.",
+    "volume": "55",
+    "issue": "8",
+    "pages": "1376-1382",
+    "date": "2012-06",
+    "DOI": "10.1007/s11433-012-4796-4",
+    "creators": [
+     {
+      "creatorType": "author",
+      "firstName": "JingJing",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "WeiWei",
+      "lastName": "Zhou"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "ChunMei",
+      "lastName": "Guan"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "JingQin",
+      "lastName": "Shen"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "ChuYing",
+      "lastName": "Ouyang"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "MinSheng",
+      "lastName": "Lei"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "SiQi",
+      "lastName": "Shi"
+     },
+     {
+      "creatorType": "author",
+      "firstName": "WeiHua",
+      "lastName": "Tang"
+     }
+    ]
+   }
+  }
+ ],
+ "items_patch": [
+  {
+   "ref": "287",
+   "key": "CYCSHICS",
+   "addCollection": "CYS4DBUL",
+   "element": "general"
+  },
+  {
+   "ref": "1427",
+   "key": "SKF9XHNY",
+   "addCollection": "3SH9SYXF",
+   "element": "Yb"
+  },
+  {
+   "ref": "1800",
+   "key": "44TSQ2IA",
+   "addCollection": "3SH9SYXF",
+   "element": "Yb"
+  }
+ ]
+}
