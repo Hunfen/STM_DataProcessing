@@ -42,7 +42,7 @@ npx tauri build --bundles app    # 只打 .app；去掉 --bundles 则打全部 b
 app/latticeSIM/src-tauri/target/release/bundle/macos/reciprocal-lattice-simulator.app
 ```
 
-首次构建需要联网拉取 crates.io 依赖（版本由 `Cargo.lock` 锁定），全量 release 编译在本机实测约 2 分钟（1m47s）。之后增量重建只需数秒。
+首次构建需要联网拉取 crates.io 依赖（版本由 `Cargo.lock` 锁定），全量 release 编译在本机实测约 2 分钟（1m47s）。之后在已有 `target/` 的工程里增量重建约 20 秒。
 
 ## 开发模式
 
