@@ -159,6 +159,16 @@ src/stm_data_processing/
                        # nanonis_ppt_generator（自动 PPT 报告）
 ```
 
+## 桌面应用
+
+[`app/latticeSIM/`](app/latticeSIM/) 是倒格子 / LEED / RHEED 模拟器的 Tauri 2 桌面版（`docs/reciprocal_lattice_simulator.html` 的多 tab 扩展版 + 衍射物理核心 `ui/diffraction.js`）。构建与运行方式见 [`app/latticeSIM/README.md`](app/latticeSIM/README.md)：
+
+```bash
+cd app/latticeSIM
+npm install
+npx tauri build --bundles app    # 产物：src-tauri/target/release/bundle/macos/*.app
+```
+
 ## 文档
 
 详细的模块接口文档见 [`docs/stm_data_processing/`](docs/stm_data_processing/)（接口表、数学公式、示例与接口对齐检查清单）。
