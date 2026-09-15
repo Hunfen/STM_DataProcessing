@@ -118,34 +118,37 @@ $$G^R(\mathbf{k}, \omega) = (\omega + i\eta - H(\mathbf{k}))^{-1}$$
 
 ### 3.3 Single-Particle Spectral Function $A(\mathbf{k}, \omega)$
 
-Calculate the spectral function, i.e., the imaginary part of the Green's function:
-$$ A(\mathbf{k}, \omega) = -\frac{1}{\pi} \text{Im}[G^R(\mathbf{k}, \omega)] $$
+The spectral function is the operator (anti-Hermitian) part of the retarded Green's function:
+
+$$ A(\mathbf{k}, \omega) = \frac{i}{2\pi}\left[G^R(\mathbf{k}, \omega) - G^{R\dagger}(\mathbf{k}, \omega)\right] $$
+
+It is Hermitian positive-semidefinite. The elementwise form $-\frac{1}{\pi}\mathrm{Im}[G^R]$ coincides with it only when $G^R$ is complex symmetric (real $H(\mathbf{k})$); with spin-orbit coupling the elementwise form is not Hermitian, so the code uses the operator form.
 
 - **Corresponding Code**: `_compute_single_particle_spectra`
-- **Data Structure**: Real array of shape `(N_k, num_wann, num_wann)` (before trace operation).
+- **Data Structure**: Hermitian matrix array of shape `(N_k, num_wann, num_wann)` (before trace operation).
 - **Note**: The code retains the matrix-form spectral function for subsequent Wannier index contraction.
 
 ### 3.4 Imaginary Part of Lindhard Function $\mathrm{Im}[\chi^L(\mathbf{q},\omega)]$
 
-#### 3.4.1 Simplification of Finite-temperature Lindhard Function
+#### 3.4.1 Finite-temperature Lindhard Function
 
-$$\begin{aligned}
-\chi^L(\mathbf{q},\omega) = -\frac{1}{2\pi i} \int\frac{d^3k}{(2\pi)^3} \int d\epsilon f(\epsilon) \text{Tr} \big[
-& M_{init} G^R(\mathbf{k},\epsilon) M_{fin} G^R(\mathbf{k}+\mathbf{q}, \epsilon+\omega) \\
-- & M_{init} G^A(\mathbf{k},\epsilon) M_{fin} G^A(\mathbf{k}+\mathbf{q}, \epsilon+\omega) \big]
-\end{aligned}$$
+The imaginary part of the Lindhard susceptibility at finite temperature is (standard retarded form)
 
-$$\begin{aligned}
-\chi^L(\mathbf{q},\omega) = \int\frac{d^3k}{(2\pi)^3} \int d\epsilon f(\epsilon) \text{Tr} \big[
-& M_{init} G^R(\mathbf{k},\epsilon) M_{fin} A(\mathbf{k}+\mathbf{q}, \epsilon+\omega) \\
-- & M_{init} A(\mathbf{k},\epsilon) M_{fin} G^A(\mathbf{k}+\mathbf{q}, \epsilon+\omega) \big]
-\end{aligned}$$
+$$ \mathrm{Im}\big[\chi^L(\mathbf{q},\omega)\big] = -\pi \int\frac{d^3k}{(2\pi)^3}\int d\epsilon \,[f(\epsilon)-f(\epsilon+\omega)] \text{Tr}\big[M_{init}A(\mathbf{k}, \epsilon)M_{fin}A(\mathbf{k}+\mathbf{q}, \epsilon+\omega)\big] $$
 
-$$ \mathrm{Im}\big[\chi^L(\mathbf{q},\omega)\big] = \pi \int\frac{d^3k}{(2\pi)^3}\int d\epsilon [f(\epsilon)-f(\epsilon+\omega)] \text{Tr}\big[M_{init}A(\mathbf{k}, \epsilon)M_{fin}A(\mathbf{k}+\mathbf{q}, \epsilon+\omega)\big] $$
+where $f(\epsilon)$ is the Fermi-Dirac occupation and $A(\mathbf{k},\epsilon)$ the spectral function of §3.3 (with $\mathrm{Im}[G^R]=-\pi A$). The Fermi-function difference selects particle-hole excitations across the chemical potential: it is non-zero only where one of $\epsilon$, $\epsilon+\omega$ is occupied and the other empty.
 
 #### 3.4.2 Zero-temperature Lindhard Function
 
-$$\mathrm{Im}[\chi^L(\mathbf{q},\omega)] = \int_{-\omega}^{0} d\epsilon \int\frac{d^3k}{(2\pi)^3}M_{init}A(\mathbf{k}, \epsilon)M_{fin}A(\mathbf{k}+\mathbf{q}, \epsilon+\omega) $$The code uses FFT to accelerate the integral process (Convolution Theorem):$$\int d^3k f(\mathbf{k})g(\mathbf{k}+\mathbf{q})=\int d^3r \tilde{f}(\mathbf{r})\tilde{g}(-\mathbf{r})e^{-i\mathbf{q\cdot r}}$$
+At $T=0$ the Fermi-function difference restricts $\epsilon\in[-\omega, 0]$, giving
+
+$$\mathrm{Im}[\chi^L(\mathbf{q},\omega)] = -\pi\int_{-\omega}^{0} d\epsilon \int\frac{d^3k}{(2\pi)^3} \text{Tr}\big[M_{init}A(\mathbf{k}, \epsilon)M_{fin}A(\mathbf{k}+\mathbf{q}, \epsilon+\omega)\big]$$
+
+The code evaluates the k-sum on the discrete grid with FFTs (convolution theorem). The cross-correlation is obtained by reversing the first factor in k-space: with $\tilde f(\mathbf{r})=\int d^3k\,f(\mathbf{k})\,e^{i\mathbf{k}\cdot\mathbf{r}}$,
+
+$$\sum_{\mathbf{k}} f(\mathbf{k})\,g(\mathbf{k}+\mathbf{q})=\int d^3r\, \tilde f(-\mathbf{r})\,\tilde g(\mathbf{r})\,e^{-i\mathbf{q}\cdot\mathbf{r}}$$
+
+so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic) before its FFT. The k-sum is the raw FFT grid sum: no $1/N_k$ or $(2\pi)^{-3}$ normalization is applied.
 
 1. **Energy Grid Generation**: Discretize the integration range $[-\omega, 0]$ into `n_eps` points.
 
@@ -175,22 +178,22 @@ $$\mathrm{Im}[\chi^L(\mathbf{q},\omega)] = \int_{-\omega}^{0} d\epsilon \int\fra
    spectra_unocc = np.einsum("ac,ijcb->ijab", self._mfin, spectra_unocc)
    ```
 
-4. **Fourier Transform**: Apply FFT to $A(\mathbf{k})$ over k-space (axes 0,1).
-
-   $$\tilde{A}_{init}(\mathbf{r}, \epsilon) = \mathcal{F}_{\mathbf{k} \to \mathbf{r}} [M_{init}A(\mathbf{k}, \epsilon) ] = \int\frac{d^3k}{(2\pi)^3} M_{init}A(\mathbf{k}, \epsilon)e^{i\mathbf{k\cdot r}} $$
-
-   $$\tilde{A}_{fin}(\mathbf{r}, \epsilon+\omega) = \mathcal{F}_{\mathbf{k} \to \mathbf{r}} [M_{fin}A(\mathbf{k}, \epsilon+\omega)] = \int\frac{d^3k}{(2\pi)^3} M_{fin}A(\mathbf{k}, \epsilon+\omega)e^{i\mathbf{k\cdot r}}$$
+4. **k-Space Reversal and Fourier Transform**: Reverse the occupied spectrum in k ($\mathbf{k}\to-\mathbf{k}$, periodic) — this turns the FFT convolution into the cross-correlation of the theorem above — then apply the FFT over k-space (axes 0, 1).
 
    ```python
+   neg_idx = np.concatenate(([0], np.arange(nk - 1, 0, -1)))  # i -> (-i) mod nk
+   spectra_occ = spectra_occ[np.ix_(neg_idx, neg_idx)]  # k -> -k, periodic
    b_occ = np.fft.fftn(spectra_occ, axes=(0, 1))  # F[k→r]
    b_occ_shifted = np.fft.fftshift(b_occ, axes=(0, 1))
    b_unocc = np.fft.fftn(spectra_unocc, axes=(0, 1))
    b_unocc_shifted = np.fft.fftshift(b_unocc, axes=(0, 1))
    ```
 
+   With the k-reversal, the first FFT evaluates $\tilde{A}_{init}(-\mathbf{r}, \epsilon)$ for $\tilde{A}_{init}(\mathbf{r}, \epsilon) = \mathcal{F}_{\mathbf{k} \to \mathbf{r}} [M_{init}A(\mathbf{k}, \epsilon)]$; the second evaluates $\tilde{A}_{fin}(\mathbf{r}, \epsilon+\omega) = \mathcal{F}_{\mathbf{k} \to \mathbf{r}} [M_{fin}A(\mathbf{k}, \epsilon+\omega)]$.
+
 5. **Real-space Product**: Contract Wannier indices and multiply in real space.
 
-   $$ P(\mathbf{r}, \epsilon, \omega) = \tilde{A}_{init}(\mathbf{r}, \epsilon)\tilde{A}_{fin}(-\mathbf{r}, \epsilon + \omega)$$
+   $$ P(\mathbf{r}, \epsilon, \omega) = \tilde{A}_{init}(-\mathbf{r}, \epsilon)\,\tilde{A}_{fin}(\mathbf{r}, \epsilon + \omega)$$
 
    ```python
    b_prod = np.einsum("ijab,ijba->ij", b_occ_shifted, b_unocc_shifted)  # Tr[M_init·A·M_fin·A]
@@ -198,7 +201,7 @@ $$\mathrm{Im}[\chi^L(\mathbf{q},\omega)] = \int_{-\omega}^{0} d\epsilon \int\fra
 
 6. **Inverse Fourier Transform**: Transform back to q-space.
 
-   $$ f(\mathbf{q}, \epsilon, \omega) = \mathcal{F}^{-1}_{\mathbf{r} \to \mathbf{q}} [ P(\mathbf{r}, \epsilon, \omega) ] = \int d^3r \tilde{A}_{init}(\mathbf{r}, \epsilon)\tilde{A}_{fin}(-\mathbf{r}, \epsilon + \omega)e^{-i\mathbf{q\cdot r}} $$
+   $$ f(\mathbf{q}, \epsilon, \omega) = \mathcal{F}^{-1}_{\mathbf{r} \to \mathbf{q}} [ P(\mathbf{r}, \epsilon, \omega) ] = \sum_{\mathbf{k}} \text{Tr}\big[M_{init}A(\mathbf{k},\epsilon)M_{fin}A(\mathbf{k}+\mathbf{q}, \epsilon+\omega)\big] $$
 
    ```python
    conv_q = np.fft.ifftn(
@@ -208,19 +211,19 @@ $$\mathrm{Im}[\chi^L(\mathbf{q},\omega)] = \int_{-\omega}^{0} d\epsilon \int\fra
 
 7. **Energy Integration**: Accumulate contributions from all energy points.
 
-   $$ \mathrm{Im}[\chi^L(\mathbf{q},\omega)] = \int_{-\omega}^0 d\epsilon f(\mathbf{q}, \epsilon, \omega) $$
+   $$ \mathrm{Im}[\chi^L(\mathbf{q},\omega)] = -\pi\int_{-\omega}^0 d\epsilon\, f(\mathbf{q}, \epsilon, \omega) $$
 
    ```python
    chi_q_accum += conv_q  # Σ_ε f(q, ε, ω)
    ```
 
-8. **Final Scaling**: Apply prefactor and shift q-grid to centered coordinates.
+8. **Final Scaling**: Apply the $-\pi\,\Delta\epsilon$ prefactor and shift the q-grid to centered coordinates.
 
-   $$ \chi(\mathbf{q}) = -\frac{\Delta\epsilon}{2\pi} \cdot \text{fftshift}(\chi_{\text{accum}}) $$
+   $$ \chi(\mathbf{q}) = -\pi\,\Delta\epsilon \cdot \text{fftshift}(\chi_{\text{accum}}), \qquad \Delta\epsilon = \frac{|\omega|}{n_{\text{eps}}-1} $$
 
    ```python
    chi_q = np.fft.fftshift(chi_q_accum)
-   chi_q = -np.abs(resolution) / (2 * np.pi) * chi_q  # Δε/(2π) prefactor
+   chi_q = -np.pi * d_eps * chi_q  # -π·Δε prefactor, d_eps = |omega_limit| / (n_eps - 1)
    ```
 
 - **Corresponding Code**: `_compute_imag_chi` (CPU) or `_compute_imag_chi_cuda` (GPU).
@@ -255,7 +258,7 @@ The calculation results include two sets of coordinate grids:
 
 - **CPU**: Uses `numpy.ndarray`. Supports pyFFTW for accelerated FFT operations.
   - **pyFFTW Optimization**: When available, uses multi-threaded FFT plans with wisdom caching for repeated calculations.
-  - Memory usage is proportional to `nk^2 * num_wann^2 * n_energy`.
+  - Streaming: both paths process one energy slice at a time, so memory usage is proportional to `nk^2 * num_wann^2` (one spectral slice plus the accumulated q-grid), not to the number of energy points.
 - **GPU**: Uses `cupy.ndarray`.
   - **VRAM Optimization**: The GPU implementation does not store spectral functions for all energy points. Instead, it calculates each $\omega$, transforms it immediately, accumulates to `chi_q_accum`, and then releases VRAM (`mem_pool.free_all_blocks()`).
   - Memory pool limit is set to 75% of available GPU memory (based on 24GB reference).
@@ -323,3 +326,4 @@ print(f"Susceptibility shape: {chi_data.shape}")
 5. **Class Naming**: The class is named `SusceptibilityCalculator_wang2012` to indicate the method follows the approach from Wang et al. (2012).
 6. **pyFFTW Wisdom**: FFTW plans are cached in `fftw_wisdom/` directory for faster initialization on subsequent runs with the same `nk` and `num_wann`.
 7. **GPU Memory Management**: GPU implementation includes automatic memory pool management with periodic cleanup every 20 spectral function computations.
+8. **Sign Convention**: `Im[chi(q, omega)]` uses the standard retarded-Lindhard sign — negative for `omega > 0` particle-hole excitations — with the prefactor `-pi * d_eps`; the k-sum is the unnormalized FFT grid sum (no `1/N_k` or `(2 pi)^-3` factor).

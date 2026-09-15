@@ -20,7 +20,6 @@ from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
 from stm_data_processing.utils.miscellaneous import (
     extend_qpi,
     frac_to_real_2d,
-    k_to_q,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,10 +32,20 @@ class SusceptibilityCalculator_wang2012:
 
     Conventions
     -----------
-    The occupied and unoccupied spectral functions A(k, eps) are projected
-    with the orbital selection matrices minit (initial state) and mfin (final
-    state) via einsum("ac,ijcb->ijab") before the FFT-based convolution,
-    identically on the CPU and GPU paths. The energy integration over
+    Both backends compute the same zero-temperature Lindhard result (the CPU
+    path in _compute_imag_chi and the CUDA path in _compute_imag_chi_cuda)
+
+        Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
+            Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)]
+
+    with the operator spectral function A(k, eps) = i (G^R - G^R^dag) / (2 pi),
+    which is Hermitian positive-semidefinite; the elementwise -Im[G]/pi form
+    coincides with it only when G is complex symmetric (real H(k)). The
+    orbital selection matrices minit (initial state) and mfin (final state)
+    are applied via einsum("ac,ijcb->ijab") before the FFT, and the occupied
+    spectrum is reversed in k (k -> -k, periodic) so that the FFT convolution
+    sum_k Tr[B(k) C(q-k)] evaluates the Lindhard correlation
+    sum_k Tr[B(k) C(k+q)]. The energy integration over
     eps_occ = linspace(-|omega_limit|, 0, n_eps) is weighted by the actual
     grid spacing d_eps = |omega_limit| / (n_eps - 1); the resolution argument
     only sets the nominal point count via
@@ -157,10 +166,19 @@ class SusceptibilityCalculator_wang2012:
 
     # Core math
     def _compute_single_particle_spectra(self, omega):
-        """Compute spectral function A(k, omega) = -Im[G(k, omega)]/pi for all k-points."""
+        """Operator spectral function A(k, omega) = i (G^R - G^R^dag) / (2 pi).
+
+        Hermitian positive-semidefinite matrix form of the spectral function
+        (bug M8 fix), shared by the CPU and CUDA paths. The elementwise
+        -Im[G]/pi form used by the legacy code coincides with it only when G
+        is complex symmetric (real H(k)); with spin-orbit terms G is normal
+        but not symmetric, the elementwise form is not Hermitian, and the
+        difference biases Tr[M A M A].
+        """
         hk_grid = self.hk_grid
         gr_k = self.gf.compute_green(hk_grid, omega)
-        return -self.xp.imag(gr_k) / self.xp.pi
+        gr_dag = self.xp.conj(self.xp.swapaxes(gr_k, -1, -2))
+        return 1j * (gr_k - gr_dag) / (2.0 * self.xp.pi)
 
     def _energy_grid(self, omega_limit: float, resolution: float):
         """Build the occupied/unoccupied energy grids and the integration step.
@@ -195,14 +213,21 @@ class SusceptibilityCalculator_wang2012:
         return n_eps, eps_occ, eps_unocc, d_eps
 
     def _compute_imag_chi_cuda(self, omega_limit: float, resolution: float):
-        """CUDA version of occupied-unoccupied susceptibility calculation.
+        """CUDA version of the zero-temperature Lindhard susceptibility.
 
-        The orbital selection matrices minit/mfin are applied with the same
+        Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
+        Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)] with the operator
+        spectral function A = i (G^R - G^R^dag) / (2 pi) (bug M8 fix). The
+        orbital selection matrices minit/mfin are applied with the same
         einsum("ac,ijcb->ijab") projection as the CPU path before the FFT
         (bug M6 fix), so non-identity selection matrices change the result.
-        The final normalization uses the actual energy-grid spacing
-        d_eps = |omega_limit| / (n_eps - 1) as the integration weight
-        (bug M7 fix), not the requested resolution.
+        The occupied spectrum is reversed in k (k -> -k) so the FFT
+        convolution sum_k Tr[B(k) C(q-k)] becomes the Lindhard correlation
+        sum_k Tr[B(k) C(k+q)] (bug M9 fix). The final normalization uses the
+        actual energy-grid spacing d_eps = |omega_limit| / (n_eps - 1) as the
+        integration weight (bug M7 fix), not the requested resolution, and
+        the -pi prefactor of the zero-T Lindhard formula (bug M10 fix)
+        instead of the legacy -d_eps / (2 pi).
         """
         import cupy as cp
 
@@ -238,6 +263,10 @@ class SusceptibilityCalculator_wang2012:
 
         chi_q_accum = self.xp.zeros((nk, nk), dtype=self.xp.float64)
 
+        # Periodic index reversal i -> (-i) mod nk, used to turn the FFT
+        # convolution into the Lindhard correlation (bug M9 fix).
+        neg_idx = self.xp.asarray(np.concatenate(([0], np.arange(nk - 1, 0, -1))))
+
         # Bug M6 fix: move the orbital selection matrices to the GPU once so
         # the per-energy projection below matches the CPU path exactly.
         minit_gpu = self.xp.asarray(self._minit)
@@ -258,6 +287,11 @@ class SusceptibilityCalculator_wang2012:
             spectra_occ_2d = self.xp.einsum(
                 "ac,ijcb->ijab", minit_gpu, spectra_occ_2d
             )
+            # Bug M9 fix: reverse the occupied spectrum in k (k -> -k,
+            # periodic) so the FFT below evaluates the Lindhard correlation
+            # sum_k Tr[B(k) C(k+q)] instead of the convolution
+            # sum_k Tr[B(k) C(q-k)]. Only the first factor is reversed.
+            spectra_occ_2d = spectra_occ_2d[neg_idx[:, None], neg_idx[None, :], :, :]
 
             spectra_unocc = self._compute_single_particle_spectra(eps_unocc[i])
             spectra_unocc_2d = self.xp.ascontiguousarray(
@@ -308,7 +342,9 @@ class SusceptibilityCalculator_wang2012:
         # Bug M7 fix: weight by the actual grid spacing d_eps instead of the
         # requested resolution (they differ when |omega|/resolution is not an
         # integer).
-        chi_q = -d_eps / (2 * np.pi) * chi_q_accum
+        # Bug M10 fix: the zero-T Lindhard prefactor is -pi * d_eps; the
+        # legacy -d_eps / (2 * pi) was off by a factor of 2 * pi^2.
+        chi_q = -np.pi * d_eps * chi_q_accum
         chi_q = self.xp.asnumpy(chi_q)
 
         mem_pool.free_all_blocks()
@@ -319,13 +355,19 @@ class SusceptibilityCalculator_wang2012:
         return chi_q
 
     def _compute_imag_chi(self, omega_limit: float, resolution: float):
-        """Compute Im[chi(q)] with orbital selection matrices.
+        """Compute Im[chi(q)] on the CPU backend (corrected zero-T Lindhard).
 
-        The orbital selection matrices minit/mfin are applied as
-        einsum("ac,ijcb->ijab") projections on the spectral functions before
-        the FFT. The final normalization uses the actual energy-grid spacing
-        d_eps = |omega_limit| / (n_eps - 1) as the integration weight
-        (bug M7 fix), not the requested resolution.
+        Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
+        Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)] with the operator
+        spectral function A = i (G^R - G^R^dag) / (2 pi) (bug M8 fix). The
+        orbital selection matrices minit/mfin are applied as
+        einsum("ac,ijcb->ijab") projections before the FFT, and the occupied
+        spectrum is reversed in k (k -> -k) so the FFT convolution
+        sum_k Tr[B(k) C(q-k)] becomes the Lindhard correlation
+        sum_k Tr[B(k) C(k+q)] (bug M9 fix). The final normalization uses the
+        actual energy-grid spacing d_eps = |omega_limit| / (n_eps - 1) as the
+        integration weight (bug M7 fix) and the -pi prefactor of the zero-T
+        Lindhard formula (bug M10 fix), not the legacy -d_eps / (2 pi).
         """
         PYFFTW_AVAILABLE = pyfftw is not None
         if not PYFFTW_AVAILABLE:
@@ -337,6 +379,10 @@ class SusceptibilityCalculator_wang2012:
         n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
             omega_limit, resolution
         )
+
+        # Periodic index reversal i -> (-i) mod nk, used to turn the FFT
+        # convolution into the Lindhard correlation (bug M9 fix).
+        neg_idx = np.concatenate(([0], np.arange(nk - 1, 0, -1)))
 
         n_spectra_total = 2 * n_eps
         logger.info(
@@ -402,10 +448,17 @@ class SusceptibilityCalculator_wang2012:
         spectra_count = 0
 
         for i in range(n_eps):
-            spectra_occ = np.asarray(self._compute_single_particle_spectra(eps_occ[i]))
+            spectra_occ = np.asarray(
+                self._compute_single_particle_spectra(eps_occ[i])
+            )
             spectra_occ = spectra_occ.reshape(nk, nk, nw, nw)
 
             spectra_occ = np.einsum("ac,ijcb->ijab", self._minit, spectra_occ)
+            # Bug M9 fix: reverse the occupied spectrum in k (k -> -k,
+            # periodic) so the FFT below evaluates the Lindhard correlation
+            # sum_k Tr[B(k) C(k+q)] instead of the convolution
+            # sum_k Tr[B(k) C(q-k)].
+            spectra_occ = spectra_occ[np.ix_(neg_idx, neg_idx)]
             spectra_count += 1
 
             spectra_unocc = np.asarray(
@@ -461,7 +514,9 @@ class SusceptibilityCalculator_wang2012:
         # Bug M7 fix: weight by the actual grid spacing d_eps instead of the
         # requested resolution (they differ when |omega|/resolution is not an
         # integer).
-        chi_q = -d_eps / (2 * np.pi) * chi_q
+        # Bug M10 fix: the zero-T Lindhard prefactor is -pi * d_eps; the
+        # legacy -d_eps / (2 * pi) was off by a factor of 2 * pi^2.
+        chi_q = -np.pi * d_eps * chi_q
 
         logger.info("[CPU] Susceptibility calculation completed.")
         return chi_q
@@ -579,7 +634,13 @@ class SusceptibilityCalculator_wang2012:
                 mfin=self._mfin,
             )
 
-        q1_grid_orig, q2_grid_orig = k_to_q(self.k1_grid, self.k2_grid)
+        # Bug M11 fix (odd nk): the returned q-grids must match the
+        # fftshifted data pixel by pixel. The linspace-derived labels used
+        # previously (k_to_q) are offset by half a grid step for odd nk; the
+        # discrete FFT frequency grid matches for both parities (same pattern
+        # as bare_lindhard).
+        q_vals = np.fft.fftshift(np.fft.fftfreq(self.nk))
+        q1_grid_orig, q2_grid_orig = np.meshgrid(q_vals, q_vals, indexing="ij")
 
         if q_range is not None:
             chi_q, q1_grid, q2_grid = extend_qpi(
