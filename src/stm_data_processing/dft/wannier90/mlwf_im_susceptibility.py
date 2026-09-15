@@ -45,7 +45,8 @@ class SusceptibilityCalculator_wang2012:
     which is Hermitian positive-semidefinite; the elementwise -Im[G]/pi form
     coincides with it only when G is complex symmetric (real H(k)). The
     orbital selection matrices minit (initial state) and mfin (final state)
-    are applied via einsum("ac,ijcb->ijab") before the FFT, and the occupied
+    are applied before the FFT (the CPU path uses the matmul(M, A) form of
+    the einsum("ac,ijcb->ijab") contraction), and the occupied
     spectrum is reversed in k (k -> -k, periodic) so that the FFT convolution
     sum_k Tr[B(k) C(q-k)] evaluates the Lindhard correlation
     sum_k Tr[B(k) C(k+q)]. The energy integration over
@@ -182,6 +183,18 @@ class SusceptibilityCalculator_wang2012:
         gr_k = self.gf.compute_green(hk_grid, omega)
         gr_dag = self.xp.conj(self.xp.swapaxes(gr_k, -1, -2))
         return 1j * (gr_k - gr_dag) / (2.0 * self.xp.pi)
+
+    def _spectral_from_eigh(self, eigvals, eigvecs, omega):
+        """Operator spectral function A(k, omega) from the eigendecomposition of H(k).
+
+        A = U diag(d) U^dag = V V^dag with d = eta/pi/((omega-E)^2+eta^2) and
+        V = U sqrt(d). For Hermitian H(k) this equals i(G^R - G^R^dag)/(2 pi)
+        from the LU-solve route (same eta); it avoids one batched LU solve
+        per energy point.
+        """
+        d = self.eta / (np.pi * ((omega - eigvals) ** 2 + self.eta ** 2))
+        v = eigvecs * np.sqrt(d)[..., None, :]
+        return np.matmul(v, np.conj(v).swapaxes(-1, -2))
 
     def _energy_grid(self, omega_limit: float, resolution: float):
         """Build the occupied/unoccupied energy grids and the integration step.
@@ -362,9 +375,13 @@ class SusceptibilityCalculator_wang2012:
 
         Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
         Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)] with the operator
-        spectral function A = i (G^R - G^R^dag) / (2 pi) (bug M8 fix). The
+        spectral function A = i (G^R - G^R^dag) / (2 pi) (bug M8 fix); on this
+        CPU path A is built from the eigendecomposition of H(k) as
+        A = U diag(d) U^dag with d = eta/pi/((eps-E)^2+eta^2), which is the
+        same operator as the LU-route form (same eta). The
         orbital selection matrices minit/mfin are applied as
-        einsum("ac,ijcb->ijab") projections before the FFT, and the occupied
+        matmul(M, A) projections (the same contraction as the previous
+        einsum("ac,ijcb->ijab")) before the FFT, and the occupied
         spectrum is reversed in k (k -> -k) so the FFT convolution
         sum_k Tr[B(k) C(q-k)] becomes the Lindhard correlation
         sum_k Tr[B(k) C(k+q)] (bug M9 fix). The final normalization uses the
@@ -393,6 +410,16 @@ class SusceptibilityCalculator_wang2012:
             f"Unoccupied energy range: [{eps_unocc[0]:.3f}, {eps_unocc[-1]:.3f}] eV ({n_eps} points)"
         )
         logger.info(f"[CPU] Total spectral function computations: {n_spectra_total}")
+
+        # One batched eigendecomposition of the cached Hermitian H(k) grid is
+        # enough for every energy point: with H(k) = U diag(E) U^dag, the
+        # Green function is G^R = U diag(1/(eps - E + i eta)) U^dag, so
+        # A = i (G^R - G^R^dag) / (2 pi) = U diag(eta/pi/((eps-E)^2+eta^2)) U^dag
+        # (see _spectral_from_eigh). This replaces one batched LU solve per
+        # energy point with a single O(nw^3) factorization of the whole grid.
+        logger.info("[CPU] Computing batched eigendecomposition of H(k)...")
+        eigvals, eigvecs = np.linalg.eigh(np.asarray(self.hk_grid))
+        logger.info("[CPU] Batched eigendecomposition of H(k) completed.")
 
         chi_q_accum = np.zeros((nk, nk), dtype=np.float64)
 
@@ -451,12 +478,10 @@ class SusceptibilityCalculator_wang2012:
         spectra_count = 0
 
         for i in range(n_eps):
-            spectra_occ = np.asarray(
-                self._compute_single_particle_spectra(eps_occ[i])
-            )
+            spectra_occ = self._spectral_from_eigh(eigvals, eigvecs, eps_occ[i])
             spectra_occ = spectra_occ.reshape(nk, nk, nw, nw)
 
-            spectra_occ = np.einsum("ac,ijcb->ijab", self._minit, spectra_occ)
+            spectra_occ = np.matmul(self._minit, spectra_occ)
             # Bug M9 fix: reverse the occupied spectrum in k (k -> -k,
             # periodic) so the FFT below evaluates the Lindhard correlation
             # sum_k Tr[B(k) C(k+q)] instead of the convolution
@@ -464,12 +489,10 @@ class SusceptibilityCalculator_wang2012:
             spectra_occ = spectra_occ[np.ix_(neg_idx, neg_idx)]
             spectra_count += 1
 
-            spectra_unocc = np.asarray(
-                self._compute_single_particle_spectra(eps_unocc[i])
-            )
+            spectra_unocc = self._spectral_from_eigh(eigvals, eigvecs, eps_unocc[i])
             spectra_unocc = spectra_unocc.reshape(nk, nk, nw, nw)
 
-            spectra_unocc = np.einsum("ac,ijcb->ijab", self._mfin, spectra_unocc)
+            spectra_unocc = np.matmul(self._mfin, spectra_unocc)
             spectra_count += 1
 
             if PYFFTW_AVAILABLE:

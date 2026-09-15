@@ -4,7 +4,7 @@ This document provides detailed information about the `stm_data_processing.dft.w
 
 ## 1. Module Overview
 
-The `SusceptibilityCalculator_wang2012` class uses the Green's function method to calculate the imaginary part of the bare Lindhard susceptibility $\mathrm{Im}[\chi_0(\mathbf{q}, \omega)]$ in reciprocal space by integrating the single-particle spectral function. It supports both CPU (NumPy/pyFFTW) and GPU (CuPy) backends for acceleration.
+The `SusceptibilityCalculator_wang2012` class uses the Green's function method to calculate the imaginary part of the bare Lindhard susceptibility $\mathrm{Im}[\chi_0(\mathbf{q}, \omega)]$ in reciprocal space by integrating the single-particle spectral function. It supports both CPU (NumPy/pyFFTW) and GPU (CuPy) backends for acceleration. The GPU backend requires a CUDA device; on machines without one (e.g. Apple Silicon), the backend automatically falls back to CPU.
 
 **Reference:**
 
@@ -110,11 +110,14 @@ $$H(\mathbf{k}) = \sum_{\mathbf{R}} \frac{e^{i 2\pi \mathbf{R} \cdot \mathbf{k}}
 
 ### 3.2 Retarded Green's Function Calculation $G^R(\mathbf{k}, \omega)$
 
-For each energy point $\omega$, compute the retarded Green's function:
+The retarded Green's function is
 $$G^R(\mathbf{k}, \omega) = (\omega + i\eta - H(\mathbf{k}))^{-1}$$
 
-- **Corresponding Code**: `self.gf.compute_green(hk_grid, omega)`
-- **Formula Details**: Obtained by solving the linear system $ (\omega + i\eta - H) X = I $ for $G^R$.
+The CPU path avoids inverting per energy point: it diagonalizes the Hermitian $H(\mathbf{k})$ once on the k-grid, $H(\mathbf{k}) = U\,\mathrm{diag}(E)\,U^\dagger$, so that
+$$G^R(\mathbf{k}, \omega) = U\,\mathrm{diag}\!\big((\omega - E + i\eta)^{-1}\big)\,U^\dagger$$
+
+- **Corresponding Code**: CPU: `np.linalg.eigh` once inside `_compute_imag_chi` + `_spectral_from_eigh(eigvals, eigvecs, omega)`; CUDA path: `self.gf.compute_green(hk_grid, omega)`
+- **Formula Details**: The CUDA path obtains $G^R$ by solving the linear system $(\omega + i\eta - H) X = I$. Both routes give the same $G^R$ for Hermitian $H(\mathbf{k})$; the eigensystem route is the CPU-path optimization.
 
 ### 3.3 Single-Particle Spectral Function $A(\mathbf{k}, \omega)$
 
@@ -124,9 +127,9 @@ $$ A(\mathbf{k}, \omega) = \frac{i}{2\pi}\left[G^R(\mathbf{k}, \omega) - G^{R\da
 
 It is Hermitian positive-semidefinite. The elementwise form $-\frac{1}{\pi}\mathrm{Im}[G^R]$ coincides with it only when $G^R$ is complex symmetric (real $H(\mathbf{k})$); with spin-orbit coupling the elementwise form is not Hermitian, so the code uses the operator form.
 
-- **Corresponding Code**: `_compute_single_particle_spectra`
+- **Corresponding Code**: CPU: `_spectral_from_eigh` ($A = U\,\mathrm{diag}(d)\,U^\dagger = V V^\dagger$ with $d = \eta/\pi/((\omega-E)^2+\eta^2)$); CUDA: `_compute_single_particle_spectra`
 - **Data Structure**: Hermitian matrix array of shape `(N_k, num_wann, num_wann)` (before trace operation).
-- **Note**: The code retains the matrix-form spectral function for subsequent Wannier index contraction.
+- **Note**: The code retains the matrix-form spectral function for subsequent Wannier index contraction. The eigensystem form is the same operator as $i(G^R - G^{R\dagger})/(2\pi)$ for Hermitian $H(\mathbf{k})$ at the same $\eta$.
 
 ### 3.4 Imaginary Part of Lindhard Function $\mathrm{Im}[\chi^L(\mathbf{q},\omega)]$
 
@@ -165,8 +168,9 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
    $$ A_{\text{occ}}(\mathbf{k}, \epsilon) = A(\mathbf{k}, \epsilon_{\text{occ}}), \quad A_{\text{unocc}}(\mathbf{k}, \epsilon+\omega) = A(\mathbf{k}, \epsilon_{\text{unocc}}) $$
 
    ```python
-   spectra_occ = self._compute_single_particle_spectra(eps_occ[i])  # A(k, ε)
-   spectra_unocc = self._compute_single_particle_spectra(eps_unocc[i])  # A(k, ε+ω)
+   # CPU path: H(k) is diagonalized once before the loop (eigvals, eigvecs).
+   spectra_occ = self._spectral_from_eigh(eigvals, eigvecs, eps_occ[i])      # A(k, ε)
+   spectra_unocc = self._spectral_from_eigh(eigvals, eigvecs, eps_unocc[i])  # A(k, ε+ω)
    ```
 
 3. **Orbital Selection**: Apply $M_{init}$ and $M_{fin}$ matrices via Einstein summation.
@@ -174,8 +178,8 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
    $$ A_{\text{occ}} \leftarrow M_{init} \cdot A_{\text{occ}}, \quad A_{\text{unocc}} \leftarrow M_{fin} \cdot A_{\text{unocc}} $$
 
    ```python
-   spectra_occ = np.einsum("ac,ijcb->ijab", self._minit, spectra_occ)
-   spectra_unocc = np.einsum("ac,ijcb->ijab", self._mfin, spectra_unocc)
+   spectra_occ = np.matmul(self._minit, spectra_occ)    # same contraction as einsum("ac,ijcb->ijab")
+   spectra_unocc = np.matmul(self._mfin, spectra_unocc)
    ```
 
 4. **k-Space Reversal and Fourier Transform**: Reverse the occupied spectrum in k ($\mathbf{k}\to-\mathbf{k}$, periodic) — this turns the FFT convolution into the cross-correlation of the theorem above — then apply the FFT over k-space (axes 0, 1).
@@ -258,6 +262,7 @@ The calculation results include two sets of coordinate grids:
 
 - **CPU**: Uses `numpy.ndarray`. Supports pyFFTW for accelerated FFT operations.
   - **pyFFTW Optimization**: When available, uses multi-threaded FFT plans with wisdom caching for repeated calculations.
+  - **Eigensystem Route**: $H(\mathbf{k})$ is diagonalized once on the k-grid (`np.linalg.eigh`); each energy point then builds $A$ from the eigensystem ($V V^\dagger$) instead of a batched LU solve per energy point.
   - Streaming: both paths process one energy slice at a time, so memory usage is proportional to `nk^2 * num_wann^2` (one spectral slice plus the accumulated q-grid), not to the number of energy points.
 - **GPU**: Uses `cupy.ndarray`.
   - **VRAM Optimization**: The GPU implementation does not store spectral functions for all energy points. Instead, it calculates each $\omega$, transforms it immediately, accumulates to `chi_q_accum`, and then releases VRAM (`mem_pool.free_all_blocks()`).
@@ -275,7 +280,7 @@ The `minit` and `mfin` matrices allow selective orbital contributions to the sus
 
 ## 5. Usage Example
 
-```python src/STM_DataProcessing/examples/calculate_susceptibility.py
+```python
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import SusceptibilityCalculator_wang2012
 import numpy as np
@@ -317,7 +322,7 @@ print(f"Susceptibility shape: {chi_data.shape}")
 
 ## 6. Notes
 
-1. **Backend Configuration**: Controlled via `stm_data_processing.config.BACKEND`. If set to `"gpu"` and `cupy` is installed, CUDA acceleration is automatically enabled. Call `clear_cache()` after switching backend.
+1. **Backend Configuration**: Controlled via `stm_data_processing.config.BACKEND`. If set to `"gpu"` and `cupy` is installed with a usable CUDA device, CUDA acceleration is automatically enabled; without a CUDA device the backend stays on CPU. The CPU path is the recommended one on Apple Silicon (batched eigendecomposition + matmul projections + pyFFTW/Accelerate). Call `clear_cache()` after switching backend.
 2. **Energy Integration Range**: The code defaults to integration range `[-omega_limit, 0]` (below Fermi level).
    - **Physical Basis**: At $T=0$, susceptibility arises from electron-hole excitations. Transitions occur from occupied states ($\epsilon < 0$) to unoccupied states ($\epsilon + \omega > 0$). This constrains the initial energy to $-\omega < \epsilon < 0$.
    - **Implementation**: This ensures only valid transitions across the Fermi level are counted. To adjust, modify the `eps` generation logic in `_compute_imag_chi`.
