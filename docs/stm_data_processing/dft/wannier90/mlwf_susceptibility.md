@@ -1,10 +1,10 @@
 # mlwf_susceptibility.py API Documentation
 
-This document provides detailed information about the `stm_data_processing.dft.wannier90.mlwf_susceptibility` module, including its API usage, data structures, and the underlying physical formulas. This module is primarily used for calculating static Lindhard susceptibility ($\mathrm{Im}[\chi(\mathbf{q, \omega})]$) based on tight-binding Hamiltonians.
+This document provides detailed information about the `stm_data_processing.dft.wannier90.mlwf_susceptibility` module, including its API usage, data structures, and the underlying physical formulas. This module is primarily used for calculating the imaginary part of the frequency-dependent Lindhard susceptibility ($\mathrm{Im}[\chi(\mathbf{q, \omega})]$) based on tight-binding Hamiltonians.
 
 ## 1. Module Overview
 
-The `SusceptibilityCalculator_wang2012` class uses the Green's function method to calculate magnetic susceptibility in real or reciprocal space by integrating the single-particle spectral function. It supports both CPU (NumPy/pyFFTW) and GPU (CuPy) backends for acceleration.
+The `SusceptibilityCalculator_wang2012` class uses the Green's function method to calculate the imaginary part of the bare Lindhard susceptibility $\mathrm{Im}[\chi_0(\mathbf{q}, \omega)]$ in reciprocal space by integrating the single-particle spectral function. It supports both CPU (NumPy/pyFFTW) and GPU (CuPy) backends for acceleration.
 
 **Reference:**
 
@@ -49,7 +49,7 @@ class SusceptibilityCalculator_wang2012:
 - `gf`: `GreenFunction` instance (lazy-loaded).
 - `k_points`: Generated fractional k-point grid coordinates `(N, 3)`.
 - `k1_grid`, `k2_grid`: 2D k-space grid arrays, shape `(nk, nk)`.
-- `q1_grid`, `q2_grid`: 2D q-space grid arrays, shape `(nk, nk)`.
+- `q1_grid`, `q2_grid`: 2D grid arrays, shape `(nk, nk)` (copies of `k1_grid`/`k2_grid`, initialized together with `k_points`).
 - `minit`, `mfin`: Orbital selection matrices, shape `(num_wann, num_wann)`.
 - `xp`: Backend array module (`numpy` or `cupy`).
 
@@ -73,7 +73,7 @@ This is the primary entry point for users, executing the complete susceptibility
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `omega_limit` | `float` | Required | Energy integration limit (eV). Integration range is $[-\vert\text{limit}\vert, 0]$. |
-| `resolution` | `float` | Required | Energy integration step size (eV). |
+| `resolution` | `float` | Required | Nominal energy step (eV). Sets the number of energy points via `n_eps = round(|omega_limit| / resolution) + 1`; the actual integration step is `d_eps = |omega_limit| / (n_eps - 1)`, which is the weight applied to the integral. |
 | `q_range` | `tuple` | `(-0.5, 0.5)` | Cropping range for output q-space. If `None`, no cropping is applied. |
 | `output_path` | `str` | `None` | Optional. If provided, saves results to an HDF5 file. |
 
@@ -237,7 +237,7 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
 
 - **Required Attributes**:
   - `num_wann`: int
-  - `bvecs`: `(3, 3)` reciprocal lattice vector matrix (for converting to real-space q-grids).
+  - `bvecs`: `(3, 3)` reciprocal lattice vector matrix or `None` (used to build the real-space q-grids `qx_grid`/`qy_grid`).
   - `hk(k_points)`: Method returning `(N, num_wann, num_wann)` array.
 
 ### 4.2 Output Grid Coordinates
@@ -245,7 +245,7 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
 The calculation results include two sets of coordinate grids:
 
 1. **Fractional Grids (`q1_grid`, `q2_grid`)**:
-   - Range: Default $[-0.5, 0.5)$ or cropped according to `q_range`.
+   - Range: The discrete FFT frequency grid `fftshift(fftfreq(nq))` — $[-0.5, 0.5)$ for even `nq` — cropped or periodically extended according to `q_range`.
    - Units: Fractional reciprocal lattice units (multiples of reciprocal lattice vectors).
    - Shape: `(nq, nq)`.
 
@@ -261,7 +261,7 @@ The calculation results include two sets of coordinate grids:
   - Streaming: both paths process one energy slice at a time, so memory usage is proportional to `nk^2 * num_wann^2` (one spectral slice plus the accumulated q-grid), not to the number of energy points.
 - **GPU**: Uses `cupy.ndarray`.
   - **VRAM Optimization**: The GPU implementation does not store spectral functions for all energy points. Instead, it calculates each $\omega$, transforms it immediately, accumulates to `chi_q_accum`, and then releases VRAM (`mem_pool.free_all_blocks()`).
-  - Memory pool limit is set to 75% of available GPU memory (based on 24GB reference).
+  - Memory pool limit is set to 75% of the device memory, queried at runtime (`cp.cuda.Device().mem_info`).
   - Suitable for scenarios with large `nk` but limited VRAM.
 
 ### 4.4 Orbital Selection Matrices
@@ -296,7 +296,7 @@ calculator = SusceptibilityCalculator_wang2012(
 # 3. Execute calculation
 results = calculator.calculate(
     omega_limit=1.0,      # integration limit 1.0 eV
-    resolution=0.01,      # energy step 0.01 eV
+    resolution=0.01,      # nominal energy step (eV)
     q_range=(-0.5, 0.5),  # output q range
     output_path="./output/susceptibility.h5"
 )
