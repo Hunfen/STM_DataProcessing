@@ -1,6 +1,6 @@
 # STM Data Processing
 
-STM / DFT / Wannier90 数据处理工具包：从 **Nanonis 扫描隧道显微镜实验数据**到 **Wannier90 紧束缚模型**的理论计算，覆盖准粒子干涉（QPI）、磁化率、能带展开、BTK 超导谱等凝聚态物理常用分析流程。
+STM / DFT / Wannier90 数据处理工具包：从 **Nanonis 扫描隧道显微镜实验数据**到 **Wannier90 紧束缚模型**的理论计算，覆盖准粒子干涉（QPI）、Lindhard 响应函数虚部、能带展开、BTK 超导谱等凝聚态物理常用分析流程。
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://opensource.org/licenses/MIT)
@@ -12,7 +12,7 @@ STM / DFT / Wannier90 数据处理工具包：从 **Nanonis 扫描隧道显微�
   - 任意 k 点的 `H(k)` 批量计算（扁平化 GEMM 收缩，GPU 友好）
   - 二维能带 `E(k)`、Green 函数
   - QPI 准粒子干涉：JDOS（FFT 自相关）、Born 近似（含散射势）、T-matrix 形式
-  - Wang-2012 方法自旋磁化率、轨道选择性裸 Lindhard 函数
+  - Wang-2012 方法 Lindhard 响应函数虚部（Im χ0）、轨道选择性裸 Lindhard 函数
 - **双后端计算**：模块级 CPU（NumPy）/ GPU（CuPy）自动探测与手动切换，GPU 模式下自动按显存容量分批调度
 - **高精度晶格运算**：基于 mpmath 任意精度（默认 50 位）的晶体学约定，支持正/倒格矢互求、超胞/子胞变换、旋转与一致性校验
 - **OpenMX 工具**：能带 / DOS 解析、谱函数展开（unfolding）、Gaussian cube 差分
@@ -96,10 +96,10 @@ born = BornQPI(ham, nk=256, eta=0.005)
 result = born.calculate(energy_range=0.5, V=V)
 ```
 
-### 4. 自旋磁化率（Wang 2012）
+### 4. Lindhard 响应函数虚部（Wang 2012）
 
 ```python
-from stm_data_processing.dft.wannier90.mlwf_susceptibility import (
+from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import (
     SusceptibilityCalculator_wang2012,
 )
 
@@ -149,7 +149,7 @@ src/stm_data_processing/
 ├── dft/
 │   ├── openmx/        # OpenMX：parser / band / dos / unfolding / diff_gcube
 │   └── wannier90/     # Wannier90：mlwf_hamiltonian / mlwf_gk / mlwf_ek2d /
-│                      #            mlwf_susceptibility / bare_lindhard
+│                      #            mlwf_im_susceptibility / bare_lindhard
 ├── stm/               # STM 端：qpi_jdos / qpi_born / qpi_tmat / vortex_num /
 │                      #         preview_plot
 ├── io/                # IO 层：nanonis_loader / w90hr_loader / ek2d_io /

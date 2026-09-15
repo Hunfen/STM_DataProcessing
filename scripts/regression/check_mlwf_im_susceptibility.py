@@ -1,6 +1,7 @@
-"""Regression checks for the corrected mlwf_susceptibility paths.
+"""Regression checks for the corrected mlwf_im_susceptibility paths.
 
-Both backends now implement the same zero-temperature Lindhard result
+Both backends now implement the same zero-temperature imaginary part of the
+bare Lindhard (charge) susceptibility,
 
     Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
         Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)]
@@ -49,11 +50,11 @@ from stm_data_processing.config import set_backend
 # No CUDA device on this machine: force the deterministic CPU path.
 set_backend("cpu")
 
-import stm_data_processing.dft.wannier90.mlwf_susceptibility as ms  # noqa: E402
+import stm_data_processing.dft.wannier90.mlwf_im_susceptibility as ms  # noqa: E402
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import (  # noqa: E402
     MLWFHamiltonian,
 )
-from stm_data_processing.dft.wannier90.mlwf_susceptibility import (  # noqa: E402
+from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import (  # noqa: E402
     SusceptibilityCalculator_wang2012,
 )
 

@@ -1,14 +1,14 @@
-# 磁化率数据 I/O 模块接口文档
+# Lindhard 响应函数虚部 I/O 模块接口文档
 
 ## 模块概述
 
-`susceptibility_io.py` 提供磁化率（Lindhard susceptibility）计算结果的 HDF5 落盘与读取功能。它是 `SusceptibilityCalculator_wang2012.calculate()` 计算模块的保存层，同时负责在读取时重建 q 网格、可选地按 `q_range` 扩展/裁剪，并把分数坐标转换为实空间倒空间坐标。
+`susceptibility_io.py` 提供 Lindhard 响应函数虚部（Im χ0(q,ω)，电荷响应，非磁化率）计算结果的 HDF5 落盘与读取功能。它是 `SusceptibilityCalculator_wang2012.calculate()` 计算模块的保存层，同时负责在读取时重建 q 网格、可选地按 `q_range` 扩展/裁剪，并把分数坐标转换为实空间倒空间坐标。
 
 - **模块路径**：`src/stm_data_processing/io/susceptibility_io.py`
 - **职责**：
-  - `save_susceptibility_to_h5()`：将未扩展的磁化率数组保存到 HDF5（默认网格范围 `[-0.5, 0.5)`）。
+  - `save_susceptibility_to_h5()`：将未扩展的 Im χ0(q,ω) 数组保存到 HDF5（默认网格范围 `[-0.5, 0.5)`）。
   - `load_susceptibility_from_h5()`：读取 HDF5，重建网格，按需扩展，返回与计算模块 `calculate()` 一致的结构。
-- **与计算模块的对应关系**：`dft.wannier90.mlwf_susceptibility.SusceptibilityCalculator_wang2012.calculate()` 在 `output_path` 非空时调用 `save_susceptibility_to_h5()`。
+- **与计算模块的对应关系**：`dft.wannier90.mlwf_im_susceptibility.SusceptibilityCalculator_wang2012.calculate()` 在 `output_path` 非空时调用 `save_susceptibility_to_h5()`。
 
 **设计约定**：HDF5 只保存原始网格 `[-0.5, 0.5)` 的数据（节省空间）；扩展与实空间坐标转换在加载阶段完成。
 
@@ -18,7 +18,7 @@
 
 ### `save_susceptibility_to_h5(...)`
 
-将磁化率结果保存为 HDF5 文件。
+将 Im χ0(q,ω) 结果保存为 HDF5 文件。
 
 ```python
 def save_susceptibility_to_h5(
@@ -38,7 +38,7 @@ def save_susceptibility_to_h5(
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `susceptibility` | `np.ndarray` | 必需 | 磁化率数组，形状 `(nq, nq)`（或更高维） |
+| `susceptibility` | `np.ndarray` | 必需 | Im χ0(q,ω) 数组，形状 `(nq, nq)`（或更高维） |
 | `output_path` | `str` | 必需 | 输出 HDF5 文件路径 |
 | `module_type` | `str` | `"susceptibility"` | 模块类型标识 |
 | `bvecs` | `np.ndarray \| None` | `None` | 倒格矢，形状 `(2,2)` 或 `(3,3)`；非空时保存为 dataset |
@@ -52,7 +52,7 @@ def save_susceptibility_to_h5(
 
 ### `load_susceptibility_from_h5(h5_path, q_range)`
 
-从 HDF5 文件读取磁化率结果。
+从 HDF5 文件读取 Im χ0(q,ω) 结果。
 
 ```python
 def load_susceptibility_from_h5(
@@ -70,7 +70,7 @@ def load_susceptibility_from_h5(
 
 | 键 | 类型 | 形状 | 说明 |
 |----|------|------|------|
-| `data` | `np.ndarray` | `(Nq, Nq)` | 加载（可能已扩展）的磁化率数组 |
+| `data` | `np.ndarray` | `(Nq, Nq)` | 加载（可能已扩展）的 Im χ0(q,ω) 数组 |
 | `q1_grid` | `np.ndarray` | `(Nq, Nq)` | 分数坐标 q1 网格 |
 | `q2_grid` | `np.ndarray` | `(Nq, Nq)` | 分数坐标 q2 网格 |
 | `qx_grid` | `np.ndarray \| None` | `(Nq, Nq)` | 实空间倒空间坐标（1/Å），`bvecs` 缺失时为 `None` |
@@ -99,7 +99,7 @@ def load_susceptibility_from_h5(
 
 | 名称 | 存在条件 | 形状 | 说明 |
 |------|----------|------|------|
-| `susceptibility` | 总是 | `(nq, nq)`（或更高维） | 磁化率数据（未扩展），`compression`/`compression_opts` 压缩 |
+| `susceptibility` | 总是 | `(nq, nq)`（或更高维） | Im χ0(q,ω) 数据（未扩展），`compression`/`compression_opts` 压缩 |
 | `bvecs` | `bvecs is not None` | `(2,2)` 或 `(3,3)` | 倒格矢 |
 
 **Attributes**：
@@ -197,7 +197,7 @@ print(data_ext["q1_grid"].shape)     # 扩展后网格
 | 保存/加载共享同一网格重建逻辑 | ✅ | 均基于 `[-0.5, 0.5)`、`nq`、`extend_qpi`、`frac_to_real_2d` |
 | `module_type` 标识一致 | ⚠️ | `calculate()` 的 metadata 用 `"imag_Lindhard"`；其内部保存调用传入的是 `"Imaginary Lindhard"`（见下） |
 
-**✅ 接口一致性**：`mlwf_susceptibility.calculate()` 内部调用 `save_susceptibility_to_h5()` 时已使用正确的关键字 `output_path=`、`bvecs=`（曾存在 `outpath=`/`bevecs=` 关键字不匹配的历史问题，已修复）。其余 `eta`/`omega_limit`/`resolution`/`nq` 与本函数形参一一对应，`minit`/`mfin` 通过 `**metadata_kwargs` 以属性形式落盘。
+**✅ 接口一致性**：`mlwf_im_susceptibility.calculate()` 内部调用 `save_susceptibility_to_h5()` 时已使用正确的关键字 `output_path=`、`bvecs=`（曾存在 `outpath=`/`bevecs=` 关键字不匹配的历史问题，已修复）。其余 `eta`/`omega_limit`/`resolution`/`nq` 与本函数形参一一对应，`minit`/`mfin` 通过 `**metadata_kwargs` 以属性形式落盘。
 
 ---
 

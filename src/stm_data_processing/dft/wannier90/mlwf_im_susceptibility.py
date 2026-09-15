@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 class SusceptibilityCalculator_wang2012:
-    """Class for calculating Lindhard susceptibility chi0(q) from tight-binding Hamiltonian.
+    """Class for calculating the imaginary part Im[chi0(q, omega)] of the bare
+    Lindhard (charge) susceptibility from a tight-binding Hamiltonian at a fixed
+    energy omega = omega_limit; this is the Wang et al. 2012 method and is
+    neither a magnetic susceptibility nor the static/full chi0(q).
     Accelatration reference:
     DOI: https://doi.org/10.1103/PhysRevB.85.224529
 
@@ -213,7 +216,7 @@ class SusceptibilityCalculator_wang2012:
         return n_eps, eps_occ, eps_unocc, d_eps
 
     def _compute_imag_chi_cuda(self, omega_limit: float, resolution: float):
-        """CUDA version of the zero-temperature Lindhard susceptibility.
+        """CUDA version of the zero-temperature Im[chi0(q, omega)] calculation.
 
         Im chi(q, omega) = -pi * d_eps * sum_eps sum_k
         Tr[M_init A(k, eps) M_fin A(k+q, eps+omega)] with the operator
@@ -604,7 +607,8 @@ class SusceptibilityCalculator_wang2012:
         q_range: tuple[float, float] | None = (-0.5, 0.5),
         output_path: str | None = None,
     ) -> dict[str, Any]:
-        """Calculate static Lindhard susceptibility chi0(q)."""
+        """Calculate the imaginary part Im[chi0(q, omega)] of the bare Lindhard
+        susceptibility at energy omega = omega_limit."""
         nk = self.nk
 
         # Obtain Backend every time.

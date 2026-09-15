@@ -1,6 +1,6 @@
-# mlwf_susceptibility.py API Documentation
+# mlwf_im_susceptibility.py API Documentation
 
-This document provides detailed information about the `stm_data_processing.dft.wannier90.mlwf_susceptibility` module, including its API usage, data structures, and the underlying physical formulas. This module is primarily used for calculating the imaginary part of the frequency-dependent Lindhard susceptibility ($\mathrm{Im}[\chi(\mathbf{q, \omega})]$) based on tight-binding Hamiltonians.
+This document provides detailed information about the `stm_data_processing.dft.wannier90.mlwf_im_susceptibility` module, including its API usage, data structures, and the underlying physical formulas. This module is primarily used for calculating the imaginary part of the frequency-dependent Lindhard susceptibility ($\mathrm{Im}[\chi(\mathbf{q, \omega})]$) based on tight-binding Hamiltonians.
 
 ## 1. Module Overview
 
@@ -19,7 +19,7 @@ DOI: <https://doi.org/10.1103/PhysRevB.85.224529>
 
 ### 2.1 Initialization
 
-```python src/STM_DataProcessing/src/stm_data_processing/dft/wannier90/mlwf_susceptibility.py
+```python src/STM_DataProcessing/src/stm_data_processing/dft/wannier90/mlwf_im_susceptibility.py
 class SusceptibilityCalculator_wang2012:
     def __init__(
         self,
@@ -57,7 +57,7 @@ class SusceptibilityCalculator_wang2012:
 
 This is the primary entry point for users, executing the complete susceptibility calculation workflow.
 
-```python src/STM_DataProcessing/src/stm_data_processing/dft/wannier90/mlwf_susceptibility.py
+```python src/STM_DataProcessing/src/stm_data_processing/dft/wannier90/mlwf_im_susceptibility.py
     def calculate(
         self,
         omega_limit: float,
@@ -277,7 +277,7 @@ The `minit` and `mfin` matrices allow selective orbital contributions to the sus
 
 ```python src/STM_DataProcessing/examples/calculate_susceptibility.py
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
-from stm_data_processing.dft.wannier90.mlwf_susceptibility import SusceptibilityCalculator_wang2012
+from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import SusceptibilityCalculator_wang2012
 import numpy as np
 
 # 1. Load Hamiltonian
@@ -323,7 +323,7 @@ print(f"Susceptibility shape: {chi_data.shape}")
    - **Implementation**: This ensures only valid transitions across the Fermi level are counted. To adjust, modify the `eps` generation logic in `_compute_imag_chi`.
 3. **HDF5 Saving**: If `output_path` is provided, the original un-cropped data is saved to an HDF5 file for subsequent re-cropping or analysis.
 4. **Periodic Boundary Conditions**: Calculation is based on periodic boundary conditions; q-space results are periodic. The `extend_qpi` function handles q-space repetition/expansion.
-5. **Class Naming**: The class is named `SusceptibilityCalculator_wang2012` to indicate the method follows the approach from Wang et al. (2012).
+5. **Naming**: The module is named `mlwf_im_susceptibility` because it computes the imaginary part `Im[chi0(q, omega)]` of the bare Lindhard (charge) susceptibility; the class keeps the name `SusceptibilityCalculator_wang2012` to indicate the method follows Wang et al. (2012).
 6. **pyFFTW Wisdom**: FFTW plans are cached in `fftw_wisdom/` directory for faster initialization on subsequent runs with the same `nk` and `num_wann`.
 7. **GPU Memory Management**: GPU implementation includes automatic memory pool management with periodic cleanup every 20 spectral function computations.
 8. **Sign Convention**: `Im[chi(q, omega)]` uses the standard retarded-Lindhard sign — negative for `omega > 0` particle-hole excitations — with the prefactor `-pi * d_eps`; the k-sum is the unnormalized FFT grid sum (no `1/N_k` or `(2 pi)^-3` factor).

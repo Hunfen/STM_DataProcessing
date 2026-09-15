@@ -26,7 +26,7 @@
 | `mlwf_hamiltonian.py` | [dft/wannier90/mlwf_hamiltonian.md](dft/wannier90/mlwf_hamiltonian.md) |
 | `mlwf_gk.py` | [dft/wannier90/mlwf_gk.md](dft/wannier90/mlwf_gk.md) |
 | `mlwf_ek2d.py` | [dft/wannier90/mlwf_ek2d.md](dft/wannier90/mlwf_ek2d.md) |
-| `mlwf_susceptibility.py` | [dft/wannier90/mlwf_susceptibility.md](dft/wannier90/mlwf_susceptibility.md) |
+| `mlwf_im_susceptibility.py` | [dft/wannier90/mlwf_im_susceptibility.md](dft/wannier90/mlwf_im_susceptibility.md) |
 | `bare_lindhard.py`（算法说明） | [dft/wannier90/static_lindhard_overlap.md](dft/wannier90/static_lindhard_overlap.md) |
 
 ## io
