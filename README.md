@@ -149,7 +149,7 @@ src/stm_data_processing/
 ├── dft/
 │   ├── openmx/        # OpenMX：parser / band / dos / unfolding / diff_gcube
 │   └── wannier90/     # Wannier90：mlwf_hamiltonian / mlwf_gk / mlwf_ek2d /
-│                      #            mlwf_im_susceptibility / bare_lindhard
+│                      #            mlwf_im_susceptibility / lindhard_re_chi
 ├── stm/               # STM 端：qpi_jdos / qpi_born / qpi_tmat / vortex_num /
 │                      #         preview_plot
 ├── io/                # IO 层：nanonis_loader / w90hr_loader / ek2d_io /

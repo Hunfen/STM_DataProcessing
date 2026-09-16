@@ -1,4 +1,23 @@
-"""IO module for saving and loading susceptibility calculation results."""
+"""IO module for saving and loading susceptibility calculation results.
+
+Storage convention
+------------------
+The two susceptibility modules
+(``lindhard_re_chi.RealLindhardCalculator`` and
+``mlwf_im_susceptibility.SusceptibilityCalculator_wang2012``) store the
+*fftshifted* primitive-BZ array, so the q=(0,0) pixel sits at index
+``(nq//2, nq//2)`` and its fractional labels are the discrete FFT
+frequencies ``np.fft.fftshift(np.fft.fftfreq(nq))``.  Those labels are
+exactly the transfer momenta the data pixels were evaluated at, for both
+even and odd ``nq`` (a centered ``linspace`` spanning ``[-0.5, 0.5)`` is
+off by half a cell for odd ``nq``).
+
+No grid array is stored in the file: the loader rebuilds the grid from the
+``nq`` attribute, which makes the file format independent of the grid
+resolution.  The ``module_type`` attribute records which response is
+stored (``real_Lindhard`` / ``imag_Lindhard``) and is identical to the
+``metadata['module_type']`` returned by the calculating module.
+"""
 
 import logging
 from pathlib import Path
@@ -27,7 +46,9 @@ def save_susceptibility_to_h5(
 ) -> None:
     """Save susceptibility results to an HDF5 file.
 
-    Saves unextended susceptibility data with the default [-0.5, 0.5) range.
+    Saves the fftshifted primitive-BZ susceptibility (q=(0,0) at index
+    ``(nq//2, nq//2)``, matching ``fftshift(fftfreq(nq))`` labels).  No grid is
+    stored; :func:`load_susceptibility_from_h5` rebuilds it from ``nq``.
     Extension and real-space coordinate conversion are handled during loading.
 
     Parameters
@@ -101,6 +122,13 @@ def load_susceptibility_from_h5(
 
     Reconstructs grids and optionally extends susceptibility based on q_range.
 
+    The stored data is fftshifted, so the grid is rebuilt as the discrete FFT
+    frequency grid ``fftshift(fftfreq(nq))`` (q=(0,0) at index ``nq//2``), which
+    labels every data pixel exactly for both even and odd ``nq``.  Files written
+    before this convention used a ``linspace`` grid that was off by half a cell
+    for odd ``nq``; they carry the same data and no stored grid, so they are
+    read back with the corrected grid automatically.
+
     Parameters
     ----------
     h5_path : str
@@ -150,7 +178,10 @@ def load_susceptibility_from_h5(
         logger.info("   - Grid size (nq): %d", nq)
         logger.info("   - Module type: %s", module_type)
 
-    q_vals = np.linspace(-0.5, 0.5, nq, endpoint=False)
+    # Discrete FFT frequency grid: the labels of the fftshifted data pixels.
+    # A centered linspace grid spanning [-0.5, 0.5) coincides with this one
+    # only for even nq; for odd nq it is offset by half a cell.
+    q_vals = np.fft.fftshift(np.fft.fftfreq(nq))
     q1_grid, q2_grid = np.meshgrid(q_vals, q_vals, indexing="ij")
 
     if q_range is not None:

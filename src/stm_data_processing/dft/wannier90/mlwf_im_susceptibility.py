@@ -24,6 +24,12 @@ from stm_data_processing.utils.miscellaneous import (
 
 logger = logging.getLogger(__name__)
 
+#: ``module_type`` tag written into the HDF5 attributes and returned in the
+#: metadata dict.  It records which response is stored and is kept identical
+#: between the save call and the metadata of the sibling Re module
+#: (``real_Lindhard`` / ``imag_Lindhard``).
+_MODULE_TYPE = "imag_Lindhard"
+
 
 class SusceptibilityCalculator_wang2012:
     """Class for calculating the imaginary part Im[chi0(q, omega)] of the bare
@@ -651,7 +657,7 @@ class SusceptibilityCalculator_wang2012:
             save_susceptibility_to_h5(
                 susceptibility=chi_q,
                 output_path=output_path,
-                module_type="Imaginary Lindhard",
+                module_type=_MODULE_TYPE,
                 bvecs=self.ham.bvecs,
                 eta=self.eta,
                 omega_limit=omega_limit,
@@ -665,7 +671,7 @@ class SusceptibilityCalculator_wang2012:
         # fftshifted data pixel by pixel. The linspace-derived labels used
         # previously (k_to_q) are offset by half a grid step for odd nk; the
         # discrete FFT frequency grid matches for both parities (same pattern
-        # as bare_lindhard).
+        # as lindhard_re_chi.RealLindhardCalculator).
         q_vals = np.fft.fftshift(np.fft.fftfreq(self.nk))
         q1_grid_orig, q2_grid_orig = np.meshgrid(q_vals, q_vals, indexing="ij")
 
@@ -679,7 +685,7 @@ class SusceptibilityCalculator_wang2012:
         qx_grid, qy_grid = frac_to_real_2d(q1_grid, q2_grid, self.ham.bvecs)
 
         metadata = {
-            "module_type": "imag_Lindhard",
+            "module_type": _MODULE_TYPE,
             "eta": self.eta,
             "omega_limit": omega_limit,
             "resolution": resolution,
