@@ -141,6 +141,46 @@ bvecs = mx.read_bvecs_from_out("system.out")
 diff_cube_files("before.cube", "after.cube", "diff.cube")  # 势差分析
 ```
 
+### 8. FFT Bragg 峰检测与晶格精修
+
+在一张 FFT 图上尽可能多地检出 Bragg 点，给出亚像素 `q`、逐点不确定度与整数指数 `(h,k)`，并对晶格做带全局质量门的约束精修：
+
+```python
+import numpy as np
+
+from stm_data_processing.utils.bragg_peak_detection import (
+    LatticeSpec,
+    detect_bragg_peaks,
+)
+
+# 合成演示：30 nm 场、六方 a = 2 nm 的反射 + 高斯噪声
+n, size_nm = 256, 30.0
+b_px = 4 * np.pi / (np.sqrt(3) * 2.0) / (2 * np.pi / size_nm)   # |b1|，单位 px
+axis = np.arange(n) - n // 2
+xg, yg = np.meshgrid(axis, axis)
+b1 = np.array([b_px, 0.0])
+b2 = b_px * np.array([np.cos(np.pi / 3), np.sin(np.pi / 3)])
+image = np.zeros((n, n))
+for h in range(-2, 3):
+    for k in range(-2, 3):
+        q = h * b1 + k * b2
+        if (h, k) == (0, 0) or np.hypot(*q) > 0.6 * (n // 2):
+            continue
+        image += np.exp(-(np.hypot(*q) / 40.0) ** 2) * np.cos(
+            2 * np.pi * (q[0] * xg + q[1] * yg) / n
+        )
+image += 1.0 * np.random.default_rng(20260917).normal(size=(n, n))
+
+result = detect_bragg_peaks(
+    image, size_nm, lattice=LatticeSpec(a_nm=2.0, symmetry="hexagonal")
+)
+print(len(result.peaks), result.lattice.fit_ok, result.lattice.quality)
+for peak in result.peaks[:3]:                    # 亚像素 q 与不确定度（px）
+    print(peak.index_hk, peak.q_px, peak.sigma_q_px, peak.q_model_px)
+```
+
+要点：`fit_ok=False` 时全部模型声明被收回（`index_hk`/`q_model_px`/affine/形变量为 `None`），只保留诊断量，判决可仅凭 `(result.lattice, result.meta)` 复算；真实数据被拒时先做数据侧提质，**不要**放宽门限。用法、参数与精度数字来源见 [`docs/bragg_peak_detection_usage.md`](docs/bragg_peak_detection_usage.md)，算法与阈值见 [`docs/design/bragg_peak_detection.md`](docs/design/bragg_peak_detection.md)。
+
 ## 模块结构
 
 ```
@@ -154,8 +194,8 @@ src/stm_data_processing/
 │                      #         preview_plot
 ├── io/                # IO 层：nanonis_loader / w90hr_loader / ek2d_io /
 │                      #        lattice_loader / qpi_io / susceptibility_io
-└── utils/             # lattice（高精度）/ lattice_operations / lindhard1dfree /
-                       # btk / miscellaneous / monitor / plot_funcs /
+└── utils/             # lattice（高精度）/ lattice_operations / bragg_peak_detection /
+                       # lindhard1dfree / btk / miscellaneous / monitor / plot_funcs /
                        # nanonis_ppt_generator（自动 PPT 报告）
 ```
 
@@ -172,6 +212,11 @@ npx tauri build --bundles app    # 产物：src-tauri/target/release/bundle/maco
 ## 文档
 
 详细的模块接口文档见 [`docs/stm_data_processing/`](docs/stm_data_processing/)（接口表、数学公式、示例与接口对齐检查清单）。
+
+Bragg 峰检测模块另有两份专门文档：
+
+- [`docs/bragg_peak_detection_usage.md`](docs/bragg_peak_detection_usage.md)：使用指南（API 示例、参数、输出字段、真实数据被拒时的处置、精度数字来源）；
+- [`docs/design/bragg_peak_detection.md`](docs/design/bragg_peak_detection.md)：设计规格（算法栈、公式、质量门推导、基准协议与全部阈值）。
 
 ## 开发
 
