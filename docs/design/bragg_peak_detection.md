@@ -600,9 +600,9 @@ SNR_G      = magnitude[round(q_G)] / sigma_n
 - 场景 SNR 定义：**最强 Bragg 峰的 SNR**（参考峰 = 首环中最强者），通过缩放信号振幅设定（噪声实现固定），`probe_spec_v2.scaled_image` 同此。
 - 真值 q 精确已知：Hann 窗只改变峰形（窗核 ⊛ 包络变换），**不移动峰的解析位置**，故真值就是 `(h,k)@B_ideal@M_true`（PROBE 无噪实测证明：不变量与相位无关，且真值标号拟合残差 1.97e-4）。
 
-### 6.2 指标与通过阈值（阈值 = 本机实测值 + 余量；括号内为 PROBE 实测）
+### 6.2 指标与通过阈值（阈值由设计探针 PROBE 标定；交付实现的对应值见 §6.4 与回归脚本打印）
 
-| # | 指标 | 场景 | 阈值 | 实测 |
+| # | 指标 | 场景 | 阈值 | 实测（设计探针 PROBE） |
 |---|---|---|---|---|
 | M1 | 逐环 recall，环 SNR ≥ 50 | ladder，最强 SNR ≥ 150 | **每环 ≥ 0.95** | 1.000（SNR 199 / 107 / 51 三环） |
 | M2 | 逐环 recall，环 SNR ≥ 15 | 同上 | **每环 ≥ 0.90** | 1.000（SNR 20 环） |
@@ -624,6 +624,8 @@ SNR_G      = magnitude[round(q_G)] / sigma_n
 | M17 | 迭代增益：predict→verify 新增点 | 低 SNR ladder | **≥ 1 个点/次运行**（机制必须真实工作） | 7.5 个点/次（S3） |
 | M18 | 运行时间 | 整个回归脚本 | **≤ 180 s** | 探针 4 场景（含 18 次实现）≈ 90 s |
 | M19 | 晶格质量门（§4.4(e)：G-1/G-2/G-3 合取） | 合成基准四场景 + 失配规格场景 | **合成四场景 `fit_ok=True` 且 `quality="ok"`（实测 χ² 1.34–1.84、rms 0.0594/0.1191/0.2013/0.0931 px、`pool_spacing_px` 16.84–16.85、`consistent_fraction` 1.000）；失配规格场景 `fit_ok=False` 且每个峰 `index_hk is None`** | 新增验收项（不修改任何既有 M 阈值）；真实数据基线见 §6.4 |
+
+> 注：上表"实测"列为**设计探针 PROBE** 的数值，仅用于标定阈值；交付实现的对应实测值为（回归脚本 v5 打印）：`M5` FPR = **0.0101 / 0.0111 / 0.0267**（低 SNR **0.0435**）、`M6` = **0.0197 px**、`M7` = **0.0535 px**（低 SNR 15–50 **0.0514 px**）、`M10` = **0.834 / 0.844**、`M11` ≈ **0.01446 px**（SNR≥50 的 median σ_q）、`M18` ≈ **18 s**（25/25 PASS，预算 180 s）。另附早期口径供对照：`M5` = 0.0200 / 0.0220 / 0.0267、`M7` = 0.0535 / 0.0602 px（取自 t6 期验证报告，该构建早于 v5；与本表阈值无冲突）。阈值列不受此影响、一律未改。
 
 > M1–M4 的**召回按环统计**（同一环内所有点的理论振幅相同；六方环 6 或 12 个点，±q 都计入真值），每环的 SNR 取该环真值位置上 `|F|/sigma_n` 的中位数；只有 **SNR ≥ 阈值的环**参与判定，其余环只需打印（`ladder` 剖面的 0.02 环在最强 SNR=200 时 SNR≈2.9，低于 `min_snr_verify=3.5`，**允许全漏**）。回归脚本必须打印每环的 `(amp, n_truth, SNR_median, recall)` 四元组。实测（§8）：`ladder` 最强 SNR=200 时，SNR 199/107/51/20/8.2 五环 recall 全为 **1.000**，SNR 2.9 环 0.056。
 
@@ -743,7 +745,7 @@ Run from the repository root:
 | 风险 | 处置（已定案） |
 |---|---|
 | real-data 的"真值"不可得（PROJ §4：真实峰是 ~4.5 nm⁻¹ 的大尺度特征，不一定是 1×1/7×7 原子峰） | 真值只在合成场景断言；真实数据只做 smoke 不变量断言（F8）；定量结论全部来自合成成真值 |
-| 无 `LatticeSpec` 时的对称类推断可能误判（首环缺峰） | 推断是 best-effort：候选类并行验证、按"验证通过点数"取胜、平局取 |det B| 大者；结果写入 `meta["inferred_symmetry"]`，用户可用 `LatticeSpec` 覆盖；`affine` 在此路径下为 `None`（避免给出无定义的畸变） |
+| 无 `LatticeSpec` 时的对称类推断可能误判（首环缺峰） | 推断是 best-effort：候选类并行验证后按加权 `χ²_red` 最小者胜、平局取 `|det B|` 大者排序；结果写入 `meta["inferred_symmetry"]`，用户可用 `LatticeSpec` 覆盖；`affine` 在此路径下为 `None`（避免给出无定义的畸变） |
 | 标号模糊性导致 rotation 误读 | 显式输出 `rotation_mod_deg` 与 `rotation_is_absolute`；文档与 docstring 明写"未给参考取向时旋转只到点群模数"；回归按压模数断言 |
 | 弱峰定位误差大（SNR < 15 时 rms₂D 0.22 px） | 逐点 σ_q 如实给出并由 M10 标定；弱峰若与晶格一致应改用 `q_model_px`（M12 要求模型预测优于逐点） |
 | 窗口形状失配（Hann 核非高斯，残差 27.2%） | 用模型地板 0.006 px 覆盖系统项（D9）；不引入窗核模型（non-goal 6） |
@@ -754,7 +756,7 @@ Run from the repository root:
 
 ## 11. 下游交接清单（t5 → t6 → t7）
 
-1. t5 交付：`src/stm_data_processing/utils/bragg_peak_detection.py`（API 与 §5 逐字一致）、`scripts/regression/check_bragg_peak_detection.py`（§7 的 R1–R16 全部实现）；改动范围仅这两个新增文件 + 可选的 `docs/stm_data_processing/utils/bragg_peak_detection.md` 接口文档（如需，按 `docs/stm_data_processing/README.md` 的索引风格）。
+1. t5 交付：`src/stm_data_processing/utils/bragg_peak_detection.py`（API 与 §5 逐字一致）、`scripts/regression/check_bragg_peak_detection.py`（§7 的 R1–R25 全部实现）；改动范围仅这两个新增文件 + 可选的 `docs/stm_data_processing/utils/bragg_peak_detection.md` 接口文档（如需，按 `docs/stm_data_processing/README.md` 的索引风格）。
 2. t5 必须给出：`.venv/bin/python scripts/regression/check_bragg_peak_detection.py` 的 exit 0 实测输出，以及 `ruff check src/stm_data_processing/utils/` 的 `All checks passed!`。
-3. t6 独立验证：复跑回归脚本、复跑既有 8 套 `check_*.py`（不得回归失败）、在 `topo0002.sxm` 上做真实数据实测并记录峰数/`|q|`/σ；对 §6.2 的 M1–M17 与 PROBE 的对应数值做**数量级对账**（若实测优于 PROBE 需说明原因）。
+3. t6 独立验证：复跑回归脚本、复跑既有 8 套 `check_*.py`（不得回归失败）、在 `topo0002.sxm` 上做真实数据实测并记录峰数/`|q|`/σ；对 §6.2 的 M1–M19 与 PROBE 的对应数值做**数量级对账**（若实测优于 PROBE 需说明原因）。
 4. t7 评审：核对实现与本文档逐条一致（特别是 §4.2 噪声/自适应规则、§4.3 界与质量门、§4.4 GLS+迭代、§4.5 三层不确定度、§5 API 字段名与单位），核对 non-goals 未被越界实现。
