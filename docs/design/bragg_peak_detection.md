@@ -685,6 +685,20 @@ Check list:
   (R15) determinism (two runs identical)
   (R16) real-data smoke on 2025-07-09/topo0002.sxm (read-only, [SKIP] if absent)
   (R17) a near-neighbour satellite 6 px from a first-ring peak is resolved
+  (R18) square end-to-end path (the F-1 seed fix)
+  (R19) oblique end-to-end path and the least-distortion gauge (F-6 / A-10 / A-13)
+  (R20) inferred lattice (lattice=None) path (F-7)
+  (R21) field self-consistency (cov_q_px / sigma_q_px, sigma_pred propagation)
+  (R22) degenerate inputs, label rollback and the orientation convention
+  (R23) lattice acceptance gates: pass / reject / opt-out on the synthetic scenarios
+  (R24) gate reporting, meta echo and the accepted inference-oblique case (A-14)
+  (R25) residual units and consistent_fraction (A-15), on both dq baselines
+
+  M19 (the gate acceptance item) is covered by R23 / R24 / R25: R23 checks
+  pass / reject / opt-out on the four synthetic scenarios and the mismatched
+  spec, R24 checks the reported pool_spacing_px / residual_max_px / thresholds
+  against ``meta`` plus the accepted inference-oblique case, and R25 checks the
+  residual units in pixels (two dq baselines) and the two-state identity.
 
 Run from the repository root:
     .venv/bin/python scripts/regression/check_bragg_peak_detection.py
@@ -693,7 +707,7 @@ Run from the repository root:
 
 - 结构：`def check_rN() -> None:` + 裸 `assert`；`main()` 遍历 `checks`，`[PASS]/[FAIL]` 打印，末尾 `RESULT: ALL CHECKS PASSED` 或 `raise SystemExit(1)`。
 - 所有合成场景用 `np.random.default_rng(20260917)`（或片段化固定种子）；真实数据用 `NanonisFileLoader`（`stm_data_processing.io.nanonis_loader`）只读打开；**不 import matplotlib**（避免 MPLCONFIGDIR 噪声）。
-- 运行时间预算 ≤ 180 s；回归脚本必须打印 M1–M18 的**实测数值**（供 t6 抄进验证报告与本文档的数值对账）。
+- 运行时间预算 ≤ 180 s；回归脚本必须打印 M1–**M19** 的**实测数值**（供 t6 抄进验证报告与本文档的数值对账）。
 - 断言阈值全部取 §6.2/§6.3 的数值；**任何阈值都不得放宽**（放宽即视为规格变更，需要重开需求流程）。
 
 ---
