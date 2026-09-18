@@ -1,99 +1,359 @@
 ---
 name: stm-topo-phase-analysis
-description: STM 拓扑图 CSV 全流程处理：Bragg 峰仿射矫正（调用 STM_DataProcessing 的 bragg_peak 包，显式 LatticeSpec，石墨烯 a=0.246 nm、无旋转对称拉伸）、gwyddion/inferno 绘制、r3 Bragg 峰 mask 复数 iFFT 相位分析与 Kekulé 相位提取（6 个 r3 峰分别做，q 由包内 17×17 高斯亚像素定位给出）。当用户提供 STM 拓扑图 CSV 及图像边长（nm），要求矫正、绘图或相位分析时使用。
+description: STM 拓扑图 CSV 的几何矫正与双环相位数学分析：显式参考晶格与可指定的锚定环（1x1 或 r3）、1x1 与 r3 两族同口径的逐反射相位统计（幅度加权圆均值/中位数/半峰宽/簇/幅度/三重积/折叠分布，含 Friedel 恒等式自检与 r0 规范固定）、完整图集（每族 25 张）与一键数学 self-test。只做几何与相位数学，不做物理解释。当用户给出拓扑图 CSV 与图像边长（nm），要求仿射矫正、绘制、或两族环的相位/相位统计时使用。
 ---
 
-# STM Topo CSV → Correction → Phase Analysis
+# stm-topo-phase-analysis（STM 拓扑图：几何矫正 + 双环相位数学，v2）
 
-## 输入
+**范围**：本 skill 只做**几何与相位数学**——峰检测、亚像素定位、对称正定拉伸矫正、圆统计量、
+规范固定、图集与自检。**物理解释由使用者进行**：本 skill 的脚本、图标题、log 与文档都不给出
+物理结论，也不使用任何 k 空间/高对称点类称呼。
 
-- 拓扑图 CSV/txt：正方形数值矩阵，可含 NaN；**第一行 = 扫描起始行 = 图像顶部**
-- 图像边长 L (nm)：正方形扫描
-- 可选：石墨烯晶格常数 a（默认 0.246 nm）、mask 半径百分比（默认 5%）
+两个环只有两个名字，归属只看**半径比**：
 
-## 依赖与执行环境
+| 名字 | 定义 |
+| --- | --- |
+| `ring_1x1` | 参考环：它的六个峰做最小二乘定出晶格原点 r0，相位以它为规范 |
+| `ring_r3` | 半径是 `ring_1x1` 半径的 **1/√3** 的环（容差可配，默认 3 %） |
 
-- 峰检测、亚像素定位、对称正定拉伸矩阵与重采样**全部来自库内包** `stm_data_processing.utils.bragg_peak`（`detect_bragg_peaks` / `correct_bragg_peaks` / `compute_fft2`）；本 skill 只负责读入、预处理（去平面 + 上下翻转）、显式声明参考晶格与绘图
-- 参考晶格必须**显式给出** `LatticeSpec(a_nm=a, symmetry="hexagonal", bvecs_nm_inv=None)`（不做点群自动推断）。**峰检测本身仍走包内数据锚定路径**（`detect_bragg_peaks(..., lattice=None)`：把六方基矢锚在第一环上），再用显式 spec 做几何校正；用 spec 直接做检测会在数据相对理想晶格偏离超过匹配容差时锁到错峰（实测 30 nm 数据：spec 检测把 141 px 的弱峰当 (1,0)，真实 135 px 环漏标；数据锚定则正确标出 134.6/135.3/137.5 px 三峰）。
-- spec 的**取向**取数据自身拟合出的 (1,0) 方向（`lattice_orientation_deg`）：对称拉伸无旋转，若把未旋转的理想基矢直接喂给拟合，取向差会被吸收成假剪切
-- 本机系统 Python 无 numpy/matplotlib，必须在库目录下用 uv 环境执行：
-  `cd /path/to/STM_DataProcessing && uv run python <script> ...`（脚本默认 `--stm-lib` 指向本库 `src`）
-- 字体：**禁用 `text.usetex`**（本机 matplotlib 3.10 + TeX Live 2026 有编码 bug，`$-\pi$` 会被渲成 `hBc\pi`）；用 `mathtext.fontset='cm'` + `font.serif=['Palatino']` 代替
+---
 
-## 流程
+## 1 输入与执行环境
 
-### 第一步：矫正（scripts/stm_topo_correct.py）
+| 项 | 说明 |
+| --- | --- |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部** |
+| 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
+| 参考晶格 | 六方，1x1 晶格常数 `a`（默认 0.246 nm）；**取向取数据自身的 (1,0) 方向**，不做点群推断 |
+| 分隔符 | 自动识别；显式用 `--delimiter ','` / `--delimiter '\t'` |
+| 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`。**不要用 `uv run`**（会写仓库 `.venv`） |
+| 绘图 | `text.usetex=False`（mpl 3.10 + TeX Live 2026 有编码 bug），mathtext cm + Palatino |
 
-```bash
-cd /path/to/STM_DataProcessing
-uv run python skills/stm-topo-phase-analysis/scripts/stm_topo_correct.py \
-    topo0009.txt -L 100 -o data_processing
-# tab 分隔文件（如 20251117_topo4_30nm.csv）加 --delimiter '\t'，逗号 CSV 加 --delimiter ','
-# 需要时用 --peaks Q1X Q1Y Q2X Q2Y 手动指定锚定峰对（q 像素偏移），--list-peaks 打印峰表
-```
-
-步骤：
-1. 读入（默认自动识别 tab/逗号/空白分隔）→ `flipud(subtractMeanPlane(data))`（去平面 + 上下翻转，保证 origin=lower 方向正确）
-2. `detect_bragg_peaks(topo, L, patch_half=8)`：包内完成 Hanning 窗 FFT、径向背景 SNR 峰检测、17×17 高斯亚像素定位、环聚类与晶格拟合/标注（第一环 = 石墨烯 1×1 环）
-3. 取该检测拟合出的 (1,0) 方向作为 spec 取向 → `LatticeSpec(a_nm=a, symmetry="hexagonal", orientation_deg=θ)`
-4. `correct_bragg_peaks(topo, L, lattice=spec, result=<上面的检测>)`：包内用**全部带标签独立峰**加权最小二乘解对称正定拉伸 `M`（纯拉伸、零旋转，`q_obs = q_ideal @ M`，理想基矢按 spec 的 a 与 θ 给出），检查正定性，失败时回退双矢量闭式解并在 `meta` 中记录
-5. 重采样：`scipy.ndimage.affine_transform(order=3, cval=NaN)`，画布由包按变换后的四角 + pad 给出（`n_out`），**校正后视场 = L · n_out / n**（nm/px 尺度不变）
-6. 打印：`|b1|` 校正前实测值 / 理想值、`M`、画布边长、NaN 比例，以及**对校正图重新检测**得到的 `|b1|` 校正后实测值
-
-**可用范围与已知限制**：矫正必须先有**带标签**的晶格，而标号受包内检测自带的容差限制——环聚类要求 60° 三重峰的半径彼此一致到 3 %（`rings._RING_RADIUS_TOL`），`match_labels` 要求峰位与本征 |q| 相差不超过 2 %（另有 2 px 下限）。因此**各向异性大约 ≤ 3 % 才可用**。更强各向异性（以及天生各向异性、没有 60° 三重峰的矩形/方晶格）会连晶格都拟合不出来：`method="identity_fallback"`、`fallback=True`、`n_labelled=0`、`affine_q=affine_image=I`，**什么都没矫正**——此时返回数组只是把原数据重铺到更大的 NaN 画布上（n 为偶数时中心对齐还会落在半像素偏移上：实测 n=512 时 offset=−10.5 px、与原数据最大差 2.04 而信号幅度 0.68；奇数 n 才逐点复原到 1e-15），不要把它当成已矫正图像，日志给出 `no positive-definite stretch; correction skipped`，检测侧给出 `lattice_error="no hexagonal ring found in the candidate set"`；实测 5 %/3 % 各向异性合成几何即落到该回退。该情形**不静默**：`meta` 与警告日志都会显示，本脚本也会打印 fallback 标记——**信任矫正结果前务必先检查 `meta['method']` / 打印的 fallback 标记**。更强各向异性与畸变矩形/方晶格需要宽容差对应路径（路线图 L1，见 `docs/design/bragg_peak_detection.md` 第 9 节）。
-
-输出：
-- `<stem>_corrected.csv` — 矫正后数据（正方形，NaN 填充）
-- `<stem>_corrected_fft2.npy` — 复数 FFT2（complex128，fftshift，DC 居中；NaN 按最佳拟合平面填充后加 Hanning 窗，`subtract_plane=False`）
-- `<stem>_corrected.png` — 拓扑图（gwyddion colormap，origin=lower，NaN 灰色）
-- `<stem>_corrected_fft.png` — FFT 图（inferno + log + 百分位归一化 [5, 99.5]）
-
-### 第二步：相位分析（scripts/stm_phase_analysis.py）
+## 2 第一步：矫正（`scripts/stm_topo_correct.py`）
 
 ```bash
 cd /path/to/STM_DataProcessing
-uv run python skills/stm-topo-phase-analysis/scripts/stm_phase_analysis.py \
-    tmp_verify/bragg_correct/topo0009_corrected.csv -o OUT_DIR --pct 5 --bins 1024
-# 可选 -L/--size-nm 只影响包内检测/标注（FFT 本身与尺寸无关），默认 100
+MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  skills/stm-topo-phase-analysis/scripts/stm_topo_correct.py \
+  INPUT.csv -L 50 -o OUT --a 0.246 --anchor-ring r3 --list-rings
 ```
 
-三种情况（建议输出到独立文件夹并按类分目录）：
-1. **nomask**：直接对复数 FFT2 本身（q 空间）画 amplitude（log, inferno）+ phase（seismic），不做 mask 不做 iFFT
-2. **r3all**：6 个 r3 内圈峰一起 mask，mask 与补集分别复数 `ifft2(ifftshift(...))` → amplitude（log, gwyddion）+ phase（seismic），NaN 灰色，complex128 存 npy
-3. **per-peak（核心）**：6 个 r3 峰**分别**做 Kekulé 相位分析：
-   - r3 峰位置与亚像素 q：由包内 `detect_bragg_peaks(..., patch_half=8)`（17×17 高斯定位器）给出；峰号按 qy 升序（12 点钟起顺时针）r3p0..r3p5
-     ⚠️ **禁止做全局平面修正**：曾用 unwrap+平面拟合扣梯度，拟合吸收 16px 伪梯度，把 Z3 三峰抹平（0.16 vs 0.15 背景）；正确做法是 q 从峰位一次取准，不做任何二次修正
-   - 单峰 mask（半径 p%×N）→ 复数 iFFT → ψ(r) = Δ e^{i(q·r+φ)}
-   - φ(r) = angle(ψ) − q·r (mod 2π)（坐标用居中坐标）
-   - amplitude 加权直方图（360 bins，p50 阈值像素），Z3 标记线 0/2π/3/4π/3
-   - φ(r) 相位图（hsv）
+流程：读入 → `flipud(subtractMeanPlane(...))` → 包内数据锚定峰检测（`bragg_peak.detect_bragg_peaks`）
+→ 取数据自身 (1,0) 方向构造显式 `LatticeSpec` → `correct_bragg_peaks` 对称正定拉伸
+（纯拉伸、零旋转，加权最小二乘，失败时闭式回退并记 `meta`）→ `scipy.ndimage.affine_transform`
+重采样（`order=3`，`cval=NaN`），画布 `n_out`、**矫正后视场 = `L · n_out / n`**。
 
-输出结构（每个峰 r3p{i}，12 点钟为 r3p0，顺时针；文件名与旧版一致）：
-- `r3p{i}_in.png` `r3p{i}_out.png` — mask/补集 amplitude+phase
-- `r3p{i}_mask_{in,out}_ifft.npy` — complex128
-- `r3p{i}_kekule_phi.png` — φ(r) 图 + φ 直方图
-- `r3_peaks_kekule_phi_hist.png` — 6 峰 φ 直方图 2×3 汇总
-- `r3_peaks_kekule_phi_map.png` — 6 峰 φ(r) 图 2×3 汇总
-- `all_cases_phase_histograms.png` — 0/π 直方图（第一行 OUT+nomask，第二行 IN）
-- `nomask.png`、`r3all_in.png`、`r3all_out.png` + `r3all_mask_{in,out}_ifft.npy`
-- `combined_kekule_phi.png`、`combined_theta_field.npy`、`combined_product_psi.npy`
+### 2.1 锚定环必须显式指定（v2 核心）
 
-## 物理要点（Kekulé 分析）
+包内检测把**它认定的第一个环**标成 (1,0)。当 r3 环落在 1x1 环**内侧**（半径比 1/√3）时，
+这个环可能正是 r3 环；若此时按 1x1 给参考晶格，拟合会把 r3 环拉到 1x1 的理想半径上，
+**几何被破坏**。`--anchor-ring` 就是把这个事实说出来：
 
-- **0/π 双峰与 Z3 锁定不冲突**：含 Friedel 对的 iFFT 是实数 ρ₃ = 2|Δ|cos(q·r+φ)，像素相位只有 0（正）/π（负）——实数信号的 Z2 折叠，永远是两值
-- Z3 信息在**单侧**分量：φ(r) 直方图应有 0/2π/3/4π/3 三峰（三 domain 锁定）或单峰（单 domain 主导）
-- 实数测量有 φ → -φ 简并：Friedel 对的两个峰（如 r3p0 与 r3p5）测到的锁定值互补（240° ↔ 120°）
-- ±π 是同一相位被直方图首尾 bin 切开
+| 参数 | 含义 | 参考晶格 |
+| --- | --- | --- |
+| `--anchor-ring 1x1`（默认） | 检测锚定的环是 1x1 环 | `a_ref = a` |
+| `--anchor-ring r3` | 检测锚定的环是 r3 环 | `a_ref = √3 · a` |
 
-## 关键约定
+**报告**（log + `correction_report.json`）：`method` / `fallback` / `n_labelled` / rms、
+检测到的环表（半径 px 与 nm⁻¹、成员数、总幅度）、`|b1|` 矫正前后与理想值的比、
+`|det M|^(1/2)`、画布 `n_out`、矫正后视场与 nm/px、NaN 比例、锚定环反演的晶格常数
+（`a_ref` 与 1x1 的 `a`）。
 
-- 拓扑图统一 gwyddion colormap；FFT 图 inferno；phase seismic；amplitude log 尺度
-- 全程复数 complex128，iFFT 结果不取 `.real`
-- 绘图屏蔽 NaN：`np.where(valid, arr, np.nan)` + colormap `set_bad(grey)`
-- 峰编号按 r3 内圈 12 点钟起顺时针：r3p0..r3p5
-- 参考晶格显式声明：`LatticeSpec(a_nm=a, symmetry="hexagonal")`（a 默认 0.246 nm），不做点群自动推断
+**锚定自检（非循环）**：矫正只把**锚定环**放到理想半径上，所以"矫正后锚定环 = 理想值"不能
+证明锚定正确；判据是**另一族**——正确的锚定会让矫正后两个最强环构成 1 : √3 对。
+脚本给出 `anchor verdict` ∈ {`consistent`, `inconsistent`, `unverifiable`} 并在非 consistent 时
+打 WARNING。实测：正确锚定 `ratio = 1.732311`（偏 0.015 %）→ consistent；错误锚定
+`ratio = 1.957` → inconsistent（另一组几何下矫正后退化为不足两环 → unverifiable）。
 
-## 修改记录
+**已知限制**：矫正需要先有**带标签**的晶格；环半径聚类容差 3 %、`match_labels` 容差 2 %
+决定了可用范围 ≈ 各向异性 ≤ 3 %。超出时包返回 `method="identity_fallback"`、`fallback=True`，
+**什么都没矫正**（数组只是重铺到更大的 NaN 画布上）——脚本会照实打印并打 WARNING，
+**信任结果前先看 `method`/`fallback`**。
 
-2026-09：初版（topo0009 实测流程）；增加 6 峰 Kekulé 相位分析（exact-q 方法，无全局平面修正）。
-2026-09（入库）：skill 移入仓库 `skills/stm-topo-phase-analysis/`，两个脚本改为调用 `stm_data_processing.utils.bragg_peak` 包（峰检测/亚像素定位/对称正定拉伸/重采样），删除各自重复实现的 `detect_peaks`/`gauss2d`/`subpixel_q`/`symmetric_stretch`；矫正脚本新增 `--list-peaks`，相位脚本新增可选 `-L/--size-nm`。矫正流程：包内数据锚定检测 → 取数据 (1,0) 方向构造显式 `LatticeSpec(a_nm=a, orientation_deg=θ)` → 几何校正。
+输出：`<stem>_corrected.csv`、`<stem>_corrected_fft2.npy`（复数 FFT2，含 Hanning 窗与 NaN 平面填充）、
+`<stem>_corrected.png`（gwyddion）、`<stem>_corrected_fft.png`（inferno 对数）、
+`correction.log`、`correction_report.json`。
+
+## 3 第二步：相位分析（`scripts/stm_phase_analysis.py`）
+
+```bash
+cd /path/to/STM_DataProcessing
+MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  skills/stm-topo-phase-analysis/scripts/stm_phase_analysis.py \
+  OUT/INPUT_corrected.csv -o OUT/phase --size-nm-from-log OUT/correction.log \
+  --pct 5 --gate p50 --anchor auto
+```
+
+**约定（全脚本唯一一套定义）**
+
+```
+φ(r) = angle(ψ(r)) − (2π/N) q·(r − c),   ψ = 单反射圆形 mask 的复数 iFFT,  c = N//2
+```
+
+| 量 | 定义（唯一口径） |
+| --- | --- |
+| **逐峰相位（唯一口径）** | **像素集合 = 全画布的全部有效（非 NaN）像素**，权重 `|ψ(r)|`，**不是**实空间圆盘子集、**不是**加门样本：`φ_val = arg Σ_{r ∈ 全画布} |ψ(r)| e^{iφ(r)}`，其中 `φ(r) = angle(ψ(r)) − (2π/N) q·(r − c)`、`c = N//2`、`ψ = 单反射 q 空间 mask 的复数 iFFT`。单 bin mask 时恒等于 `arg X(q) + (2π/N) q·c`（该反射的全局系数；实测 4.8e-12°）；一般情况下它 = 被 mask 覆盖的谱分量解调到画布中心的相干和。实测复现**窗加权成分真值到 0.04°**（本 skill 自测实测 0.0015°）。`p50` 门**只用于分布形状展示**（窗 + 门使居中区域被放大、成分比变 2 % 就让 `3Φ̄` 偏 12°：实测 未加门 128.73° / 门后 141.11° / 窗加权真值 128.77°） |
+| 相位中位数 / IQR / FWHM | **加门**样本（默认 `p50`）的形状描述量；引用必须同时给出 `--gate` |
+| FWHM 两种口径 | `fwhm_deg` = 平滑直方图的半高全宽（默认 2° 圆高斯平滑、0.1° 分箱）；`fwhm_deconv_deg` = 高斯等效去卷积 `√(FWHM² − (2.3548σ)²)`，不满足时为 NaN |
+| 簇数 / 簇心 / 簇宽 | `phasemath.cluster_list`（平滑直方图严格局部极大 ≥ `min_frac`=0.25 倍峰值、抛物线亚分箱、中心 30° 内贪心合并、±15° 窗口内幅度加权圆均值迭代）；**簇宽** = 该簇 ±15° 内样本的幅度加权圆标准差 |
+| 幅度统计 | 未加门的幅度中位数与 FWHM（加门后中位数按定义就是门阈值） |
+| Friedel 对和 | φ(q) + φ(−q)（模 360°）：**实图像 FT 恒等式**，只作自检；管线按**检出的**波矢量配对，故残余受 `|Σq|` 限制（每对都输出 `|Σq|`） |
+| 三独立值 | 波矢和为零的三元组（另一三元组是它的对径镜像）；给出三值、各自 mod 120°、和（mod 360° 与 mod 120°）、镜像值、到 0/120/240 阶梯的距离 |
+| 三重积 θ | 三独立反射的逐像素相位之和（默认把 Σq 投影到零；`--no-project-q` 保留检出值），给 θ 的均值/中位数/R/FWHM/簇数/镜像值/`3θ mod 360°`，并附 `|q_sum|` |
+| 120° 折叠分布 | φ mod 120° 映射回整圆后的中位数/R/FWHM/簇数（对全局 120° 重标号不变） |
+| 集中度 R | 幅度加权圆均值的模长 |
+
+⚠ **两种读法的对照（必须分清，否则数字差几十度）**：同一句"幅度加权圆均值"，把像素集合换成
+**实空间圆盘子集**就是**另一个估计量**——它会采到圆盘内的区域边界内容。在有界区域样本上实测
+（n = 384/512、区域为半径 0.20n 的圆盘、区域相位 0/120°、`ring_r3` 三独立和）：
+
+| 读法 | 3Φ（同一配置） | 与窗加权真值之差 |
+| --- | --- | --- |
+| **全画布（本 skill 采用）** | 73.0892° | **0.0015°** |
+| 实空间圆盘 r = 16 px 子集 | 179.3375° | **106.250°** |
+| **等窗权重**两区域（左右各半、ΔΦ = 120°）全画布 | 178.4483° | **0.0002°** |
+| 同配置的圆盘子集读法 | 179.8855° | +1.437°（同一变体，偏差随几何变） |
+
+独立复核（verifier 自造几何）同向：全画布 +0.024°，其"mask 口径"−52.741° / −58.727° / −58.85°。
+⚠ 偏差的**大小取决于具体像素集合**，三种都是"受限子集"但互不相同：居中实空间圆盘（等权半平面）
++1.4°、居中圆盘（圆盘区域）**+106.25°**、verifier 的 `scope="mask"`
+（= 实空间像素中数组下标落在 **q 空间** mask 圆盘内的那些 ⇒ 一个被 |q| 位移的**偏心**圆盘，只采到单一区域）
+−52.7 ~ −58.9°。**结论不变**：本 skill 用全画布口径；受限子集口径必须写明是哪一种。
+⇒ **引用"相位回收精度"必须同时给出定义（像素集合）、配置（区域几何）与几何参数**；
+本 skill 的回收阈值都标注"单区域 / 全局调制配置"。
+
+**参考环（ring_1x1）的选择**：`--anchor auto`（默认）→ `strongest` → `outer` / `inner` →
+`radius`（配 `--reference-radius-px`），方法学在 `phasepipe.choose_rings` 里，log 打印实际走的路径。
+选定参考环后，**r3 环由参考半径的 1/√3 定位**（`--r3-tol`，默认 3 %）。
+
+**「未检出 r3 圈」分支**：定位不到就**如实输出**——log 写 `ring pair: NOT FOUND`、
+`# the r3 ring is NOT reported ...`，写 `phase_stats.json`（`status="r3_not_found"`）与
+`ring_candidates.csv`，**退出码 2，不画任何图**（不猜、不硬套）。
+
+**规范固定（gauge fix）**：用 `ring_1x1` 六个峰的未加门相位做
+`φ_j = (2π/N) q_j·r0 + c (mod 2π)` 的加权最小二乘（多起点 Gauss–Newton，返回全部局部极小）。
+约定：`φ̃ = φ − (2π/N) q·r0 − c`（**另一符号约定只差一个常旋转**，簇数/FWHM/R 完全相同）。
+
+**原点拟合口径（写进 `phase_stats.json` 的 `gauge.fit_convention` / `triple_fit`）**：本 skill 用
+**六峰**（三对 Friedel，三峰携带 +Φ、镜像携带 −Φ）对**同一个公共偏移 + 一个原点**做最小二乘。
+六个方程只有三个未知量 ⇒ 只有当六条相位能被单一原点表示时残差才为 0；因此**六峰 rms 是模型一致性
+诊断量**（参考环不均匀、畸变、或合成图案的镜像反号都会把它抬起来——自测实测：注入 Φ_ref = 25° 的
+合成图案给 **rms = 25.0000°**）。作为对照同时报 **q-sum-zero 三峰拟合**：它 3 方程 3 未知、
+**rms 恒为 0**（自测实测 0.000e+00°），因此**没有**诊断信息，只用于给出"另一个合法分支"。
+六峰解可以落在离解调中心任意多个**直接点阵**矢量处（解集 = {最佳解} ⊕ 点阵平移）；
+遗留分支把 `ring_r3` 相位移动 `(2π/N) q·L`，而 `3Δ` 与其到阶梯的距离不变。
+
+**报告 r0 必须附全四项**（写进 `phase_stats.json` 的 `gauge`）：
+
+1. **残差 RMS**（`rms_deg`）与参考环六峰 gauge 后偏离 0 的 rms（`reference_rms_deg`）；
+2. **局部极小个数**（`n_minima`）与**分支表**（每个分支的 `r0`、`c`、rms、是否点阵平移）；
+3. **解集说明**：解集 = {最佳 `r0`} ⊕ {参考环的**相位点阵**（`q·L ∈ Nℤ`）}——点阵平移给六条模型
+   相位各加 2π 的整数倍，**残差逐位不变**，拟合永远分不开（结构性退化，不是数值误差）；
+4. **诱导位移律**：点阵平移对另一族每峰的位移是 `(2π/N) q·L`；脚本对当前数据**实测**并输出
+   `induced_shifts_are_multiples_of_120deg`——**不要假定 mod 120° 可比**（理想几何下恰好是 ±120°
+   的整数倍；真实数据上不同解的代表点可相差 ±180°/±171.7°）。
+
+⇒ **跨峰差（spread）与 120° 折叠分布的位置都随分支变**；随分支**严格不变**的只有闭合和
+（三独立相位之和、逐像素 θ）与每峰分布形状（R/FWHM/簇数/簇宽）。
+
+**随原点漂移的量（自检实测，报告漂移率与残差）**：单峰原始相位按
+`φ → φ − (2π/N) q·δ` 漂移（精确律残差 < 1e-9°；在加了窗的真实画布上同样成立、残差 0.003°，
+实测漂移率可达 **20.2 °/px**）；**严格不变的量**：逐像素三重积 θ（0.0000°）、集中度 R、
+加门后 FWHM、簇数；gauge 后相位只对**同一分支**不变（换分支则按上面的诱导位移律移动）。
+另外，固定平移 0.003 px / 0.05 px / 1 px / 一个点阵矢量对单峰相位的位移分别是
+**0.14° / 2.50° / ±43.56° / ±180.0°**（解析与实测一致）——**跨讨论引用单峰绝对相位必须附分支与系统带**。
+
+**单峰绝对相位的系统带**：由参考环残差反推逐峰散布 `σ_peak ≈ RMS_res/0.707`，
+再除以 3 得 √3 配对反射的系统带（精确关系 `std(Δφ_r3) = σ_peak/3`）；
+真实数据示例：`RMS_res = 10.39° → 带 ≈ 4.9°`、`23.75° → 带 ≈ 11.2°`。该带**不随像素数下降**。
+
+**峰位不确定度与 θ 的斜坡**：混合相位会让检出的峰位偏移（单区合成 0.019 px，两区 ΔΦ=120° 合成
+**0.911 px**）；脚本输出每族的**六边形残差**（`hexagon_residual_rms_px` / `..._max_px`）与
+`|Σq|`，并给「若不投影，θ 会被跨画布斜坡拉开多少度」（`theta_ramp_span_deg_if_unprojected`）。
+默认 `--project-q` 把三独立波矢之和**投影到零**，去掉净斜坡；但**不清除逐峰偏置**，
+所以引用 θ 时要同时看 R/簇数是否退化。
+
+**三重积的镜像二义**：另一闭合三元组是当前三元组的对径，故**有符号 θ 与 `3θ mod 360°` 会镜像**
+（实测 353.26° ↔ 6.74°、345.23° ↔ 14.77°），而**到 0/120/240 阶梯的距离不变**——
+脚本对每一条 θ 输出同时给出镜像值，引用有符号值必须写明选取规则。
+
+**多成分判别边界（纯数学结论，self-test 实测）**：
+
+| 配置 | 相干度 | 三独立值和 | 簇数 | 说明 |
+| --- | --- | --- | --- | --- |
+| 1 个成分 | 1.000 | 落在 0/120/240 阶梯上 | 1 | 恒等 |
+| 2 个**等权**成分、相差 120° | 0.500 | **离阶梯 60°** | 2 | 「和 ≈ 0」不成立 ⇒ 它是**值域判别** |
+| 3 个等权成分 0/120/240 | 0 | 相量相消、相位无意义 | — | 守门量是**幅度/相干度** |
+| 2 个成分 98 %/2 %（相差 120°） | 0.970 | 离阶梯 **3.07°** | **1** | 和能看见、簇数看不见 |
+| 2 个成分 70 %/30 % | 0.615 | 离阶梯 46.9° | 2 | 两者都能看见 |
+
+定量边界：`(1−f, f)` 两成分相距 120° 时，离阶梯距离 ≈ `3f·sin120°`（小 f），
+**5° 交点 f = 0.0319**；管线实测（窗加权份额 `f_w` = 0.0312 / 0.2930）分别给
+`3Φ̄ = 4.875° / 73.086°`，与窗加权相量真值一致到 **0.0014°**。
+⇒ **簇数回答"有几个相位"，相干度回答"峰还在不在"，「和 ≈ 0」只回答"加权圆均值是否落在阶梯附近"**，
+三者不可互相替代。
+
+## 4 输出与**图集清单（交付契约）**
+
+非图产物：`phase_stats.json`（所有数字的唯一来源）、`phase_stats.csv`（逐峰表）、
+`phase_relations.csv`（Friedel 对/三独立和/三重积）、`phase_ring_comparison.csv`（两族对照表）、
+`ring_candidates.csv`、`phase_stats.log`、`atlas_manifest.json`。
+
+**图集：每族 25 张（`ring_1x1` 25 + `ring_r3` 25），两族共 50 张**（`--no-figures` 关闭）；
+每个数据集独立成一套 50 张，端到端测试对两个数据集各跑一轮（合计 100 张）。文件名与张数如下，写死在
+`stm_phase_analysis.py` 顶部（`PER_PEAK_FIGURES` / `SUMMARY_FIGURES` / `FIGURES_PER_RING`），
+manifest 与 `phase_stats.json` 的 `atlas` 段同时声明 25/族。
+
+| # | 文件名模式（`RING` = `ring_1x1` 或 `ring_r3`，`i` = 0…5；**即脚本实际产出的命名，不改名**） | 面板（manifest 的 `panels` 字段逐字声明） |
+| --- | --- | --- |
+| 1 | `RING_p{i}_mask_in.png` | `["amplitude (log)", "phase"]` |
+| 2 | `RING_p{i}_mask_out.png` | `["amplitude (log)", "phase"]` |
+| 3 | `RING_p{i}_phi_dist.png` | `["phi(r) map", "phi distribution"]` —— **逐峰 φ(r) 相位图就是这张图的左面板**（与 v1 的逐峰 map+直方图合图同构），不是缺失的独立文件 |
+| 4 | `RING_qspace_mask.png` | FFT2 对数幅度 + 该族六个 mask 圆 |
+| 5 | `RING_mask_all_in.png` | 六峰一起 mask 的场：幅度 + 相位 |
+| 6 | `RING_mask_all_out.png` | 上述 mask 的补集场：幅度 + 相位 |
+| 7 | `RING_case_phase_histograms.png` | 0/π 相位直方图三联：FFT2、mask OUT、mask IN |
+| 8 | `RING_phi_hist_summary.png` | 六峰 φ 分布 2×3 汇总（每格标题带中位数） |
+| 9 | `RING_phi_map_summary.png` | 六峰 φ(r) 图 2×3 汇总 |
+| 10 | `RING_theta_field.png` | 三重积 θ(r) 图 + θ 分布（参考线同下） |
+
+**相位直方图的参考线约定**：所有 φ 分布与 θ 分布面板的 x 轴标签写明
+`2 pi k / 3, k = 0,1,2 = 0/120/240 deg`（虚线即这三条线，另加 `pi` 刻度仅作读图参考）——
+不出现任何 k 空间/物理称呼。文件名、图标题、脚本 title/label 只用 `ring_1x1` / `ring_r3` 与数学量名。
+
+**manifest 条目模式（逐字段，`atlas.py --check` 逐项核对；`kind`/`ring`/`peak` 即命名规则）**
+
+| 字段 | 取值 / 含义 |
+| --- | --- |
+| `file` | PNG 文件名（`^RING_(p[0-5]_(mask_in|mask_out|phi_dist)|qspace_mask|mask_all_in|mask_all_out|case_phase_histograms|phi_hist_summary|phi_map_summary|theta_field)\.png$`） |
+| `ring` | `ring_1x1` 或 `ring_r3` |
+| `kind` | `per_peak`（六峰各自的图，`peak` = 0…5）或 `summary`（每族 7 张汇总，`peak` = `null`） |
+| `peak` | 峰号 0…5（`kind=per_peak`），汇总图为 `null` |
+| `panels` | 该图面板的自左向右（网格则逐行）名称表，见上表 |
+| `size_px` | `[width, height]`，与 PNG 实际尺寸一致 |
+| `label` / `annotation` / `title` | 人类可读前缀 / 取整后的注解数字 / `label + " \| " + annotate(annotation)` |
+| `paths` | 每个注解字段在 `phase_stats.json` 里的点分路径 |
+
+**图-数字契约（可程序化核对，不需要 OCR）**：每张图的标题由**一份注解字典**渲染
+（`atlas.annotate`，字段顺序由 `atlas.FIELD_ORDER` 规范固定，与字典插入顺序无关），同一份字典写入
+① 图标题、② `atlas_manifest.json` 的 `figures[]`（含 `file` / `size_px` / `label` / `annotation` /
+`title` / `paths`）、③ PNG 的 `tEXt` 块 `stm-atlas`（JSON）。`paths` 指向 `phase_stats.json` 的
+点分路径，注解值是该 JSON 数字按打印位数取整的结果（核对容差 = 半个末位）。
+第三方可用**一条命令**独立复核：
+
+```bash
+.venv/bin/python skills/stm-topo-phase-analysis/scripts/atlas.py \
+  --check OUT/phase/atlas_manifest.json --stats OUT/phase/phase_stats.json \
+  --expected-figures 50 --expected-per-ring 25
+```
+
+命令逐张检查：存在、非零、PIL 可开且尺寸与 manifest 一致、PNG 内嵌注解（含 `panels`）= manifest、
+标题 = 注解字典的渲染、注解数字 = `phase_stats.json` 对应路径的数字（末位半单位容差）、
+`kind`/`peak` 自洽、`panels` 非空、总数与每族张数自洽。
+**self-test 与端到端冒烟都真的以命令行方式调用它**（不是"有能力但没跑"）：self-test 里
+`atlas.py --check ... --expected-figures 50 --expected-per-ring 25` 断言退出码 0 且 stdout 含
+`ATLAS CHECK PASSED`；`e2e_scratch/run_smoke.sh` 对**两个数据集各跑一轮完整分析**并各审一次图集，
+最后打印「每族 25 张 / 单数据集 50 张 / 两数据集合计 100 张」的实际计数。
+
+**命名规则**：文件名、图标题、脚本 title/label 只用 `ring_1x1` / `ring_r3` 与数学量名；
+相位直方图的参考线一律是数学阶梯 `2πk/3`（0/120/240°），不使用任何 k 空间/物理称呼。
+
+## 5 一键 self-test
+
+```bash
+cd /path/to/STM_DataProcessing
+MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python skills/stm-topo-phase-analysis/scripts/selftest.py
+# 可选：--quick（跳过端到端阶段，约 20 s）、--workdir DIR、--size N、--keep
+```
+
+覆盖与验收阈值（实测 **69/69** 通过，全程约 3 min；`--quick` 约 25 s）。
+**两类量的阈值分开定**（与 §3 的口径一致）：
+
+| 类 | 量 | 验收阈值 |
+| --- | --- | --- |
+| **稳健量** | 三独立相位之和（注入 30° → 期望 3×30°） | ≤ 0.5° |
+| | 集中度 R | ≤ 0.01 |
+| | 加门 FWHM | ≤ 0.5° |
+| | 逐像素三重积 θ | ≤ 1° |
+| **参考量** | 单峰绝对相位 | **只要求落在系统带 `σ_peak/3` 内**（`σ_peak` 由参考环残差反推），**不设小误差阈值** |
+
+检查清单：
+
+1. **圆统计量**：加权圆均值；圆中位数 = L1 目标精确极小（暴力网格，残差 < 1e-9）；退化样本
+   （对径等权）极小集宽度 360° 被标记；高斯样本去卷积 FWHM = 2.3548σ（1 %）；双成分簇心/权重。
+2. **Fourier 恒等式**：解调约定（9 个平面波，< 0.01°）；**Friedel**（< 1e-6°）；
+   **掩膜代数** `ψ_in + ψ_out = ifft2(ifftshift(FFT2))`（相对残差 < 1e-12）；
+   **规范变换律**（参考点平移 δ 加常数 `−(2π/N)q·δ`：在**解调场上实测**、非代数恒等式，< 1e-10°，
+   实测 7.1e-12°；另附**反面控制**——把预言换成扰动 δ+(0.5,0.5) px 后同一比较给 127.765°，
+   证明该断言**可失败**）；单区三独立和与逐像素三重积 = 3Φ（< 0.5°）。
+3. **gauge 漂移**：单 bin 平面波平移 → 相位严格按 `−(2π/N)q·δ`（残差 < 1e-9°）、
+   基准解的 `r0 − δ` 精确解释平移后的相位（< 1e-9°）；加窗真实画布上漂移率与残差实测报告；
+   gauge 后 mod 120°（< 0.05°）、θ（< 0.5°）、R/FWHM/簇数不变。
+4. **逐峰相位定义（像素集合）**：单 bin 平面波证明「相位值 = 全画布幅度加权圆均值
+   = `arg X(q) + (2π/N)q·c`」（4.8e-12°）；有界两区域样本上，全画布读法与窗加权真值差 **0.0015°**，
+   而实空间圆盘子集读法（同一估计量、不同像素集合）差 **106.25°**；**等窗权重**两区域
+   （左右各半、ΔΦ=120°、窗权重 0.5026/0.4974）全画布差 **0.0002°**，同配置圆盘子集读法
+   +1.44°（该变体的偏差随几何变：+1.44° / −52.7° / −58.7° / +106.25°，见 §3 表）——反例按 §3
+   的几何逐项记录；原点拟合口径：六峰 rms **25.0000°** vs q-sum-zero 三峰 **0.000e+00°**。
+5. **注入相位回收 + 阈值分档**（配置：**单区域 / 全局调制**，n = 384，`ring_1x1` r = 175.88 px、
+   `ring_r3` r = 101.54 px，q-mask 19 px）：注入 30° → 稳健量按上表回收（实测 `|ΔΣφ − 90°| = 0.015°`、
+   `|Δθ − 90°| = 0.023°`、`ΔR = 3e-6`、`ΔFWHM = 0.0000°`，阈值 0.5/1/0.01/0.5）；
+   单峰绝对相位实测偏离 0.011°，对照系统带 0.211°（σ_peak = 0.633°，来自人为加入的 0.5 px
+   峰位抖动）——**只判「在带内」**。
+6. **稳健量 vs 单峰绝对相位（t6 结论）**：相位点阵 `q·L ∈ Nℤ` 在六个反射上闭合（7.8e-16）；
+   四个点阵平移下残差逐位不变（变化 5.3e-15°，结构性退化）；点阵平移对 r3 的诱导位移
+   `(2π/N)q·L` 与公式逐项一致（本理想几何实测恰为 [120, 240, …]°，脚本对每组数据**实测并输出**
+   `induced_shifts_are_multiples_of_120deg`，**不假定** mod 120° 可比）；镜像对
+   353.26↔6.74、345.23↔14.77 的阶梯距离不变。
+7. **多成分判别边界**：见 §3 表；管线实测与窗加权相量真值差 < 0.1°（实测 0.0014°）。
+8. **环定位分支**：`auto/radius` 的 1/√3 定位、参考半径过远、无配对环、最内环即 r3 —— 四个分支；
+   峰编号从 12 点钟起顺时针（步长 −60°）。
+9. **端到端**：真跑两次完整管线（**先断言第二次运行的返回码**，再读它的产物；未产出时如实判 FAIL 而不是抛 traceback）→ 图集清单断言（50 张、命名模式、PIL、注解 = JSON）、
+   **确定性**（两次运行图逐像素相同、PNG 甚至逐字节相同、JSON 数字相同）、log 数字 = JSON 数字、
+   缺 r3 分支（退出码 2、有明确信息、0 张图）。
+10. **矫正阶段**（能 import 包时）：注入 2 % 各向异性 → 回收 `M = [[1.00995, −0.00006],
+   [−0.00006, 0.98994]]`、`|det M|^(1/2) = 0.99990`、反演 `a = 0.2460 nm`；
+   锚定自检 consistent；错误锚定被判 not consistent。
+
+## 6 变与不变（引用任何一个数字前请读）
+
+**默认只引用稳健量**（t6 结论，写进本 skill 的引用规则）：
+
+| 类 | 量 | 对图像原点 / 对 r0 分支 |
+| --- | --- | --- |
+| **稳健量（可以直接引用、跨约定比较）** | Friedel 对和 | 不变（恒等式，实测 ≤2.8e-8°） |
+| | 三独立相位之和、逐像素三重积 θ | **精确不变**（Σq = 0 时；实测 ≤1e-14°，真实数据 7 个解下 0 ± 0.08°，残差来自检出 q 的 \|Σq\|） |
+| | 每峰分布形状（R / FWHM / 簇数 / 簇宽） | 不变（整体平移；实测 ΔR ≤1.3e-9、簇数相同） |
+| | 幅度与相干度 | 不变（守门量：相消时相位无意义） |
+| **参考量（必须附条件）** | 单峰绝对相位 | **随分支变**：点阵平移给 `(2π/N)q·L`；固定平移 0.003/0.05/1 px 给 0.14°/2.50°/±43.56°，一个点阵矢量给 ±180.0° |
+| | 三峰 spread、跨峰合并 / 120° 折叠分布的**位置** | 随分支变（诱导位移一般不是 120° 的整数倍） |
+
+引用单峰绝对相位时必须写明：`r0` 用的是解集里的**哪一个分支** + 由参考环残差反推的**系统带
+`σ_peak/3 ≈ RMS_res/2.12`**（真实数据示例 10.39° → 4.9°、23.75° → 11.2°）。
+
+* **随图像原点漂移**：单峰原始相位按 `φ → φ − (2π/N) q·δ` 线性漂移（大 |q| 时每像素可达几十度，
+  实测 20.2 °/px）；闭合和与分布形状不受影响。
+* **依赖口径**：FWHM（平滑/分箱口径）、簇宽（窗口口径）、幅度统计（是否加门）、
+  成分权重（**窗加权**而非面积权重：Hanning 窗中心 1、边缘 0，居中区域被放大，实测面积 20 %
+  的居中盘窗加权后为 41 %）。
+* **门是一种隐式空间选择**：`p50` 门偏向画布中心，门后的相位和最多可与全区差 12°。
+  相位**值**用未加门的加权圆均值，门后的分布只用来描述形状。
+
+## 7 不随本 skill 落盘的方法学附件
+
+`origin_space.py`（r0 解集与不确定度传播的纯数学脚本）**不属于本 skill 的落盘内容**——它是方法学
+研究附件，源头在 `data_processing/phase_reanalysis/_methods/`。它的四个结论已被本 skill 吸收进
+本文档：解集 = {最佳 r0} ⊕ 参考环相位点阵（点阵平移残差逐位不变，§3 gauge 段）、原点误差传播
+`std(Δφ) = σ_peak·|q|/(√3 R1)`（对 1/√3 对退化为 `σ_peak/3`，即 §3 的系统带）、Σq = 0 的闭合和
+与原点无关、分布形状/R/FWHM/簇数与平移无关（§6 的稳健量清单）。需要重跑该附件时在 `_methods/`
+里运行它，本 skill 目录不含该脚本。
+
+## 8 修改记录
+
+2026-09（v1）：初版（topo0009 实测流程），六峰相位分析。
+2026-09（v1 入库）：脚本改为调用 `stm_data_processing.utils.bragg_peak` 包。
+2026-09（v2，本版）：见 `CHANGES.md`——锚定环显式化（`--anchor-ring`）、两族同口径双环分析、
+r3 由 1/√3 定位与「未检出」分支、唯一的相位估计量定义 + 分布描述量分离、
+Friedel/三独立/三重积/折叠分布/R 全套、图集清单与图-数字契约、一键 self-test、
+命名中性化、`phasepipe`/`phasemath`/`atlas` 三个模块入库。
