@@ -50,12 +50,15 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import affine_transform
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from stm_data_processing.utils.bragg_peak import (  # noqa: E402
+    LatticeSpec,
     compute_fft2,
+    correct_bragg_peaks,
     detect_bragg_peaks,
     gls_fit,
     hexagon_basis,
@@ -80,6 +83,9 @@ WEAK_ANNULUS = (1.2, 3.0)
 WEAK_MIN_PEAKS = 4
 RUNTIME_LIMIT_S = 60.0
 EVIDENCE_DIR = ROOT / "tmp_verify" / "bragg_rewrite"
+CORRECTION_DIR = ROOT / "tmp_verify" / "bragg_correct"
+# Array-axis swap between physical (x, y) and array (row, col) order.
+_AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
 
 CASES = (
     {
@@ -129,7 +135,13 @@ def shell_index(peak) -> int:
 # R1: synthetic ground truth
 # ---------------------------------------------------------------------------
 def synthetic_image(
-    n: int, size_nm: float, a_nm: float, seed: int = 20260918, orientation_deg: float = 0.0
+    n: int,
+    size_nm: float,
+    a_nm: float,
+    seed: int = 20260918,
+    orientation_deg: float = 0.0,
+    matrix=None,
+    symmetry: str = "hexagonal",
 ):
     """Real-space image of a hexagonal lattice plus Gaussian noise.
 
@@ -137,14 +149,20 @@ def synthetic_image(
     ``qy > 0`` or ``qy == 0`` with ``qx > 0``), so every reflection carries its
     deterministic amplitude ``1/(1 + h^2 + k^2 + hk)`` and no pair can partially
     cancel, as independent phases per half-plane representative would allow.
-    ``orientation_deg`` rotates the reciprocal basis counter-clockwise.
+    ``orientation_deg`` rotates the reciprocal basis counter-clockwise,
+    ``matrix`` applies a reciprocal-space distortion ``q -> q @ matrix`` (the
+    distorted lattice an STM image shows after a sample stretch) and
+    ``symmetry`` selects the hexagonal (default) or square basis.
 
     Returns ``(image, truth)`` where ``truth`` maps the shell index to the true
     (qx, qy) positions in FFT pixels (half-plane representatives only).
     """
     rng = np.random.default_rng(seed)
-    b1 = 4.0 * np.pi / (np.sqrt(3.0) * a_nm)
-    basis = b1 * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
+    if symmetry == "square":
+        basis = 2.0 * np.pi * np.array([[1.0, 0.0], [0.0, 1.0]]) / a_nm
+    else:
+        b1 = 4.0 * np.pi / (np.sqrt(3.0) * a_nm)
+        basis = b1 * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
     theta = np.radians(float(orientation_deg))
     rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
     basis = basis @ rot.T
@@ -157,11 +175,13 @@ def synthetic_image(
             if (h, k) == (0, 0):
                 continue
             q_px = np.asarray([h, k], dtype=float) @ basis * pixels_per_nm_inv
+            if matrix is not None:
+                q_px = q_px @ np.asarray(matrix, dtype=float)
             if float(np.hypot(*q_px)) > 0.9 * (n // 2):
                 continue
             if not (q_px[1] > 0.0 or (q_px[1] == 0.0 and q_px[0] > 0.0)):
                 continue
-            shell = h * h + k * k + h * k
+            shell = h * h + k * k + (0 if symmetry == "square" else h * k)
             phase = float(rng.uniform(0.0, 2.0 * np.pi))
             image += np.cos(
                 2.0 * np.pi * (q_px[0] * cols + q_px[1] * rows) / n + phase
@@ -238,62 +258,91 @@ def run_synthetic(n: int = 512, size_nm: float = 30.0, a_nm: float = A_NM) -> No
     check("R1.6 deterministic re-run", deterministic, "positions bit-identical")
 
 
+def _sweep_case(n, size_nm, a_nm, angle, seed, true_b1):
+    """One R1.7 case: detect a rotated lattice and check the first-ring labels.
+
+    Returns ``(ok, |b1| relative error, worst ring-member residual in px)``.
+    """
+    image, _ = synthetic_image(n, size_nm, a_nm, seed=seed, orientation_deg=angle)
+    result = detect_bragg_peaks(image, size_nm)
+    first = [
+        peak
+        for peak in result.peaks
+        if peak.index_hk is not None and shell_index(peak) == 1
+    ]
+    labels = sorted(peak.index_hk for peak in first if peak.independent)
+    fitted = (
+        float(np.hypot(*result.lattice.bvecs_nm_inv[0]))
+        if result.lattice is not None
+        else 0.0
+    )
+    b1_error = abs(fitted - true_b1) / true_b1 if fitted else 1.0
+    member_error = 0.0
+    if result.lattice is not None and len(first) == 6:
+        b_px = result.lattice.bvecs_nm_inv / result.dq_nm_inv
+        for peak in first:
+            model = np.asarray(peak.index_hk, dtype=float) @ b_px
+            member_error = max(
+                member_error,
+                float(np.hypot(peak.q_px[0] - model[0], peak.q_px[1] - model[1])),
+            )
+    ok = (
+        len(first) == 6
+        and len(set(labels)) == 3
+        and b1_error <= 0.02
+        and member_error <= 2.0
+    )
+    return ok, b1_error, member_error
+
+
 def run_orientation_sweep(
-    n: int = 256, size_nm: float = 30.0, a_nm: float = 0.5, steps: int = 12
+    n: int = 256,
+    size_nm: float = 30.0,
+    a_nm: float = 0.5,
+    steps: int = 12,
+    seeds: tuple[int, ...] = (0, 3, 4),
 ) -> None:
-    """R1.7: the reference ring must label correctly at every orientation.
+    """R1.7: the reference ring must label correctly at every orientation and seed.
 
     The ring triple is ordered by *folded* angle (mod 180), so its label sequence
-    is a cyclic rotation of ``_FIRST_RING_LABELS``: for a (1, 0) direction above
-    120 degrees the sorted order starts at the (-1, 1) reflection.  The sweep uses
-    the 12 axis-aligned seeds (a lattice member every 30 degrees, i.e. on an axis
-    or exactly between two of them) and requires, at every one of them, a fitted
-    lattice, six first-ring peaks, three distinct first-ring labels, the true
-    reciprocal constant and ring members reproduced by the chosen model.
+    is a cyclic rotation of ``_FIRST_RING_LABELS``; pairing a fixed sequence with
+    a fixed anchor (the round-1 code) mislabels rings whose detected members span
+    the +/-q boundary and blows the GLS chi-square up, leaving no member labelled.
+    Both sweep axes matter: the 12 axis-aligned orientations cover the three
+    folded-angle rotations and the three noise seeds cover the detection draws
+    that make a spanning triple appear.  The seed set is deliberately chosen (not
+    0, 1, 2): measured with ``tmp_verify/bragg_rewrite/r6_probe.py``, restoring the
+    round-1 body in-process scores 34/36 cases and 10/12 orientations under this
+    configuration (it mislabels the ring at 180 and 240 degrees with seed 3),
+    while the shipped code scores 36/36 and 12/12.
     """
-    heading("R1.7 axis-aligned seed sweep (12 seeds)")
+    heading(
+        f"R1.7 axis-aligned seed sweep ({steps} orientations x {len(seeds)} seeds = "
+        f"{steps * len(seeds)} cases)"
+    )
     true_b1 = 4.0 * np.pi / (np.sqrt(3.0) * a_nm)
-    passed = 0
+    cases = passed = orientations_ok = 0
     worst_b1 = 0.0
     worst_member = 0.0
     for step in range(steps):
         angle = 360.0 * step / steps
-        image, _ = synthetic_image(n, size_nm, a_nm, orientation_deg=angle)
-        result = detect_bragg_peaks(image, size_nm)
-        first = [
-            peak
-            for peak in result.peaks
-            if peak.index_hk is not None and shell_index(peak) == 1
-        ]
-        labels = sorted(peak.index_hk for peak in first if peak.independent)
-        fitted = (
-            float(np.hypot(*result.lattice.bvecs_nm_inv[0]))
-            if result.lattice is not None
-            else 0.0
-        )
-        b1_error = abs(fitted - true_b1) / true_b1 if fitted else 1.0
-        member_error = 0.0
-        if result.lattice is not None and len(first) == 6:
-            b_px = result.lattice.bvecs_nm_inv / result.dq_nm_inv
-            for peak in first:
-                model = np.asarray(peak.index_hk, dtype=float) @ b_px
-                member_error = max(
-                    member_error,
-                    float(np.hypot(peak.q_px[0] - model[0], peak.q_px[1] - model[1])),
-                )
-        passed += int(
-            len(first) == 6
-            and len(set(labels)) == 3
-            and b1_error <= 0.02
-            and member_error <= 2.0
-        )
-        worst_b1 = max(worst_b1, b1_error)
-        worst_member = max(worst_member, member_error)
+        orientation_ok = True
+        for seed in seeds:
+            cases += 1
+            ok, b1_error, member_error = _sweep_case(
+                n, size_nm, a_nm, angle, seed, true_b1
+            )
+            passed += int(ok)
+            orientation_ok &= ok
+            worst_b1 = max(worst_b1, b1_error)
+            worst_member = max(worst_member, member_error)
+        orientations_ok += int(orientation_ok)
     check(
         "R1.7 first ring labelled at every axis-aligned seed",
-        passed == steps,
-        f"{passed}/{steps} seeds ok, worst |b1| error {worst_b1:.3%}, "
-        f"worst ring-member residual {worst_member:.3f} px",
+        passed == cases,
+        f"{passed}/{cases} cases ok, {orientations_ok}/{steps} orientations fully ok, "
+        f"worst |b1| error {worst_b1:.3%}, worst ring-member residual "
+        f"{worst_member:.3f} px",
     )
 
 
@@ -562,6 +611,202 @@ def write_evidence(case, image, result, metrics, a_fit, first, weak, runtime) ->
     )
 
 
+# ---------------------------------------------------------------------------
+# R4: lattice-distortion correction
+# ---------------------------------------------------------------------------
+def first_ring_gaps(result) -> float:
+    """Largest |gap - 60 deg| between neighbouring labelled first-ring peaks."""
+    # Independent members only: a +q/-q pair shares one angle modulo 180 deg.
+    ring = [p for p in result.peaks
+            if p.index_hk is not None and p.independent and shell_index(p) == 1]
+    if len(ring) < 3:
+        return float("nan")
+    angles = sorted(np.degrees(np.arctan2(p.q_px[1], p.q_px[0])) % 180.0 for p in ring)
+    gaps = [angles[i + 1] - angles[i] for i in range(len(angles) - 1)]
+    gaps.append(180.0 - (angles[-1] - angles[0]))
+    return max(abs(float(gap) - 60.0) for gap in gaps)
+
+
+def b1_nm_inv(result) -> float:
+    """|b1| of a detection in nm^-1 (NaN when no lattice was fitted)."""
+    if result.lattice is None:
+        return float("nan")
+    return float(np.hypot(*result.lattice.bvecs_nm_inv[0]))
+
+
+def run_correction_square(n=256, size_nm=30.0, a_nm=3.0) -> None:
+    """R4.1: an explicit square LatticeSpec drives detection and correction."""
+    heading(f"R4.1 square lattice (a = {a_nm:g} nm, n = {n}, L = {size_nm:g} nm)")
+    spec = LatticeSpec(a_nm=a_nm, symmetry="square")
+    image, _ = synthetic_image(n, size_nm, a_nm, seed=11, symmetry="square")
+    result = detect_bragg_peaks(image, size_nm, lattice=spec)
+    labelled = sum(peak.index_hk is not None for peak in result.peaks)
+    check("R4.1.1 square spec fits and labels peaks",
+          result.lattice is not None and result.lattice.fit_ok and labelled >= 6,
+          f"basis_source = {result.meta.get('basis_source')}, labelled = {labelled}")
+    ideal = 2.0 * np.pi / a_nm
+    correction = correct_bragg_peaks(image, size_nm, lattice=spec)
+    redo = detect_bragg_peaks(correction.image, correction.size_nm, lattice=spec)
+    before, after = (abs(b1_nm_inv(r) - ideal) / ideal for r in (result, redo))
+    check(
+        "R4.1.2 square |b1| within 2 % before / 0.5 % after correction",
+        before <= 0.02 and np.isfinite(after) and after <= 0.005,
+        f"|b1| = {b1_nm_inv(result):.5f} -> {b1_nm_inv(redo):.5f} nm^-1 "
+        f"(ideal {ideal:.5f}), method = {correction.meta['method']}, "
+        f"n_labelled = {correction.meta['n_labelled']}, n_out = {correction.n_out}",
+    )
+
+
+def run_correction_direction_guard(n=512, size_nm=30.0, a_nm=A_NM) -> None:
+    """R4.2: anisotropic round-trip, plus a reversed-convention guard."""
+    heading(f"R4.2 anisotropic round-trip (n = {n}, L = {size_nm:g} nm)")
+    ideal = 4.0 * np.pi / (np.sqrt(3.0) * a_nm)
+    # 3 % x stretch, 2 % y stretch plus a 0.5 % shear: genuinely anisotropic, yet
+    # mild enough for the ring finder (3 % relative radius tolerance) to still
+    # detect a lattice; a 5 %/3 % distortion already leaves no ring to correct.
+    image, _ = synthetic_image(
+        n, size_nm, a_nm, seed=17, matrix=[[1.03, 0.005], [0.005, 1.02]]
+    )
+    raw = detect_bragg_peaks(image, size_nm)
+    correction = correct_bragg_peaks(image, size_nm)
+    redo = detect_bragg_peaks(correction.image, correction.size_nm)
+    error = abs(b1_nm_inv(redo) - ideal) / ideal
+    check(
+        "R4.2.1 corrected |b1| within 0.5 % of ideal",
+        np.isfinite(error) and error <= 0.005,
+        f"distorted raw |b1| = {b1_nm_inv(raw):.4f} nm^-1, corrected "
+        f"{b1_nm_inv(redo):.5f} ({error:.3%} off ideal {ideal:.5f}); "
+        f"raw gaps {first_ring_gaps(raw):.3f} -> {first_ring_gaps(redo):.3f} deg; "
+        f"M = {np.array2string(correction.affine_q, precision=4)}",
+    )
+    check("R4.2.2 corrected first-ring gaps 60 +- 0.3 deg",
+          np.isfinite(first_ring_gaps(redo)) and first_ring_gaps(redo) <= 0.3,
+          f"max |gap - 60| = {first_ring_gaps(redo):.3f} deg")
+    # Deliberately reversed convention: resample with the forward stretch M
+    # instead of its inverse; it must fail the same corrected-|b1| check.
+    reversed_image = affine_transform(
+        image, _AXIS_SWAP @ correction.affine_q @ _AXIS_SWAP, correction.offset,
+        output_shape=(correction.n_out, correction.n_out), order=1, mode="constant",
+        cval=np.nan,
+    )
+    wrong = detect_bragg_peaks(reversed_image, correction.size_nm)
+    wrong_error = abs(b1_nm_inv(wrong) - ideal) / ideal
+    reversed_fails = not (np.isfinite(wrong_error) and wrong_error <= 0.005)
+    check(
+        "R4.2.3 reversed matrix convention fails the same test",
+        reversed_fails,
+        f"reversed |b1| = {b1_nm_inv(wrong):.5f} nm^-1, error = {wrong_error:.2%} "
+        f"(correct convention {error:.3%}, threshold 0.5 %)",
+    )
+
+
+def run_correction_identity_fallback(n=256, size_nm=30.0, a_nm=A_NM) -> None:
+    """R4.4: the identity fallback is a true no-op (no re-grid, no added NaN)."""
+    heading(f"R4.4 identity fallback (5 %/3 % distortion, n = {n}, L = {size_nm:g} nm)")
+    image, _ = synthetic_image(
+        n, size_nm, a_nm, seed=17, matrix=[[1.05, 0.015], [0.015, 0.97]]
+    )
+    detection = detect_bragg_peaks(image, size_nm)
+    correction = correct_bragg_peaks(image, size_nm)
+    meta = correction.meta
+    check("R4.4.1 identity fallback reported",
+          meta["method"] == "identity_fallback" and meta["fallback"] is True
+          and meta["n_labelled"] == 0 and detection.lattice is None,
+          f"method = {meta['method']}, fallback = {meta['fallback']}, "
+          f"n_labelled = {meta['n_labelled']}, fitted lattice = "
+          f"{detection.lattice is not None}")
+    same_shape = correction.image.shape == image.shape
+    deviation = (-1.0 if not same_shape
+                 else float(np.max(np.abs(correction.image - image))))
+    added_nan = int(np.count_nonzero(~np.isfinite(correction.image) & np.isfinite(image)))
+    check("R4.4.2 input returned bit-identical (no added non-finite pixel)",
+          same_shape and added_nan == 0
+          and bool(np.array_equal(correction.image, image, equal_nan=True)),
+          f"shape {correction.image.shape} vs {image.shape}, "
+          f"max |out - in| = {deviation:g}, added non-finite = {added_nan}")
+    finite_input = float(np.isfinite(image).mean())
+    check("R4.4.3 input geometry preserved",
+          correction.n_out == correction.n_px == n
+          and correction.size_nm == size_nm
+          and bool(np.array_equal(correction.offset, np.zeros(2)))
+          and abs(correction.valid_fraction - finite_input) <= 1e-12,
+          f"n_out = {correction.n_out}, n_px = {correction.n_px}, "
+          f"size_nm = {correction.size_nm:g} (input {size_nm:g}), "
+          f"offset = {np.array2string(correction.offset, precision=1)}, "
+          f"valid_fraction = {correction.valid_fraction:.6f} "
+          f"(input finite {finite_input:.6f})")
+    check("R4.4.4 identity matrices reported",
+          bool(np.allclose(correction.affine_q, np.eye(2)))
+          and bool(np.allclose(correction.affine_image, np.eye(2))),
+          f"affine_q = {np.array2string(correction.affine_q, precision=1)}, "
+          f"affine_image = {np.array2string(correction.affine_image, precision=1)}")
+
+
+def run_correction_case(case) -> None:
+    """R4.3: correct a standard dataset read-only and write an evidence PNG."""
+    name, width, path = case["name"], case["size_nm"], case["path"]
+    heading(f"R4.3 standard-data correction: {name} ({width:g} nm)")
+    if not path.is_file():
+        SKIPPED.append(f"R4.3 {name} (missing {path})")
+        print(f"  [SKIP] R4.3 {name}: {path} not found", flush=True)
+        return
+    image, digest = load_image(path), md5(path)
+    correction = correct_bragg_peaks(image, width)
+    redo = detect_bragg_peaks(correction.image, correction.size_nm)
+    b1 = b1_nm_inv(redo)
+    error = abs(b1 - B1_IDEAL_NM_INV) / B1_IDEAL_NM_INV
+    check(
+        f"R4.3.1 {name} corrected |b1| within 0.5 % of 29.4946 nm^-1",
+        np.isfinite(error) and error <= 0.005,
+        f"|b1| = {b1:.4f} nm^-1 ({error:.3%} off), method = {correction.meta['method']}, "
+        f"n_out = {correction.n_out} px, size_out = {correction.size_nm:.3f} nm",
+    )
+    gap = first_ring_gaps(redo)
+    check(
+        f"R4.3.2 {name} corrected first-ring gaps 60 +- 0.3 deg",
+        np.isfinite(gap) and gap <= 0.3,
+        f"max |gap - 60| = {gap:.3f} deg",
+    )
+    nan_fraction = float(correction.meta["nan_fraction"])
+    check(
+        f"R4.3.3 {name} NaN fraction below 15 %",
+        nan_fraction < 0.15,
+        f"NaN = {nan_fraction:.2%} over {correction.n_out}^2 px",
+    )
+    check(f"R4.3.4 {name} data file unchanged", digest == md5(path), f"md5 = {digest}")
+    write_correction_evidence(case, correction, redo, b1, gap)
+
+
+def write_correction_evidence(case, correction, redo, b1, gap) -> None:
+    """Write the corrected topograph and corrected |FFT| with the ideal ring."""
+    name = case["name"]
+    floor = max(float(np.abs(correction.fft2).max()) * 1e-6, np.finfo(float).tiny)
+    centre = correction.n_out // 2
+    labelled = [peak for peak in redo.peaks if peak.index_hk is not None]
+    figure, axes = plt.subplots(1, 2, figsize=(14, 7))
+    axes[0].imshow(correction.image, cmap="gray", origin="upper")
+    axes[0].set_title(f"{name} corrected topograph, {correction.n_out} px")
+    axes[1].imshow(np.log10(np.maximum(np.abs(correction.fft2), floor)),
+                   cmap="inferno", origin="upper")
+    axes[1].add_patch(plt.Circle((centre, centre), B1_IDEAL_NM_INV / redo.dq_nm_inv,
+                                 color="#33d1ff", fill=False, linewidth=1.6,
+                                 label="ideal |b1| = 29.49 nm^-1"))
+    axes[1].plot([centre + p.q_px[0] for p in labelled],
+                 [centre + p.q_px[1] for p in labelled], "o", markersize=7,
+                 markerfacecolor="none", markeredgecolor="#ff9f40",
+                 markeredgewidth=1.5, label="labelled peaks (corrected)")
+    axes[1].set_title(f"corrected |FFT|: |b1| = {b1:.3f} nm^-1, "
+                      f"max gap err = {gap:.2f} deg")
+    axes[1].legend(loc="upper right", fontsize=9)
+    CORRECTION_DIR.mkdir(parents=True, exist_ok=True)
+    target = CORRECTION_DIR / f"correct_{name}.png"
+    figure.savefig(target, dpi=110, bbox_inches="tight")
+    plt.close(figure)
+    size = target.stat().st_size if target.is_file() else 0
+    check(f"R4.3.5 {name} correction evidence PNG written", size > 0,
+          f"{target.relative_to(ROOT)} ({size} B)")
+
+
 def main() -> int:
     """Run every part of the suite and return the process exit code."""
     logging.getLogger("stm_data_processing").setLevel(logging.ERROR)
@@ -570,8 +815,12 @@ def main() -> int:
     run_synthetic()
     run_orientation_sweep()
     run_anchor_check()
+    run_correction_square()
+    run_correction_direction_guard()
+    run_correction_identity_fallback()
     for case in CASES:
         run_case(case)
+        run_correction_case(case)
     heading("summary")
     failed = [entry for entry in RESULTS if not entry[1]]
     for name, _, detail in failed:

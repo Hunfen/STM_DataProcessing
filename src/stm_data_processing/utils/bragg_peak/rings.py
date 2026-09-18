@@ -234,10 +234,18 @@ def reference_model(
         rotation_is_absolute = False
         basis_source = diagnostics["basis_source"]
         ring_ladder = diagnostics["ring_ladder"]
+    if spec is not None:
+        # An explicit reference states the symmetry and the scale, so every
+        # labelled peak is a fit member.  Restricting the fit to hexagonal ladder
+        # rings would drop a square or rectangular lattice (no 60 degree triple)
+        # and a hexagonal one whose basis sits further than 2 % from the data.
+        members = [int(index) for index, label in enumerate(labels) if label is not None]
+    else:
+        members = [int(member) for ring in ladder for member in ring["triple"]]
     return {
         "model": model,
         "labels": labels,
-        "members": [int(member) for ring in ladder for member in ring["triple"]],
+        "members": members,
         "ladder_rings": [list(ring["triple"]) for ring in ladder],
         "symmetry": symmetry,
         "rotation_is_absolute": bool(rotation_is_absolute),

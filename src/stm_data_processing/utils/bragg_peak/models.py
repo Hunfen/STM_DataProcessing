@@ -20,7 +20,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-__all__ = ["BraggDetectionResult", "BraggPeak", "LatticeFit", "LatticeSpec"]
+__all__ = [
+    "BraggDetectionResult",
+    "BraggPeak",
+    "CorrectionResult",
+    "LatticeFit",
+    "LatticeSpec",
+]
 
 
 @dataclass(frozen=True)
@@ -120,5 +126,34 @@ class BraggDetectionResult:
     q_nyquist_nm_inv: float
     noise_sigma: float
     n_candidates: int
+    fft2: np.ndarray | None = None
+    meta: dict = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class CorrectionResult:
+    """Output of :func:`...bragg_peak.correct_bragg_peaks`.
+
+    ``affine_q`` is the fitted symmetric stretch ``M`` of ``q_obs = q_ideal @ M``
+    and ``affine_image`` the 2x2 matrix actually handed to
+    :func:`scipy.ndimage.affine_transform` (``output[y] = input[A y + offset]``
+    in array order ``(row, col)``).  ``size_nm`` is the corrected field of view
+    ``size_nm_input * n_out / n_px``, because the nm-per-pixel scale is preserved.
+    ``target_radius_px`` is the ideal ``|b1|`` and ``measured_radius_px`` the
+    first-ring radius measured on the input, both in the input pixel grid;
+    ``residual_ratio`` is their ratio (1.0 means no correction was needed) and
+    ``valid_fraction`` the finite fraction of the NaN-padded corrected image.
+    """
+
+    image: np.ndarray
+    size_nm: float
+    n_out: int
+    n_px: int
+    affine_q: np.ndarray
+    affine_image: np.ndarray
+    offset: np.ndarray
+    target_radius_px: float
+    measured_radius_px: float
+    residual_ratio: float
+    valid_fraction: float
     fft2: np.ndarray | None = None
     meta: dict = field(default_factory=dict)

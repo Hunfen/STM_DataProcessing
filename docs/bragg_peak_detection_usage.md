@@ -1,11 +1,12 @@
 # FFT Bragg 峰检测模块使用指南（`stm_data_processing.utils.bragg_peak`）
 
-本模块在一张 STM 拓扑图的 FFT 上做三件事：**检出尽可能多的 Bragg 峰**（石墨烯 1×1 环及更弱的高阶 Bragg 点）、给出每个点的**亚像素 `q` 与逐点不确定度**、用晶格模型做**GLS 基矢精修**并给每个峰整数指数 `(h,k)`。**真实数据在默认参数下直接可用**——不存在旧版的"质量门默认拒收"语义。
+本模块在一张 STM 拓扑图的 FFT 上做四件事：**检出尽可能多的 Bragg 峰**（石墨烯 1×1 环及更弱的高阶 Bragg 点）、给出每个点的**亚像素 `q` 与逐点不确定度**、用晶格模型做**GLS 基矢精修**并给每个峰整数指数 `(h,k)`、以及**把畸变扫描矫正回理想倒格几何**（`correct_bragg_peaks`，见 §1.5）。**真实数据在默认参数下直接可用**——不存在旧版的"质量门默认拒收"语义。
 
-- 代码（模块化包）：`src/stm_data_processing/utils/bragg_peak/`（9 个模块，合计 1595 行）
+- 代码（模块化包）：`src/stm_data_processing/utils/bragg_peak/`（10 个模块，合计 1991 行）
 - 兼容入口：`src/stm_data_processing/utils/bragg_peak_detection.py`（29 行 shim，旧 import 不变）
-- 设计规格：[`design/bragg_peak_detection.md`](design/bragg_peak_detection.md)
-- 回归自检：`scripts/regression/check_bragg_peak_detection.py`（R1 合成真值 + R2 标准数据物理断言 + R3 证据图，35/35 检查，约 33 s）
+- 设计规格：[`design/bragg_peak_detection.md`](design/bragg_peak_detection.md)（含**矫正能力路线图 L1–L4**，§9）
+- 回归自检：`scripts/regression/check_bragg_peak_detection.py`（R1 合成真值 + R2 标准数据物理断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op，54/54 检查，约 100 s）
+- Skill（随仓库分发）：`skills/stm-topo-phase-analysis/`（矫正 + 相位分析，内部调用本包）
 
 ---
 
@@ -89,6 +90,23 @@ detector = BraggPeakDetector(lattice=LatticeSpec(a_nm=0.246, symmetry="hexagonal
 result = detector.detect_from_fft2(fft2, size_nm)          # 不再做加窗/去平面
 ```
 
+### 1.5 畸变矫正（把歪掉的扫描拉回理想倒格几何）
+
+```python
+from stm_data_processing.utils.bragg_peak import LatticeSpec, correct_bragg_peaks, load_image
+
+image = load_image("topo0009.txt")
+spec = LatticeSpec(a_nm=0.246, symmetry="hexagonal")   # 显式点群：不做自动推断
+correction = correct_bragg_peaks(image, 100.0, lattice=spec)
+
+print(correction.meta["method"])        # "weighted_lsq" = 成功；"two_vector_fallback" / "identity_fallback" = 回退
+print(correction.measured_radius_px, correction.target_radius_px, correction.residual_ratio)
+print(correction.size_nm)               # 矫正后视场：换算 q_nm_inv 必须用它
+# correction.image 为矫正后图（NaN 填充），correction.fft2 为其复数谱
+```
+
+要点：① 几何解为**对称正定拉伸**（纯拉伸、零旋转）并锚定**物理真值**（\|b₁\|=4π/(√3·a)），不用拟合 `affine`（它在 `lattice=None` 下≈单位阵，会漏掉数 % 的真实偏差）；② 标准两图实测（独立复核值）：topo0009 29.8367→**29.5415 nm⁻¹**（0.159 % 偏差）、topo4 28.1891→**29.5791 nm⁻¹**（0.287 %），角距误差 ≤0.25°；经 skill 路径（含 `flipud(subtractMeanPlane)` 预处理）为 29.4695 / 29.5765 nm⁻¹（0.078 % / 0.284 %）；③ **`identity_fallback` 必须提示用户**（见 §8），该分支现在返回**输入原样**（逐位一致、不重铺画布、无半像素偏移、不增 NaN，`n_out = n_px`、`offset = 0`）；④ 方向守卫须用**正向矩阵反向**（转置反向是恒等、无效）。
+
 ---
 
 ## 2. 输入与输出
@@ -98,10 +116,11 @@ result = detector.detect_from_fft2(fft2, size_nm)          # 不再做加窗/去
 | 入口 | 说明 |
 |---|---|
 | `detect_bragg_peaks(image, size_nm, **kwargs)` | 一步完成预处理 → FFT → 检测 → 亚像素定位 → 环聚类 → 晶格精修 |
+| `correct_bragg_peaks(image, size_nm, *, lattice=None, result=None, order=3, pad=10, return_fft2=True)` | **畸变矫正**：锚定物理真值解对称正定拉伸并重采样，返回 `CorrectionResult` |
 | `compute_fft2(image, size_nm, *, window="hann", subtract_plane=True, nan_policy="plane")` | 只做预处理 + FFT（fftshift 后的复数谱） |
 | `BraggPeakDetector(**kwargs)` + `.detect(image, size_nm)` / `.detect_from_fft2(fft2, size_nm, *, return_fft2=False)` | 复用配置；`detect_from_fft2` 接受已 fftshift 的复数谱（不做加窗/去平面） |
 | `load_image(path)` | 读 tab/逗号/空白分隔的方阵 ASCII（`.txt`/`.csv`） |
-| `LatticeSpec(a_nm=..., symmetry="hexagonal"\|"square"\|"oblique", orientation_deg=..., bvecs_nm_inv=...)` | 参考晶格；`orientation_deg` 是**逆时针**旋转角（约定 `basis @ rot.T`）；`lattice=None` 时从数据推断（见 §5.4） |
+| `LatticeSpec(a_nm=..., symmetry="hexagonal"\|"square"\|"oblique", orientation_deg=..., bvecs_nm_inv=...)` | 参考晶格；`orientation_deg` 是**逆时针**旋转角（约定 `basis @ rot.T`）；`lattice=None` 时从数据推断（六方专用，见 §8） |
 
 ### 2.2 `BraggDetectionResult`
 
@@ -164,7 +183,8 @@ result = detector.detect_from_fft2(fft2, size_nm)          # 不再做加窗/去
 | 真实数据 | 三质量门（G-1/2/3）**默认拒收**，"拒绝即设计" | 默认直接可用；`fit_ok`=收敛 |
 | 峰数 | 30 nm 图爆出 5042 峰 | 同一张图 48 峰（候选上限 2048 + 环模型） |
 | 参考环 | 复杂斜方 gauge / predict-verify 循环 | 谐波阶梯规则 + 三循环旋转搜索（锚定真角） |
-| 文件 | 单文件 2515 行 | 9 模块 1595 行 + 29 行 shim |
+| 文件 | 单文件 2515 行 | 10 模块 1945 行 + 29 行 shim |
+| 矫正 | 无（旧 skill 脚本自带简化检峰 + `fsolve` 两点解） | 包内 `correct_bragg_peaks`：物理真值锚定 + 全标号峰加权 LSQ + 方向性由回归钉死 |
 | 参数 | 15+ 调参项 | 12 项（见 §3），删 7 个旧 kwarg |
 
 旧 import 路径 `from stm_data_processing.utils.bragg_peak_detection import ...` 仍可用（shim），新代码请用 `...utils.bragg_peak`。
@@ -189,7 +209,7 @@ result = detector.detect_from_fft2(fft2, size_nm)          # 不再做加窗/去
 ## 7. 复现命令
 
 ```bash
-# 模块回归（R1 合成真值 + R2 标准数据断言 + R3 证据图；35/35，约 33 s）
+# 模块回归（R1 合成真值 + R2 标准数据断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op；54/54，约 100 s，预算 ≤150 s）
 .venv/bin/python scripts/regression/check_bragg_peak_detection.py
 
 # 全部回归（9 套，必须全 exit 0）
@@ -205,7 +225,9 @@ for f in scripts/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
 
 ## 8. 已知边界（诚实记录）
 
+- **矫正受限于检测器的标号能力（重要）**：`correct_bragg_peaks` 必须先能标号（环聚类三元组半径差 ≤3 %、`match_labels` 容差 2 %·|q|），因此**各向异性大致 >3 % 时矫正退化为 `identity_fallback`**（结果图 ≈ 输入图）；畸变的矩形/方晶格因天生各向异性会直接撞上这条限制。**务必检查 `result.meta["method"]`**：为 `identity_fallback` 即表示未成功矫正。
+- **残余 0.17–0.29 % 属非仿射部分**（扫描蠕变/漂移），单一全局拉伸模型无法再降；升级路线（L1 宽容差自举 → L2 迭代收敛 → L3 一般仿射 → L4 逐行/分块非仿射）见设计规格 §9，含每级设计要点与风险。
+- **自动点群推断不做**（刻意）：点群须由 `LatticeSpec` 明示；`lattice=None` 的推断路径仍为六方专用。
 - **参考环推断**对带强 2× 谐波阶梯的人造晶格可能取到因子 2 的谐波环（详见设计规格 §8）；真实石墨烯数据不受影响。
 - **斜方对称**只支持两点种子，不发布斜方应变口径；需要应变请给 `LatticeSpec`。
-- **回归加固建议（非阻塞）**：R1.7 扫面可再加噪声种子维度，使该测试自身也能判别环标签旋转缺陷（当前判别守卫是 R1.8）。
 - 旧版文档中"真实数据大概率被拒"一节已随三质量门一并废除；若你依赖旧版的拒收语义（例如用 `meta["lattice_quality"]` 判断数据可用性），请改用 `result.lattice.fit_ok` + `meta` 里的拟合诊断自行判定。
