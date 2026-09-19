@@ -1122,86 +1122,6 @@ def test_pipeline_contract(n, workdir):
           "exit code 2, message present, 0 figures")
 
 
-def test_correction_stage(n, workdir):
-    section("correction stage: explicit anchor ring (needs the package)")
-    try:
-        sys.path.insert(0, "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src")
-        import stm_data_processing  # noqa: F401
-    except Exception as exc:  # noqa: BLE001
-        check("correction stage skipped", True,
-              f"the package is not importable here ({type(exc).__name__}); run the "
-              f"self-test with the repository interpreter to cover this stage",
-              "informational")
-        return
-
-    env = dict(os.environ)
-    env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    base = workdir / "correction"
-    base.mkdir(parents=True, exist_ok=True)
-    stretch = np.diag([1.010, 0.990])
-    radius_frac = 0.458
-    image = pp.synth_image(n, radius_frac * n,
-                           [{"kind": "full", "amp": 1.0, "phase_deg": 0.0},
-                            {"kind": "disk", "amp": 1.0, "phase_deg": 240.0,
-                             "centre": (0.5, 0.5), "radius_frac": 0.20, "edge": 4.0}],
-                           ref_amp=1.0, ref_phase_deg=40.0)
-    stretched, _matrix, n_out, _offset = pp.stretched_image(image, stretch, pad=10, order=3)
-    stretched = np.nan_to_num(stretched, nan=float(np.mean(image)))
-    csv_path = base / "stretched.csv"
-    np.savetxt(csv_path, stretched, delimiter=",", fmt="%.10e")
-    # the field of view is chosen so that the 1x1 ring of this synthetic sits where
-    # the nominal lattice constant puts it (the ring radius is 0.458 n px and
-    # |b1| = 4 pi / (sqrt(3) a) nm^-1); the nm-per-pixel scale then survives the
-    # resampling, so the stretched canvas keeps it and its field of view grows
-    ideal_b1 = 4.0 * np.pi / (SQRT3 * 0.246)
-    field_of_view = 2.0 * np.pi * (radius_frac * n) / ideal_b1 * n_out / n
-
-    reports = {}
-    for anchor in ("r3", "1x1"):
-        outdir = base / f"correction_{anchor}"
-        completed = run_script("stm_topo_correct.py",
-                               [str(csv_path), "-L", f"{field_of_view:.6f}", "-o",
-                                str(outdir), "--anchor-ring", anchor], env)
-        report = (json.loads((outdir / "correction_report.json").read_text())
-                  if (outdir / "correction_report.json").is_file() else None)
-        reports[anchor] = (completed, report)
-    good, bad = reports["r3"][1], reports["1x1"][1]
-    if good is None or bad is None:
-        check("correction stage ran", False,
-              f"exit codes {reports['r3'][0].returncode} / {reports['1x1'][0].returncode}; "
-              f"stderr: {reports['r3'][0].stderr.strip()[-200:]}", "reports written")
-        return
-    check("correct anchor: the recovered stretch undoes the injected one",
-          abs(good["affine_q"][0][0] - 1.010) < 3e-3
-          and abs(good["affine_q"][1][1] - 0.990) < 3e-3,
-          f"M = [[{good['affine_q'][0][0]:.5f}, {good['affine_q'][0][1]:.5f}], "
-          f"[{good['affine_q'][1][0]:.5f}, {good['affine_q'][1][1]:.5f}]] vs the "
-          f"injected [[1.010, 0], [0, 0.990]]; |det M|^(1/2) = "
-          f"{good['stretch_scale_sqrt_det']:.5f}", "3e-3")
-    check("correct anchor: the implied 1x1 lattice constant comes back",
-          abs(good["implied_lattice_before"]["deviation_from_nominal"]) < 0.01,
-          f"implied a = {good['implied_lattice_before']['a_1x1_nm']:.4f} nm vs the "
-          f"nominal {good['a_nm']:.3f} nm "
-          f"({100 * good['implied_lattice_before']['deviation_from_nominal']:+.3f} %)",
-          "1 %")
-    check("correct anchor: the corrected image carries a 1 : sqrt(3) ring pair",
-          good["anchor_self_check"]["verdict"] == "consistent",
-          f"anchor verdict = {good['anchor_self_check']['verdict']}, corrected ring "
-          f"ratio = {_ratio_text(good['anchor_self_check'])}", "consistent")
-    check("a wrong anchor is caught by the same self-check",
-          bad["anchor_self_check"]["verdict"] != "consistent",
-          f"anchor verdict = {bad['anchor_self_check']['verdict']}, corrected ring "
-          f"ratio = {_ratio_text(bad['anchor_self_check'])}", "not consistent")
-
-
-def _ratio_text(check_result):
-    if check_result.get("ratio") is None:
-        return "not enough corrected rings to form a pair"
-    return (f"{check_result['ratio']:.6f} (deviation "
-            f"{100 * check_result['deviation']:.4f} % from sqrt(3))")
-
-
 def test_field_of_view_from_log(n, workdir):
     """--size-nm-from-log must read the corrected canvas, not the input canvas.
 
@@ -1313,7 +1233,6 @@ def main(argv=None):
     else:
         test_pipeline_contract(args.size, workdir)
         test_field_of_view_from_log(args.size, workdir)
-        test_correction_stage(args.size, workdir)
 
     failed = [name for name, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")

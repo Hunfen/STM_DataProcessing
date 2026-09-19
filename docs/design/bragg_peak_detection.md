@@ -6,7 +6,7 @@
 
 **目标**：对一张 STM 拓扑图（方形数值矩阵 + 场边长 nm）做四件事——① 检出尽可能多的 Bragg 峰（石墨烯 1×1 环及其谐波环、更弱的高阶 Bragg 点）；② 每个峰亚像素 `q` 定位并给出逐点不确定度；③ 拟合倒格基矢（GLS 2×2 affine）并给每个峰整数指数 `(h, k)`；④ 报告畸变（旋转、主拉伸）。**真实数据在默认参数下必须直接可用**——不存在"默认拒绝"的语义。
 
-**非目标**：超结构/摩尔纹峰的独立建模（以未标号峰保留在结果中）；相位分析（另有 skill/stm-topo-phase-analysis 与本包的 `load_image`/`compute_fft2` 配合）。**晶格畸变矫正已在范围内**（`correct.py`，见 §4 S5），但**自动点群推断**仍是刻意不做——点群由调用方通过 `LatticeSpec` 明示（skill 即如此调用）。
+**非目标**：超结构/摩尔纹峰的独立建模（以未标号峰保留在结果中）；相位分析（另有 skill/phase-analysis 与本包的 `load_image`/`compute_fft2` 配合）。**晶格畸变矫正已在范围内**（`correct.py`，见 §4 S5），但**自动点群推断**仍是刻意不做——点群由调用方通过 `LatticeSpec` 明示（skill 即如此调用）。
 
 ## 2. 模块结构与预算
 
@@ -132,7 +132,7 @@ for f in scripts/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
 | n_out / 矫正后视场 | 2111 / 103.07617 nm | 1029 / 30.14648 nm |
 | NaN 占比 | 4.537 % | 8.079 % |
 
-**经 skill 路径**（`skills/stm-topo-phase-analysis/scripts/stm_topo_correct.py`，含 `flipud(subtractMeanPlane(...))` 预处理与数据锚定检测）：topo0009 一环 29.7550 → **29.4695 nm⁻¹**（0.078 %）；topo4 28.2606 → **29.5765 nm⁻¹**（0.284 %），方位 30.80°。两条路径（直接调包 vs skill）差异 <0.3 %，来自预处理与半平面选择的细微不同，均满足 ≤0.5 % 验收。
+**经 skill 路径**（`skills/topo-correction/scripts/stm_topo_correct.py`，含 `flipud(subtractMeanPlane(...))` 预处理与数据锚定检测）：topo0009 一环 29.7550 → **29.4695 nm⁻¹**（0.078 %）；topo4 28.2606 → **29.5765 nm⁻¹**（0.284 %），方位 30.80°。两条路径（直接调包 vs skill）差异 <0.3 %，来自预处理与半平面选择的细微不同，均满足 ≤0.5 % 验收。
 
 残余 0.16–0.29 % 为**非仿射部分**（扫描蠕变/漂移），单一全局拉伸模型无法再降（见 §9 L4）。
 

@@ -486,7 +486,7 @@ class Atlas:
                 info["summary"] += 1
         payload = {
             "atlas_version": 1,
-            "producer": "stm_phase_analysis.py (skill stm-topo-phase-analysis v2)",
+            "producer": "stm_phase_analysis.py (skill phase-analysis v2)",
             "per_ring": per_ring,
             "total_figures": len(self.figures),
             "figures": self.figures,

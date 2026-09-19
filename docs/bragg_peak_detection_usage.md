@@ -6,7 +6,7 @@
 - 兼容入口：`src/stm_data_processing/utils/bragg_peak_detection.py`（29 行 shim，旧 import 不变）
 - 设计规格：[`design/bragg_peak_detection.md`](design/bragg_peak_detection.md)（含**矫正能力路线图 L1–L4**，§9）
 - 回归自检：`scripts/regression/check_bragg_peak_detection.py`（R1 合成真值 + R2 标准数据物理断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op，54/54 检查，约 100 s）
-- Skill（随仓库分发）：`skills/stm-topo-phase-analysis/`（矫正 + 相位分析，内部调用本包）
+- Skill（随仓库分发）：`skills/topo-correction/`（几何矫正）+ `skills/phase-analysis/`（双环相位分析），内部调用本包
 
 ---
 

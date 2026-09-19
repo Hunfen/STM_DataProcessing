@@ -7,7 +7,20 @@
 
 ---
 
-## v2.1 修复（最新，2026-09-19；三处缺陷，未重新处理任何数据）
+## 拆分（最新，2026-09-19：拆为 topo-correction + phase-analysis 两个 skill）
+
+按用户要求把几何矫正拆成独立 skill（矫正产物可接任意后处理）：
+
+- 本目录改名 `skills/phase-analysis/`（skill 名 `phase-analysis`，原 `stm-topo-phase-analysis`）；
+  几何矫正移入新 skill `skills/topo-correction/`（见其 CHANGES.md）。
+- `scripts/stm_topo_correct.py` 移出；`scripts/selftest.py` 移除矫正阶段检查
+  （`test_correction_stage` + `_ratio_text`），检查总数 72 → **68**，其余检查与阈值不变。
+- `stm_phase_analysis.py` 的 `phase_stats.json` 里 `skill` 字段值由 `stm-topo-phase-analysis`
+  更正为 `phase-analysis`（纯字符串值，无消费者解析它）。
+- SKILL.md：删除原「第一步：矫正」章，新增「§2 输入来源：矫正产物（topo-correction）」；
+  其余相位口径、图集契约、稳健量表一字未改。
+
+## v2.1 修复（2026-09-19；三处缺陷，未重新处理任何数据）
 
 修复对象是 **v2 自身**的三个缺陷（不是相对 v1 的改动）；机制与验证证据见
 `FIX_SUMMARY.md`，验证产物保留在 `_work/`（`selftest/`、`fov_check/`、

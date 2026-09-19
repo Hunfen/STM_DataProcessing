@@ -749,7 +749,7 @@ def main(argv=None):
              "instead of analysing an unpaired ring")
         emit("# options: raise --r3-tol, name the reference ring explicitly "
              "(--anchor radius --reference-radius-px), or fix the geometry first")
-        payload = {"skill": "stm-topo-phase-analysis", "skill_version": SKILL_VERSION,
+        payload = {"skill": "phase-analysis", "skill_version": SKILL_VERSION,
                    "status": choice["status"], "input": str(csv_path),
                    "canvas_px": n, "field_of_view_nm": size_nm,
                    "field_of_view_source": fov_source,
@@ -951,7 +951,7 @@ def main(argv=None):
 
     # ---- JSON ------------------------------------------------------------ #
     payload = {
-        "skill": "stm-topo-phase-analysis",
+        "skill": "phase-analysis",
         "skill_version": SKILL_VERSION,
         "status": "ok",
         "input": str(csv_path),

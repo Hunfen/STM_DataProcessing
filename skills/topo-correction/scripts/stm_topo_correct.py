@@ -49,13 +49,12 @@ import matplotlib
 import numpy as np
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import atlas as at  # noqa: E402
-import phasepipe as pp  # noqa: E402
+import correction_lib as cl  # noqa: E402
 
 SKILL_VERSION = "2.0"  # the three v2.1 fixes change no number of the existing report
 PATCH_HALF = 8  # sub-pixel Gaussian patch half width: 8 -> 17x17 pixels
@@ -158,7 +157,7 @@ def ring_table(peaks, cluster_tol):
     """Radius clustering of the detected peaks (geometry only, no labels)."""
     records = [(float(peak.q_px[0]), float(peak.q_px[1]), float(peak.amplitude),
                 float(peak.snr), float(np.hypot(*peak.q_px))) for peak in peaks]
-    return pp.group_rings(records, tol_frac=cluster_tol, min_members=6)
+    return cl.group_rings(records, tol_frac=cluster_tol, min_members=6)
 
 
 def implied_lattice(radius_nm_inv, a_nm, anchor):
@@ -179,7 +178,12 @@ def main(argv=None):
     args = parse_args(argv)
     sys.path.insert(0, args.stm_lib)
     from stm_data_processing.utils.bragg_peak import (
-        LatticeSpec, compute_fft2, correct_bragg_peaks, detect_bragg_peaks, load_image)
+        LatticeSpec,
+        compute_fft2,
+        correct_bragg_peaks,
+        detect_bragg_peaks,
+        load_image,
+    )
     from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
     csv_path = Path(args.input)
@@ -401,11 +405,11 @@ def main(argv=None):
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"
     np.save(out_fft2, fft2_corrected)
 
-    at.setup_style()
-    cmap, cmap_source = at.load_colormap(args.stm_lib)
+    cl.setup_style()
+    cmap, cmap_source = cl.load_colormap(args.stm_lib)
     emit(f"# colormap: {cmap_source}")
     cmap_bad = cmap.copy()
-    cmap_bad.set_bad(color=at.BAD_COLOR)
+    cmap_bad.set_bad(color=cl.BAD_COLOR)
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(corrected, cmap=cmap_bad, origin="lower")
     ax.set_xticks([])
@@ -430,7 +434,7 @@ def main(argv=None):
     plt.close(fig)
 
     report = {
-        "skill": "stm-topo-phase-analysis",
+        "skill": "topo-correction",
         "skill_version": SKILL_VERSION,
         "input": str(csv_path),
         "canvas_px": int(topo.shape[0]),

@@ -1,13 +1,13 @@
 ---
-name: stm-topo-phase-analysis
-description: STM 拓扑图 CSV 的几何矫正与双环相位数学分析：显式参考晶格与可指定的锚定环（1x1 或 r3）、1x1 与 r3 两族同口径的逐反射相位统计（幅度加权圆均值/中位数/半峰宽/簇/幅度/三重积/折叠分布，含 Friedel 恒等式自检与 r0 规范固定）、完整图集（每族 25 张）与一键数学 self-test。只做几何与相位数学，不做物理解释。当用户给出拓扑图 CSV 与图像边长（nm），要求仿射矫正、绘制、或两族环的相位/相位统计时使用。
+name: phase-analysis
+description: STM 拓扑图（矫正后或任意正方形 CSV）的双环相位数学分析：1x1 与 r3 两族同口径的逐反射相位统计（幅度加权圆均值/中位数/半峰宽/簇/幅度/三重积/折叠分布，含 Friedel 恒等式自检与 r0 规范固定）、完整图集（每族 25 张）与一键数学 self-test。只做几何与相位数学，不做物理解释。当用户给出拓扑图 CSV 与图像边长（nm），要求两族环的相位/相位统计时使用。
 ---
 
-# stm-topo-phase-analysis（STM 拓扑图：几何矫正 + 双环相位数学，v2）
+# phase-analysis（STM 拓扑图：双环相位数学，v2）
 
-**范围**：本 skill 只做**几何与相位数学**——峰检测、亚像素定位、对称正定拉伸矫正、圆统计量、
-规范固定、图集与自检。**物理解释由使用者进行**：本 skill 的脚本、图标题、log 与文档都不给出
-物理结论，也不使用任何 k 空间/高对称点类称呼。
+**范围**：本 skill 只做**相位数学**——反射场提取、圆统计量、规范固定、图集与自检。
+（几何矫正已拆分为独立 skill：`topo-correction`。）**物理解释由使用者进行**：本 skill 的
+脚本、图标题、log 与文档都不给出物理结论，也不使用任何 k 空间/高对称点类称呼。
 
 两个环只有两个名字，归属只看**半径比**：
 
@@ -22,82 +22,40 @@ description: STM 拓扑图 CSV 的几何矫正与双环相位数学分析：显�
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部** |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**。典型输入 = `topo-correction` 的矫正产物（见 §2）；也接受任意方形 CSV（不经矫正，配 `-L` 或 `--size-nm-from-log`） |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方，1x1 晶格常数 `a`（默认 0.246 nm）；**取向取数据自身的 (1,0) 方向**，不做点群推断 |
 | 分隔符 | 自动识别；显式用 `--delimiter ','` / `--delimiter '\t'` |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`。**不要用 `uv run`**（会写仓库 `.venv`） |
 | 绘图 | `text.usetex=False`（mpl 3.10 + TeX Live 2026 有编码 bug），mathtext cm + Palatino |
 
-## 2 第一步：矫正（`scripts/stm_topo_correct.py`）
+## 2 输入来源：矫正产物（topo-correction skill）
+
+几何矫正已拆分为独立 skill `topo-correction`（`skills/topo-correction/scripts/stm_topo_correct.py`）：
+读入 → 预处理（`flipud(subtractMeanPlane(...))`）→ 数据锚定峰检测 → 对称正定拉伸（纯拉伸、零旋转）
+→ 重采样。其产物里本 skill 消费两个：
+
+| 产物 | 本 skill 的用法 |
+| --- | --- |
+| `<stem>_corrected.csv` | 输入图像（正方形、NaN 填充） |
+| `correction.log` | `--size-nm-from-log` 解析矫正后画布视场（依赖 `corrected canvas ... field of view X nm` 行，见 §3） |
+| `correction_report.json` | 机器可读报告（`affine_q`、锚定自检等；本 skill 不消费） |
+
+矫正的锚定环显式指定（`--anchor-ring 1x1|r3`）、锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale）、
+`identity_fallback` 限制等见 `topo-correction` 的 SKILL.md。
+
+## 3 相位分析（`scripts/stm_phase_analysis.py`）
 
 ```bash
 cd /path/to/STM_DataProcessing
 MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
-  skills/stm-topo-phase-analysis/scripts/stm_topo_correct.py \
-  INPUT.csv -L 50 -o OUT --a 0.246 --anchor-ring r3 --list-rings
-```
-
-流程：读入 → `flipud(subtractMeanPlane(...))` → 包内数据锚定峰检测（`bragg_peak.detect_bragg_peaks`）
-→ 取数据自身 (1,0) 方向构造显式 `LatticeSpec` → `correct_bragg_peaks` 对称正定拉伸
-（纯拉伸、零旋转，加权最小二乘，失败时闭式回退并记 `meta`）→ `scipy.ndimage.affine_transform`
-重采样（`order=3`，`cval=NaN`），画布 `n_out`、**矫正后视场 = `L · n_out / n`**。
-
-### 2.1 锚定环必须显式指定（v2 核心）
-
-包内检测把**它认定的第一个环**标成 (1,0)。当 r3 环落在 1x1 环**内侧**（半径比 1/√3）时，
-这个环可能正是 r3 环；若此时按 1x1 给参考晶格，拟合会把 r3 环拉到 1x1 的理想半径上，
-**几何被破坏**。`--anchor-ring` 就是把这个事实说出来：
-
-| 参数 | 含义 | 参考晶格 |
-| --- | --- | --- |
-| `--anchor-ring 1x1`（默认） | 检测锚定的环是 1x1 环 | `a_ref = a` |
-| `--anchor-ring r3` | 检测锚定的环是 r3 环 | `a_ref = √3 · a` |
-
-**报告**（log + `correction_report.json`）：`method` / `fallback` / `n_labelled` / rms、
-检测到的环表（半径 px 与 nm⁻¹、成员数、总幅度）、`|b1|` 矫正前后与理想值的比、
-`|det M|^(1/2)`、画布 `n_out`、矫正后视场与 nm/px、NaN 比例、锚定环反演的晶格常数
-（`a_ref` 与 1x1 的 `a`）。
-
-**锚定自检（非循环，两条 tell-tale）**：矫正只把**锚定环**放到理想半径上，所以"矫正后锚定环 = 理想值"不能
-证明锚定正确；判据是**另一族**——正确的锚定会让矫正后两个最强环构成 1 : √3 对。
-**但环对比值单独用是不够的**：若**原始数据本身**就有精确的 1 : √3 环对，错的锚定会把整个拟合按一个
-全局因子拉伸（1/√3 或 √3），而矫正后两个最强环仍然相差 √3 ⇒ 只看比值会误报 consistent。
-所以自检同时给出**全局拉伸尺度 `|det M|^(1/2)`**：锚定环或视场 `L` 标错都会让拟合成比例地整体缩放，
-正确锚定的 `|det M|^(1/2)` 只含"要被 undo 的那点各向异性"（≈1），错锚定则给出 0.5774 / 1.7321。
-判定：两条 tell-tale 都通过才 `consistent`；任一条失败即 `inconsistent`（**比值通过、拉伸尺度失败也是
-inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容差内则 `unverifiable`。容差**5 %**
-（`STRETCH_SCALE_TOL`：超出 `[1/1.05, 1.05]` 即失败；包自身口径是环聚类 3 % / 标签匹配 2 %，
-5 % 两侧都有余量——正确实测 ≤2 %，错锚实测偏 42 %/73 %）。log 打印每条 tell-tale 的判词与
-合并后的 `anchor verdict`，`correction_report.json` 的 `anchor_self_check` 里除原有字段外还有
-`stretch_scale_sqrt_det` / `stretch_scale_deviation` / `stretch_scale_consistent` /
-`ratio_consistent` / `verdict_reason`。
-实测（50 nm 视场真实数据，raw 三环本身是 1 : 1/√3 : 1/2）：正确锚定 `--anchor-ring r3`
-→ `|det M|^(1/2) = 1.00187`（偏 0.1868 %）、比值 1.731497（偏 0.0320 %）→ consistent；
-错锚定 `--anchor-ring 1x1` → `|det M|^(1/2) = 0.57843`（≈1/√3，偏 42 %）、反演 1x1 晶格常数
-偏离 +73.9 %，**而环对比值仍是 1 : √3** ⇒ 现在判 inconsistent 并打 WARNING（旧版此处误报 consistent）。
-另一组几何下矫正后退化为不足两环 → unverifiable。
-
-**已知限制**：矫正需要先有**带标签**的晶格；环半径聚类容差 3 %、`match_labels` 容差 2 %
-决定了可用范围 ≈ 各向异性 ≤ 3 %。超出时包返回 `method="identity_fallback"`、`fallback=True`，
-**什么都没矫正**（数组只是重铺到更大的 NaN 画布上）——脚本会照实打印并打 WARNING，
-**信任结果前先看 `method`/`fallback`**。
-
-输出：`<stem>_corrected.csv`、`<stem>_corrected_fft2.npy`（复数 FFT2，含 Hanning 窗与 NaN 平面填充）、
-`<stem>_corrected.png`（gwyddion）、`<stem>_corrected_fft.png`（inferno 对数）、
-`correction.log`、`correction_report.json`。
-
-## 3 第二步：相位分析（`scripts/stm_phase_analysis.py`）
-
-```bash
-cd /path/to/STM_DataProcessing
-MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
-  skills/stm-topo-phase-analysis/scripts/stm_phase_analysis.py \
+  skills/phase-analysis/scripts/stm_phase_analysis.py \
   OUT/INPUT_corrected.csv -o OUT/phase --size-nm-from-log OUT/correction.log \
   --pct 5 --gate p50 --anchor auto
 ```
 
-**`--size-nm-from-log` 读的是矫正后画布的视场**：`stm_topo_correct.py` 的 log 里有两处
+**`--size-nm-from-log` 读的是矫正后画布的视场**：`topo-correction` 的 `stm_topo_correct.py` 产出的
+log 里有两处
 `field of view <value> nm`——第一处是**输入画布**（`# canvas ... field of view 50 nm`），
 第二处是**矫正后画布**（`# corrected canvas: ... field of view 51.7090 nm`）。本脚本分析的是
 **矫正后的 CSV**，所以解析按以下优先级取值：
@@ -268,7 +226,7 @@ manifest 与 `phase_stats.json` 的 `atlas` 段同时声明 25/族。
 第三方可用**一条命令**独立复核：
 
 ```bash
-.venv/bin/python skills/stm-topo-phase-analysis/scripts/atlas.py \
+.venv/bin/python skills/phase-analysis/scripts/atlas.py \
   --check OUT/phase/atlas_manifest.json --stats OUT/phase/phase_stats.json \
   --expected-figures 50 --expected-per-ring 25
 ```
@@ -289,11 +247,11 @@ manifest 与 `phase_stats.json` 的 `atlas` 段同时声明 25/族。
 ```bash
 cd /path/to/STM_DataProcessing
 MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
-  .venv/bin/python skills/stm-topo-phase-analysis/scripts/selftest.py
+  .venv/bin/python skills/phase-analysis/scripts/selftest.py
 # 可选：--quick（跳过端到端阶段，约 20 s）、--workdir DIR、--size N、--keep
 ```
 
-覆盖与验收阈值（实测 **72/72** 通过，全程约 3 min；`--quick` 约 25 s）。
+覆盖与验收阈值（实测 **68/68** 通过，全程约 3 min；`--quick` 约 25 s）。
 **两类量的阈值分开定**（与 §3 的口径一致）：
 
 | 类 | 量 | 验收阈值 |
@@ -338,13 +296,12 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 9. **端到端**：真跑两次完整管线（**先断言第二次运行的返回码**，再读它的产物；未产出时如实判 FAIL 而不是抛 traceback）→ 图集清单断言（50 张、命名模式、PIL、注解 = JSON）、
    **确定性**（两次运行图逐像素相同、PNG 甚至逐字节相同、JSON 数字相同）、log 数字 = JSON 数字、
    缺 r3 分支（退出码 2、有明确信息、0 张图）。
-10. **矫正阶段**（能 import 包时）：注入 2 % 各向异性 → 回收 `M = [[1.00995, −0.00006],
-   [−0.00006, 0.98994]]`、`|det M|^(1/2) = 0.99990`、反演 `a = 0.2460 nm`；
-   锚定自检 consistent；错误锚定被判 not consistent。
-11. **`--size-nm-from-log`**（v2.1 新增，真跑三次）：① 含 `corrected canvas` 行的 log
+10. **`--size-nm-from-log`**（v2.1 新增，真跑三次）：① 含 `corrected canvas` 行的 log
    → 取矫正后画布值（实测 51.5000 nm，而非输入画布的 50 nm），log 写明 `corrected canvas line`；
    ② 只有一行 `field of view` 的 log → 取该行（回退规则）；③ 一处都没有 → 非零退出码 +
    明确信息。
+
+（几何矫正阶段的 5 项检查随拆分移至 `topo-correction` skill 的一键 self-test。）
 
 ## 6 变与不变（引用任何一个数字前请读）
 
@@ -390,3 +347,7 @@ Friedel/三独立/三重积/折叠分布/R 全套、图集清单与图-数字契
 2026-09（v2.1）：见 `CHANGES.md` 顶部——`--size-nm-from-log` 改读**矫正后画布**视场（含回退规则与
 来源打印）、锚定自检新增**全局拉伸尺度 tell-tale**（错锚不再误报 consistent）、`qspace_mask` 图标注
 峰号 `p0–p5`；三处均为 v2 自身缺陷的修复，未改任何相位口径、未重新处理数据。
+2026-09（拆分，本版）：几何矫正拆分为独立 skill `topo-correction`（目录 `skills/topo-correction/`，
+含 `stm_topo_correct.py`/`correction_lib.py`/自带 5 项 self-test）；本 skill 改名 `phase-analysis`
+（原 `stm-topo-phase-analysis`，目录 `skills/phase-analysis/`）。相位口径、图集契约、脚本名与
+调用参数全部不变；self-test 移除矫正阶段检查（72 → 68），新增 §2 输入来源说明。
