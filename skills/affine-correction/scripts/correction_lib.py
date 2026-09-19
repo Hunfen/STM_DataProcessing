@@ -1,4 +1,4 @@
-"""Shared helpers of the topo-correction skill (self-contained copy; do not import the phase-analysis skill)."""
+"""Shared helpers of the affine-correction skill (self-contained copy; do not import the phase-analysis skill)."""
 from __future__ import annotations
 
 import sys

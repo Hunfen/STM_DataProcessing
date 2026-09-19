@@ -3,7 +3,7 @@
 仓库内置 skill（**v2 拆分版**，原 `stm-topo-phase-analysis`）。**只做相位数学**：反射场提取、圆统计量、
 规范固定、图集与一键自检。物理解释由使用者进行——脚本、图标题、log 与文档都不给物理结论，
 也不使用任何 k 空间/高对称点类称呼；两个环只有 `ring_1x1`（参考环）与 `ring_r3`（半径为其 1/√3）两个名字。
-**几何矫正见独立 skill `skills/topo-correction/`**，其产物（`<stem>_corrected.csv` + `correction.log`）
+**几何矫正见独立 skill `skills/affine-correction/`**，其产物（`<stem>_corrected.csv` + `correction.log`）
 是本 skill 的典型输入。
 
 ## 文件
@@ -22,7 +22,7 @@
 
 - 仓库 `STM_DataProcessing` 源码（`src/`）：`utils.bragg_peak`（峰检测/亚像素定位/FFT2）、
   `stm.preview_plot.gwyddion`（色标）、`utils.plot_funcs.subtractMeanPlane`
-- 输入通常来自 `skills/topo-correction/` 的矫正产物（见下）；也可直接分析任意方形 CSV
+- 输入通常来自 `skills/affine-correction/` 的矫正产物（见下）；也可直接分析任意方形 CSV
   （配 `-L` 或 `--size-nm-from-log`；`--detector builtin` 可不用包）
 - **执行环境**（系统 Python 无 numpy；不要用 `uv run`——它会写仓库 `.venv`）：
 
@@ -30,8 +30,8 @@
 cd /path/to/STM_DataProcessing
 export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 
-# 0) 矫正（topo-correction skill；示例：数据里最内环其实是 r3 环）
-.venv/bin/python skills/topo-correction/scripts/stm_topo_correct.py \
+# 0) 矫正（affine-correction skill；示例：数据里最内环其实是 r3 环）
+.venv/bin/python skills/affine-correction/scripts/stm_topo_correct.py \
     INPUT.csv -L 50 --anchor-ring r3 -o OUT --list-rings
 
 # 1) 双环相位分析 + 图集
@@ -53,7 +53,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 
 1. **输入来源**：矫正产物 `OUT/INPUT_corrected.csv` + `OUT/correction.log`（`--size-nm-from-log` 优先解析
    `corrected canvas ... field of view X nm` 行取**矫正后画布**视场）。矫正的锚定环显式指定
-   （`--anchor-ring`）与锚定自检双 tell-tale 见 `topo-correction` 的 SKILL.md。
+   （`--anchor-ring`）与锚定自检双 tell-tale 见 `affine-correction` 的 SKILL.md。
 2. **两族同口径**：`ring_r3` 由 `ring_1x1` 半径的 1/√3 定位（容差可配）；定位不到就如实报
    "r3 ring not found"（退出码 2，不画图，不猜）。
 3. **唯一的相位估计量**：相位值 = mask 内**未加门**的幅度加权圆均值（= 该反射全局相位）；

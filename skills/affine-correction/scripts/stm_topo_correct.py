@@ -31,11 +31,17 @@ Outputs:
     <outdir>/correction.log             the console report
     <outdir>/correction_report.json     the same numbers, machine readable
 
+``--save-transform FILE`` (default: off) additionally writes the fitted stretch as a
+standalone transform JSON (schema ``topo-correction-transform``) that the sibling
+script ``stm_apply_transform.py`` applies to a *different* topography dataset; a run
+without the flag is unchanged, byte for byte.
+
 Usage:
     cd /path/to/STM_DataProcessing
     MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 \
         .venv/bin/python <this script> INPUT.csv -L 50 -o OUT_DIR \
-        [--a 0.246] [--anchor-ring 1x1|r3] [--delimiter ','] [--list-peaks]
+        [--a 0.246] [--anchor-ring 1x1|r3] [--delimiter ','] [--list-peaks] \
+        [--save-transform TRANSFORM.json]
 """
 from __future__ import annotations
 
@@ -102,7 +108,52 @@ def parse_args(argv=None):
                         help="print the detected ring table (radius clustering)")
     parser.add_argument("--ring-cluster-tol", type=float, default=0.02,
                         help="relative radius tolerance of the ring clustering")
+    parser.add_argument("--save-transform", default=None, metavar="FILE",
+                        help="also write the fitted stretch as a standalone transform "
+                             "JSON (schema topo-correction-transform, version 1) that "
+                             "stm_apply_transform.py can apply to another dataset; "
+                             "without this flag every output is unchanged")
     return parser.parse_args(argv)
+
+
+def transform_payload(report_path, csv_path, args, a_ref, correction, stretch_scale,
+                      anchor_verdict):
+    """Standalone description of the fitted correction, dataset independent.
+
+    Everything the apply stage needs to repeat this resampling on another
+    topography dataset: the q-space stretch ``M`` (``affine_q``), the reference
+    canvas geometry and the fit provenance.  The canvas numbers are the *reference*
+    image's; the apply stage recomputes the array matrix, ``n_out`` and the offset
+    for the target's own pixel count (only ``M``, ``pad`` and ``order`` are
+    geometry-free).
+    """
+    meta = correction.meta
+    return {
+        "schema": "topo-correction-transform",
+        "schema_version": 1,
+        "source_report": str(Path(report_path).resolve()),
+        "source_input": str(Path(csv_path).resolve()),
+        "affine_q": [[float(value) for value in row]
+                     for row in np.asarray(correction.affine_q)],
+        "affine_image_reference": [[float(value) for value in row]
+                                   for row in np.asarray(correction.affine_image)],
+        "n_px_reference": int(correction.n_px),
+        "n_out_reference": int(correction.n_out),
+        "field_of_view_nm_reference": float(args.size_nm),
+        "pad": int(meta["pad"]),
+        "order": int(meta["order"]),
+        "method": str(meta["method"]),
+        "fallback": bool(meta["fallback"]),
+        "n_labelled": int(meta["n_labelled"]),
+        "anchor_ring": args.anchor_ring,
+        "a_nm": float(args.a),
+        "a_ref_nm": float(a_ref),
+        "stretch_scale_sqrt_det": float(stretch_scale),
+        "anchor_verdict": anchor_verdict,
+        "usage": ("apply with: .venv/bin/python "
+                  "skills/topo-correction/scripts/stm_apply_transform.py INPUT.csv "
+                  "--transform <this file> -L SIZE_NM -o OUT"),
+    }
 
 
 def resolve_delimiter(raw):
@@ -483,6 +534,14 @@ def main(argv=None):
          f"{outdir / f'{stem}_corrected.png'}, {outdir / f'{stem}_corrected_fft.png'}, "
          f"{outdir / 'correction_report.json'}, {outdir / 'correction.log'}")
     (outdir / "correction.log").write_text("\n".join(log_lines) + "\n")
+    if args.save_transform:
+        # Written last and outside the log, so a run without the flag is byte-identical.
+        transform_path = Path(args.save_transform)
+        transform_path.parent.mkdir(parents=True, exist_ok=True)
+        transform_path.write_text(json.dumps(transform_payload(
+            outdir / "correction_report.json", csv_path, args, a_ref, correction,
+            stretch_scale, check["verdict"]), indent=2) + "\n")
+        print(f"# transform written: {transform_path}")
     return 0
 
 

@@ -6,7 +6,7 @@ description: STM 拓扑图（矫正后或任意正方形 CSV）的双环相位�
 # phase-analysis（STM 拓扑图：双环相位数学，v2）
 
 **范围**：本 skill 只做**相位数学**——反射场提取、圆统计量、规范固定、图集与自检。
-（几何矫正已拆分为独立 skill：`topo-correction`。）**物理解释由使用者进行**：本 skill 的
+（几何矫正已拆分为独立 skill：`affine-correction`。）**物理解释由使用者进行**：本 skill 的
 脚本、图标题、log 与文档都不给出物理结论，也不使用任何 k 空间/高对称点类称呼。
 
 两个环只有两个名字，归属只看**半径比**：
@@ -22,16 +22,16 @@ description: STM 拓扑图（矫正后或任意正方形 CSV）的双环相位�
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**。典型输入 = `topo-correction` 的矫正产物（见 §2）；也接受任意方形 CSV（不经矫正，配 `-L` 或 `--size-nm-from-log`） |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**。典型输入 = `affine-correction` 的矫正产物（见 §2）；也接受任意方形 CSV（不经矫正，配 `-L` 或 `--size-nm-from-log`） |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方，1x1 晶格常数 `a`（默认 0.246 nm）；**取向取数据自身的 (1,0) 方向**，不做点群推断 |
 | 分隔符 | 自动识别；显式用 `--delimiter ','` / `--delimiter '\t'` |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`。**不要用 `uv run`**（会写仓库 `.venv`） |
 | 绘图 | `text.usetex=False`（mpl 3.10 + TeX Live 2026 有编码 bug），mathtext cm + Palatino |
 
-## 2 输入来源：矫正产物（topo-correction skill）
+## 2 输入来源：矫正产物（affine-correction skill）
 
-几何矫正已拆分为独立 skill `topo-correction`（`skills/topo-correction/scripts/stm_topo_correct.py`）：
+几何矫正已拆分为独立 skill `affine-correction`（`skills/affine-correction/scripts/stm_topo_correct.py`）：
 读入 → 预处理（`flipud(subtractMeanPlane(...))`）→ 数据锚定峰检测 → 对称正定拉伸（纯拉伸、零旋转）
 → 重采样。其产物里本 skill 消费两个：
 
@@ -42,7 +42,7 @@ description: STM 拓扑图（矫正后或任意正方形 CSV）的双环相位�
 | `correction_report.json` | 机器可读报告（`affine_q`、锚定自检等；本 skill 不消费） |
 
 矫正的锚定环显式指定（`--anchor-ring 1x1|r3`）、锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale）、
-`identity_fallback` 限制等见 `topo-correction` 的 SKILL.md。
+`identity_fallback` 限制等见 `affine-correction` 的 SKILL.md。
 
 ## 3 相位分析（`scripts/stm_phase_analysis.py`）
 
@@ -54,7 +54,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
   --pct 5 --gate p50 --anchor auto
 ```
 
-**`--size-nm-from-log` 读的是矫正后画布的视场**：`topo-correction` 的 `stm_topo_correct.py` 产出的
+**`--size-nm-from-log` 读的是矫正后画布的视场**：`affine-correction` 的 `stm_topo_correct.py` 产出的
 log 里有两处
 `field of view <value> nm`——第一处是**输入画布**（`# canvas ... field of view 50 nm`），
 第二处是**矫正后画布**（`# corrected canvas: ... field of view 51.7090 nm`）。本脚本分析的是
@@ -301,7 +301,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
    ② 只有一行 `field of view` 的 log → 取该行（回退规则）；③ 一处都没有 → 非零退出码 +
    明确信息。
 
-（几何矫正阶段的 5 项检查随拆分移至 `topo-correction` skill 的一键 self-test。）
+（几何矫正阶段的 5 项检查随拆分移至 `affine-correction` skill 的一键 self-test。）
 
 ## 6 变与不变（引用任何一个数字前请读）
 

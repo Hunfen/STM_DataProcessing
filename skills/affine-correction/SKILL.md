@@ -1,9 +1,9 @@
 ---
-name: topo-correction
-description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 NaN）+ 视场 L（nm）→ 数据锚定峰检测、显式六方参考晶格与可指定锚定环（1x1 或 r3）、对称正定拉伸矫正（纯拉伸、零旋转）与锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale），输出矫正 CSV/复数 FFT2/预览图/报告，可接任意后处理。当用户给出拓扑图 CSV 与图像边长（nm）并要求仿射矫正时使用。
+name: affine-correction
+description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 NaN）+ 视场 L（nm）→ 数据锚定峰检测、显式六方参考晶格与可指定锚定环（1x1 或 r3）、对称正定拉伸矫正（纯拉伸、零旋转）与锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale），输出矫正 CSV/复数 FFT2/预览图/报告，可接任意后处理；并支持把拟合出的变换导出为独立 JSON（--save-transform）后应用到另一张拓扑图（stm_apply_transform.py）。当用户给出拓扑图 CSV 与图像边长（nm）并要求仿射矫正、或要求把某张图的矫正变换套用到另一张图时使用。
 ---
 
-# topo-correction（STM 拓扑图几何矫正，v2.1）
+# affine-correction（STM 拓扑图几何矫正，v2.2）
 
 **范围**：本 skill 只做**几何矫正数学**——数据锚定峰检测、亚像素定位、对称正定拉伸矫正、
 锚定自检。畸变在**倒空间**（FFT2）检测、在**实空间**用拟合拉伸的逆重采样。
@@ -28,15 +28,24 @@ description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 
 
 ```bash
 cd /path/to/STM_DataProcessing
-MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
-  skills/topo-correction/scripts/stm_topo_correct.py \
-  INPUT.csv -L 50 -o OUT --a 0.246 --anchor-ring r3 --list-rings
+export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
+
+# 第一段：在参考图上拟合（并导出变换 JSON）
+.venv/bin/python skills/affine-correction/scripts/stm_topo_correct.py \
+  INPUT.csv -L 50 -o OUT --a 0.246 --anchor-ring r3 --list-rings \
+  --save-transform OUT/transform.json
+
+# 第二段（可选）：把同一变换应用到另一张拓扑图，-L 给的是那张图自己的视场
+.venv/bin/python skills/affine-correction/scripts/stm_apply_transform.py \
+  TARGET.csv --transform OUT/transform.json -L 50 -o OUT_TARGET
 ```
 
 流程：读入 → `flipud(subtractMeanPlane(...))` → 包内数据锚定峰检测（`bragg_peak.detect_bragg_peaks`）
 → 取数据自身 (1,0) 方向构造显式 `LatticeSpec` → `correct_bragg_peaks` 对称正定拉伸
 （纯拉伸、零旋转，加权最小二乘，失败时闭式回退并记 `meta`）→ `scipy.ndimage.affine_transform`
 重采样（`order=3`，`cval=NaN`），画布 `n_out`、**矫正后视场 = `L · n_out / n`**。
+加 `--save-transform FILE` 时，拟合结束后额外把该变换写成独立 JSON（契约见 §3）；
+**不加这个开关时所有既有输出（log / 报告 / csv / npy / png）逐字节不变**。
 
 ### 2.1 锚定环必须显式指定（v2 核心）
 
@@ -95,20 +104,52 @@ NaN 平面填充）、`<stem>_corrected.png`（gwyddion）、`<stem>_corrected_f
 | `affine_q` | `correction_report.json` 里拟合出的对称正定拉伸 M：把**测得**倒格矢映射到**理想**倒格矢；实空间矫正重采样用的是 M⁻¹（数组坐标 `A = P·M⁻¹·P`，`P` 为轴交换） |
 | `anchor_self_check` | `verdict` ∈ `consistent` / `inconsistent` / `unverifiable` + 两条 tell-tale 的字段（见 §2.2） |
 
-**把变换应用到其他图像**：当前**没有 CLI 开关**（拟合与应用于同一张图一步完成）；`affine_q`、
-`n_out`、`correction_report.json` 已完整保存变换，手工对另一张图做同样重采样即可——该功能是
-拆分后可选的后继任务，不在本 skill 范围内。
+**把变换应用到其他图像（两段式，v2.2）**：`--save-transform FILE` 把拟合出的变换写成独立 JSON
+（schema `topo-correction-transform`，`schema_version = 1`；**该 schema id 是冻结的产物标识，本 skill 改名后保持不变**），
+`scripts/stm_apply_transform.py` 再把它应用到**指定的另一张**拓扑图：
 
-## 4 一键 self-test（5 项）
+```bash
+.venv/bin/python skills/affine-correction/scripts/stm_apply_transform.py \
+    TARGET.csv --transform OUT/transform.json -L <TARGET 自己的视场 nm> \
+    [-o OUT_TARGET] [--delimiter ','] [--stm-lib DIR]
+```
+
+apply 段只做**重采样**：与拟合段同样的读入/分隔符自动识别与预处理
+（`flipud(subtractMeanPlane(...))`）→ 用**目标图自己的像素数 n** 重算数组矩阵
+`A = P·M⁻¹·P`、画布 `n_out = 2·(⌈max|A⁻¹·角点|⌉ + pad) + 1` 与 offset（`order` / `pad` 取自 JSON）
+→ `scipy.ndimage.affine_transform`（`cval=NaN`）→ 输出与拟合段同名的产物
+（`<stem>_corrected.csv`、`_corrected_fft2.npy`、`_corrected.png`、`_corrected_fft.png`）、
+`correction.log`（含上面的契约行）与 `apply_report.json`。
+**不重新检测峰、不重跑锚定自检**；矫正后视场 `= L · n_out / n`。
+`method == "identity_fallback"` 时（拟合段本来就没能矫正）目标图**原样复制**：
+`n_out = n`、视场不变、不加 NaN，log 里打 WARNING。
+
+| transform JSON 字段 | 含义 |
+| --- | --- |
+| `schema` / `schema_version` | `topo-correction-transform` / `1`；apply 段校验，不匹配或 `affine_q` 非有限 2×2 / `det ≤ 0` 时打印原因并以非零码退出 |
+| `affine_q` | 拟合出的对称正定拉伸 M（apply 段只用它重算几何） |
+| `affine_image_reference` / `n_px_reference` / `n_out_reference` / `field_of_view_nm_reference` | 参考图的数组矩阵、像素数、画布与视场（记录用） |
+| `pad` / `order` | 重采样边距与样条阶数（apply 段直接采用） |
+| `method` / `fallback` / `n_labelled` / `anchor_ring` / `a_nm` / `a_ref_nm` / `stretch_scale_sqrt_det` / `anchor_verdict` | 拟合来源与可信度，原样透传进 apply 的 log 与 `apply_report.json` |
+| `source_report` / `source_input` | 拟合段 `correction_report.json` 与参考输入图的绝对路径 |
+| `usage` | 一段命令行使用提示字符串 |
+
+`apply_report.json` 的字段：`skill`、`stage`、`input`、`transform_file`、`source_report`、`source_input`、
+`method`、`fallback`、`anchor_verdict`、`field_of_view_nm`、`n_px`、`affine_q`、`matrix_used`、
+`offset`、`n_out`、`corrected_field_of_view_nm`、`corrected_nm_per_px`、`nan_fraction` 与
+`written`（六个产物路径）。注意 `anchor_verdict` 是**参考图**的结论：apply 段不做自检，
+是否可信取决于参考图与目标图是否可比。
+
+## 4 一键 self-test（6 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
 MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
-  .venv/bin/python skills/topo-correction/scripts/selftest.py
+  .venv/bin/python skills/affine-correction/scripts/selftest.py
 # 可选：--workdir DIR、--keep
 ```
 
-覆盖与验收阈值（实测 **5/5** 通过，约 1 min）：
+覆盖与验收阈值（实测 **6/6** 通过，约 1.5 min）：
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -117,11 +158,20 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 | 3 | 锚定环反演的 1x1 晶格常数回来 | 与标称 `a = 0.246 nm` 偏差 < 1 % |
 | 4 | 正确锚定（r3）通过自检 | `anchor_self_check.verdict == consistent`（实测比值 1.734029，偏 0.1142 %） |
 | 5 | 错误锚定（1x1）被同一自检抓住 | `verdict != consistent`（实测比值 1.871416，偏 8.05 %） |
+| 6 | 两段式变换（单条检查，内部 (a)–(e) 子步骤）：(a) `--save-transform` 导出的 JSON 20 个字段齐全、`affine_q` 与 `correction_report.json` 逐位一致；(b) 同一参考图 apply → `_corrected.csv` 与拟合段一致（`np.allclose rtol=atol=1e-10`，NaN 掩码相同且实测逐字节相同）；(c) 换尺寸目标（生成器 160 → 画布 183 px）的 `n_out` 按**目标 n** 重算（期望 205，与参考图 435 不同）、log 契约行视场 = `L·n_out/n`、`apply_report.json` 写出；(d) 本地 `_image_transform` 镜像与包内 `bragg_peak.correct._image_transform` 在矩阵 / `n_out` / offset 上逐位一致；(e) `identity_fallback` 变换 → 目标原样复制且 log 含 WARNING | (a)–(e) 全部通过 |
 
-包不可导入时检查 1 以 informational 跳过（同原 self-test 的分支）。
+包不可导入时检查 1 与检查 6 各自以 informational 跳过（同原 self-test 的分支）。
 
 ## 5 修改记录
 
+2026-09（改名，本版）：skill 由 `topo-correction` 改名为 `affine-correction`——目录、frontmatter
+`name:`、文档与用法示例脚本路径同步改名；**运行时行为零变化**：产物 schema id
+`topo-correction-transform`、报告 `skill` 字段值 `"topo-correction"`、log/stdout 行与 CLI help
+文本逐字节不变（改名只动名字，不动产物）。本条目之前的记录保留当时的旧名 `topo-correction`。
+见 `CHANGES.md`。
+2026-09（v2.2）：新增两段式变换——`stm_topo_correct.py --save-transform` 导出独立变换 JSON +
+新脚本 `stm_apply_transform.py` 应用到另一张图；self-test 5 → 6 项。不加开关时既有输出逐字节不变。
+见 `CHANGES.md`。
 2026-09（拆分，本版）：从 `stm-topo-phase-analysis` 拆出独立 skill（目录
 `skills/topo-correction/`）；`stm_topo_correct.py` 的兄弟依赖（`group_rings`、样式/色图 helper）
 内聚为 `correction_lib.py`；自带 5 项 self-test。输出与 log 格式逐字节不变（跨 skill 契约）。
