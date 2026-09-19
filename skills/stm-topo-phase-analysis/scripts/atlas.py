@@ -356,16 +356,28 @@ class Atlas:
         norm = np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0)
         fig, ax = plt.subplots(figsize=(6.5, 6))
         ax.imshow(norm, cmap="inferno", origin="lower")
-        for (qx, qy) in centres:
+        # The peak index of a circle is its position in ``centres``, i.e. the same
+        # index the per-peak figures and phase_stats.json use (p0 .. p5); the label
+        # is placed radially outside the circle, away from the FFT2 centre, so it
+        # never covers the masked reflection itself.
+        centre_q = (fft2.shape[1] / 2.0, fft2.shape[0] / 2.0)
+        for index, (qx, qy) in enumerate(centres):
             ax.add_patch(plt.Circle((qx, qy), mask_radius, fill=False,
                                     color="#39ff14", lw=1.2))
+            radial = np.array([float(qx) - centre_q[0], float(qy) - centre_q[1]])
+            length = float(np.hypot(*radial))
+            unit = radial / length if length > 0 else np.array([1.0, 0.0])
+            tip = np.array([float(qx), float(qy)]) + (mask_radius + 8.0) * unit
+            ax.text(float(tip[0]), float(tip[1]), f"p{index}", color="#39ff14",
+                    fontsize=10, fontweight="bold", ha="center", va="center")
         ax.set_xlim(0, fft2.shape[1])
         ax.set_ylim(0, fft2.shape[0])
         ax.set_xticks([])
         ax.set_yticks([])
         fig.tight_layout()
         return self.add(fig, name, label, values, paths, ring, "summary",
-                        panels=["FFT2 log amplitude with the ring masks"])
+                        panels=["FFT2 log amplitude with the ring masks "
+                                "(p0-p5 labelled at the circle rims)"])
 
     def mask_pair(self, psi, valid, label, values, paths, ring, name, kind, peak,
                   mask_note=None):

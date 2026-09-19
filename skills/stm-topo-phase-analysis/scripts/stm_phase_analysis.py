@@ -38,6 +38,7 @@ import csv
 import json
 import re
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +59,19 @@ SUMMARY_FIGURES = ("qspace_mask", "mask_all_in", "mask_all_out",
 PEAKS_PER_RING = 6
 FIGURES_PER_RING = PEAKS_PER_RING * len(PER_PEAK_FIGURES) + len(SUMMARY_FIGURES)
 
+# One "field of view <value> nm" occurrence of a correction log
+FovMatch = namedtuple("FovMatch", "value size_nm corrected label line")
+
+# A correction log states the field of view of the *input* canvas first and the
+# field of view of the *corrected* canvas later (the correction resamples onto a
+# larger canvas at a constant nm/px, so the corrected field of view is the one a
+# phase analysis of the corrected CSV needs).
+FOV_FROM_LOG_HELP = (
+    "read the field of view from a correction log; the "
+    "'# corrected canvas: ... field of view <value> nm' line of "
+    "stm_topo_correct.py wins, otherwise the last 'field of view <value> nm' "
+    "line of the log is used")
+
 
 # --------------------------------------------------------------------------- #
 # command line and small helpers
@@ -70,8 +84,7 @@ def parse_args(argv=None):
     parser.add_argument("-L", "--size-nm", type=float, default=None,
                         help="field of view of the corrected image in nm")
     parser.add_argument("--size-nm-from-log", default=None,
-                        help="read the field of view from a correction log "
-                             "(the line 'field of view <value> nm')")
+                        help=FOV_FROM_LOG_HELP)
     parser.add_argument("--fft2", default=None,
                         help="complex FFT2 npy; default: computed from the CSV with the "
                              "same FFT routine as the detector path")
@@ -127,15 +140,57 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def parse_fov_log(text):
+    """All 'field of view <value> nm' occurrences of a correction log, in order.
+
+    The pattern accepts the optional 'corrected canvas: ' label, so one scan
+    covers both the input-canvas line and the corrected-canvas line of
+    ``stm_topo_correct.py``.
+    """
+    pattern = re.compile(r"field of view\s+([\d.]+)\s+nm")
+    matches = []
+    for line in text.splitlines():
+        hit = pattern.search(line)
+        if not hit:
+            continue
+        matches.append(FovMatch(value=float(hit.group(1)),
+                                size_nm=hit.group(1),
+                                corrected="corrected canvas" in line,
+                                label=("corrected canvas line" if "corrected canvas" in line
+                                       else "input canvas line"),
+                                line=line.strip()))
+    return matches
+
+
 def field_of_view(args):
+    """The field of view in nm plus a one-line provenance string.
+
+    ``--size-nm-from-log`` reads a correction log: the corrected-canvas line is
+    the field of view of the CSV that is being analysed, while the input-canvas
+    line is the field of view *before* the correction (a different canvas), so
+    the corrected-canvas line wins.  Without it the last occurrence wins: a log
+    written by ``stm_topo_correct.py`` ends with the corrected canvas, and a
+    plain log with a single line has that line as its last one.  Neither present
+    is an error.
+    """
+    headline = "# field of view from log"
     if args.size_nm is not None:
-        return float(args.size_nm)
+        value = float(args.size_nm)
+        return value, f"{headline}: {value:.4f} nm (command line -L/--size-nm)"
     if args.size_nm_from_log:
-        text = Path(args.size_nm_from_log).read_text()
-        match = re.search(r"field of view ([\d.]+) nm", text)
-        if match:
-            return float(match.group(1))
-        raise SystemExit(f"no 'field of view <value> nm' line in {args.size_nm_from_log}")
+        source = Path(args.size_nm_from_log)
+        if not source.is_file():
+            raise SystemExit(f"--size-nm-from-log {source}: no such file")
+        try:
+            text = source.read_text()
+        except OSError as exc:  # noqa: PERF203 - report the log, do not traceback
+            raise SystemExit(f"--size-nm-from-log {source}: cannot read it ({exc})")
+        matches = parse_fov_log(text)
+        if matches:
+            chosen = next((item for item in matches if item.corrected), matches[-1])
+            return chosen.value, (f"{headline}: {chosen.value:.4f} nm "
+                                  f"({chosen.label}; {source})")
+        raise SystemExit(f"no 'field of view <value> nm' line in {source}")
     raise SystemExit("a field of view is required: pass -L <nm> or --size-nm-from-log")
 
 
@@ -589,7 +644,7 @@ def main(argv=None):
     csv_path = Path(args.input)
     outdir = Path(args.outdir) if args.outdir else csv_path.parent
     outdir.mkdir(parents=True, exist_ok=True)
-    size_nm = field_of_view(args)
+    size_nm, fov_source = field_of_view(args)
     log_lines = []
 
     def emit(text=""):
@@ -637,6 +692,7 @@ def main(argv=None):
     emit("# phase statistics of a corrected topography image (geometry and "
          "mathematics only; skill version " + SKILL_VERSION + ")")
     emit(f"# input: {csv_path}")
+    emit(fov_source)
     emit(f"# canvas: {n} x {n} px, field of view {size_nm} nm ({size_nm / n:.6f} nm/px), "
          f"valid pixels {100 * float(np.mean(valid)):.2f} %")
     emit(f"# FFT2: {fft_source}")
@@ -696,6 +752,7 @@ def main(argv=None):
         payload = {"skill": "stm-topo-phase-analysis", "skill_version": SKILL_VERSION,
                    "status": choice["status"], "input": str(csv_path),
                    "canvas_px": n, "field_of_view_nm": size_nm,
+                   "field_of_view_source": fov_source,
                    "detector": detector, "rings": ring_rows,
                    "ring_selection": selection}
         (outdir / "phase_stats.json").write_text(json.dumps(payload, indent=2) + "\n")
@@ -900,6 +957,7 @@ def main(argv=None):
         "input": str(csv_path),
         "canvas_px": n,
         "field_of_view_nm": size_nm,
+        "field_of_view_source": fov_source,
         "nm_per_px": size_nm / n,
         "valid_fraction": float(np.mean(valid)),
         "detector": detector,

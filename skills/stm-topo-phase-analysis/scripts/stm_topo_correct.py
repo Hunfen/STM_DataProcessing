@@ -57,8 +57,19 @@ sys.path.insert(0, str(HERE))
 import atlas as at  # noqa: E402
 import phasepipe as pp  # noqa: E402
 
-SKILL_VERSION = "2.0"
+SKILL_VERSION = "2.0"  # the three v2.1 fixes change no number of the existing report
 PATCH_HALF = 8  # sub-pixel Gaussian patch half width: 8 -> 17x17 pixels
+# Global stretch tell-tale tolerance of the anchor self-check: |det M|^(1/2) is the
+# overall scale factor of the fitted stretch, and a correct anchor leaves it within
+# a couple of percent of 1 (only the small anisotropy that the fit is meant to undo),
+# while a mis-stated anchor ring gives exactly 1/sqrt(3) = 0.5774 or sqrt(3) = 1.7321
+# (whatever the stretch then does to the *other* ring, which is a factor sqrt(3) too
+# far) and a wrong field of view L scales the whole fit by the same factor.  The
+# package's own tolerances are 3 % (ring radius clustering) and 2 % (label matching),
+# so 5 % separates the two regimes with margin on both sides: the wrong-anchor
+# examples miss it by 42 % / 73 %, while the measured deviation of a correct fit is
+# at most a few percent.
+STRETCH_SCALE_TOL = 0.05
 
 
 def parse_args(argv=None):
@@ -294,36 +305,94 @@ def main(argv=None):
             f"{float(ring['radius']) * 2 * np.pi / correction.size_nm:.4f} nm^-1 "
             f"({len(ring['members'])} members)"
             for ring in after_rings))
-    # Non-circular anchor self-check: the correct anchor makes the two strongest
-    # rings of the corrected image a 1 : sqrt(3) pair, because the correction
-    # places only the anchored ring on the ideal radius.  A wrong anchor leaves the
-    # other ring at a ratio far from sqrt(3), which is the signature to look at.
+    # Anchor self-check, two independent tell-tales.
+    #
+    # (a) The radius ratio of the two strongest corrected rings is 1 : sqrt(3) for a
+    # correct anchor, because the correction places only the anchored ring on the
+    # ideal radius.
+    #
+    # (b) The same ratio is NOT enough on real data: when the raw image already
+    # carries an exact 1 : sqrt(3) ring pair, a wrong anchor keeps that ratio while
+    # it multiplies the whole fit by 1/sqrt(3) (or sqrt(3)).  The global stretch
+    # scale |det M|^(1/2) is the tell-tale that survives this, and it is
+    # non-circular in the same way: it is fixed by the two reference radii, not by
+    # "the anchored ring reached its ideal radius".
     check = {"ratio": None, "deviation": None, "consistent": None,
              "verdict": "unverifiable", "outer_radius_px": None,
              "inner_radius_px": None, "tolerance": float(args.ring_cluster_tol),
-             "n_rings": len(after_rings)}
+             "n_rings": len(after_rings),
+             "stretch_scale_sqrt_det": float(stretch_scale),
+             "stretch_scale_tolerance": float(STRETCH_SCALE_TOL),
+             "stretch_scale_deviation": None,
+             "stretch_scale_consistent": None,
+             "ratio_consistent": None,
+             "verdict_reason": None}
+    stretch_deviation = abs(stretch_scale - 1.0)
+    stretch_ok = bool(stretch_deviation <= STRETCH_SCALE_TOL)
+    check.update({"stretch_scale_deviation": float(stretch_deviation),
+                  "stretch_scale_consistent": stretch_ok})
+    if not stretch_ok:
+        emit(f"# WARNING: the global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
+             f"deviates {100 * stretch_deviation:.2f} % from 1 (tolerance "
+             f"{100 * STRETCH_SCALE_TOL:.0f} %): the fit rescaled the whole image. "
+             "Either the anchor ring is mis-stated (try the other --anchor-ring) or "
+             "the field of view L is wrong; both stretch the fit by a global factor.")
+    ratio_ok = None
     if len(after_rings) >= 2:
         strongest = sorted(after_rings, key=lambda ring: -ring["total_amplitude"])[:2]
         outer = max(strongest, key=lambda ring: ring["radius"])
         inner = min(strongest, key=lambda ring: ring["radius"])
         ratio = float(outer["radius"]) / float(inner["radius"])
         deviation = abs(ratio - np.sqrt(3.0)) / np.sqrt(3.0)
+        ratio_ok = bool(deviation <= args.ring_cluster_tol)
         check.update({"ratio": ratio, "deviation": deviation,
-                      "consistent": bool(deviation <= args.ring_cluster_tol),
+                      "consistent": ratio_ok,
+                      "ratio_consistent": ratio_ok,
                       "outer_radius_px": float(outer["radius"]),
                       "inner_radius_px": float(inner["radius"])})
-        check["verdict"] = "consistent" if check["consistent"] else "inconsistent"
         emit(f"# anchor self-check: the two strongest corrected rings are at a radius "
              f"ratio {ratio:.6f} (1/sqrt(3) pair: {np.sqrt(3.0):.6f}, deviation "
-             f"{100 * deviation:.4f} %) -> anchor verdict = {check['verdict']}")
+             f"{100 * deviation:.4f} %) -> ring-pair verdict = "
+             f"{'consistent' if ratio_ok else 'inconsistent'}")
     else:
         emit(f"# anchor self-check: only {len(after_rings)} ring(s) with at least six "
              f"members detected on the corrected image -> the 1 : sqrt(3) ring pair "
-             f"cannot be confirmed (anchor verdict = {check['verdict']})")
+             f"cannot be confirmed")
+    emit(f"# anchor self-check: global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
+         f"(deviation {100 * stretch_deviation:.4f} % from 1, tolerance "
+         f"{100 * STRETCH_SCALE_TOL:.0f} %) -> stretch verdict = "
+         f"{'consistent' if stretch_ok else 'inconsistent'}")
+    # Both tell-tales are necessary and neither is sufficient: the combination is
+    # inconsistent as soon as one of them fails, unverifiable when the ring pair
+    # cannot be formed at all and the stretch scale is the only evidence left.
+    reasons = []
+    if not stretch_ok:
+        reasons.append(f"global stretch scale {stretch_scale:.5f} deviates "
+                       f"{100 * stretch_deviation:.2f} % from 1 (tolerance "
+                       f"{100 * STRETCH_SCALE_TOL:.0f} %): the anchor ring is "
+                       "mis-stated or the field of view L is wrong")
+    if ratio_ok is False:
+        reasons.append(f"the two strongest corrected rings are at a radius ratio "
+                       f"{check['ratio']:.6f}, not 1 : sqrt(3)")
+    if ratio_ok is None:
+        reasons.append("fewer than two corrected rings with at least six members: "
+                       "the 1 : sqrt(3) pair cannot be formed")
+    if not stretch_ok or ratio_ok is False:
+        check["verdict"] = "inconsistent"
+    elif ratio_ok is None:
+        check["verdict"] = "unverifiable"
+    else:
+        check["verdict"] = "consistent"
+    check["verdict_reason"] = ("; ".join(reasons) if reasons else
+                               "the global stretch scale is within tolerance and the "
+                               "two strongest corrected rings form a 1 : sqrt(3) pair")
+    emit(f"# anchor verdict = {check['verdict']} "
+         f"({check['verdict_reason']})")
     if check["verdict"] != "consistent":
-        emit("# WARNING: the corrected image does not show a 1 : sqrt(3) ring pair. "
-             "Either the anchor ring is mis-stated (try the other --anchor-ring) or "
-             "the data does not contain such a pair.")
+        emit("# WARNING: the corrected image does not show a 1 : sqrt(3) ring pair "
+             "with an unscaled fit. Either the anchor ring is mis-stated (try the "
+             "other --anchor-ring), the field of view L is wrong, or the data does "
+             "not contain such a pair.")
 
     corrected = np.asarray(correction.image, dtype=float)
     out_csv = outdir / f"{stem}_corrected.csv"

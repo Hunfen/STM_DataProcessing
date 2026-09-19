@@ -7,6 +7,38 @@
 
 ---
 
+## v2.1 修复（最新，2026-09-19；三处缺陷，未重新处理任何数据）
+
+修复对象是 **v2 自身**的三个缺陷（不是相对 v1 的改动）；机制与验证证据见
+`FIX_SUMMARY.md`，验证产物保留在 `_work/`（`selftest/`、`fov_check/`、
+`anchor_wrong/`、`anchor_right/`）。**未改动**：`data/` 与
+`data_processing/topo4_50nm_analysis_mask10px/` 的既有产物、任何相位口径与估计量定义。
+
+| # | 缺陷（现象） | 改动 |
+| --- | --- | --- |
+| F1 | `stm_phase_analysis.py --size-nm-from-log` 用 `re.search` 取 log **第一处** `field of view`，即**输入画布**行（topo4: 50 nm），而脚本分析的是**矫正后** CSV（矫正后画布 51.7090 nm ⇒ nm/px、环半径、物理 |q| 全错） | 改为按优先级解析：① 带 `corrected canvas` 标签的行；② 无该行时取**最后一处**匹配；③ 都没有则报错。取值后 log 打印来源说明（`# field of view from log: 51.7090 nm (corrected canvas line; ...)`），JSON 增 `field_of_view_source`（纯新增字段，既有字段与数字不变） |
+| F2 | 锚定自检只看**矫正后两个最强环的半径比**。当 raw 数据本身已有精确 1 : √3 环对时，错锚定把整个拟合按 1/√3 全局拉伸，矫正后比值**仍是** √3 ⇒ 误报 `verdict=consistent`（topo4 错锚实测 `\|det M\|^(1/2) = 0.57843`、反演 1x1 晶格常数偏 +73.9 %，却仍 consistent） | 新增**全局拉伸尺度 tell-tale**：`\|det M\|^(1/2)` 偏离 1 超过 `STRETCH_SCALE_TOL = 5 %` 即打 WARNING 并把 `anchor_self_check.verdict` 判为 `inconsistent`；`verdict_reason` 说明是"锚定环标错"还是"视场 L 标错"（两者都会整体缩放拟合）。`anchor_self_check` 新增 `stretch_scale_sqrt_det` / `stretch_scale_deviation` / `stretch_scale_consistent` / `ratio_consistent` / `verdict_reason`，**既有字段（`ratio`/`deviation`/`consistent`/`verdict`/`outer_radius_px`/`inner_radius_px`/`tolerance`/`n_rings`）保持不变**；`unverifiable` 分支与 ratio 判据逻辑不变。容差理由：包自身口径是环聚类 3 % / 标签匹配 2 %，正确实测偏 ≤2 %，错锚实测偏 42 %/73 %，5 % 两侧都有余量 |
+| F3 | `atlas.py` 的 `qspace_mask` 图只画六个 mask 圆、**不标峰号**，看图无法把圆与 `p0…p5`（per-peak 图与 `phase_stats.json` 的峰号）对应 | 每个圆在**圆外沿径向外侧**（背离 FFT 中心方向、半径 `mask_radius + 8` px）标 `p{i}`，颜色同圆框 `#39ff14`、字号 10、粗体、`ha/va=center`；该图 `panels` 改为 `["FFT2 log amplitude with the ring masks (p0-p5 labelled at the circle rims)"]`，`SKILL.md` 图集表第 4 行同步 |
+
+**验证结果（实测，命令与输出见 `FIX_SUMMARY.md`）**：
+
+| 验证 | 结果 |
+| --- | --- |
+| 全量 `selftest.py`（含图集契约、锚定自检、端到端两轮管线、新增的 `--size-nm-from-log` 三项） | 退出码 **0**，全部检查通过（**72/72**，其中 v2.1 新增 3 项；v2 原为 69 项） |
+| `stm_phase_analysis.py ... --size-nm-from-log <correction.log>`（矫正后 CSV，`--no-figures`） | log 头部 `# field of view from log: 51.7090 nm (corrected canvas line; ...)`、`# canvas: 1059 x 1059 px, field of view 51.709 nm (0.048828 nm/px)` ⇒ **不再是 50 nm** |
+| `stm_topo_correct.py ... --anchor-ring 1x1`（错锚） | `\|det M\|^(1/2) = 0.57843`、WARNING、`anchor verdict = inconsistent`（`verdict_reason` 指全局拉伸） |
+| `stm_topo_correct.py ... --anchor-ring r3`（正确锚） | `\|det M\|^(1/2) = 1.00187`、`anchor verdict = consistent`（`stretch scale ... consistent` + `ring-pair ... consistent`） |
+| `atlas.py --check`（selftest 内两轮图集） | 非零 checks 全部通过、`ATLAS CHECK PASSED` |
+| `RING_qspace_mask.png` 峰号标注（selftest 图集两族 + 文本调用探针） | 每张图 6 个 `p0…p5` 文本、位置 = 圆心 + (mask 半径+8)·径向外单位矢量（实测与契约逐位一致，d = 0）、颜色 `#39ff14`、字号 10、`ha/va=center`；12/12 个标签（两族 ×6）落在圆外径向带上 |
+
+**保留的已知行为**（本次未改，如实记录）：`stm_topo_correct.py` 的 `correction_report.json`
+顶层 `stretch_scale_sqrt_det` 字段（v2 既有字段）与 `anchor_self_check.stretch_scale_sqrt_det`
+现在**同值双份**——顶层那份是 v2 的既有契约不动，`anchor_self_check` 里那份让自检结论与数字就地可读。
+
+---
+
+## v2（原版条目，下同）
+
 ## 0 结构
 
 | # | 改动 | 理由 |

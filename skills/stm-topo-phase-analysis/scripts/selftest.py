@@ -1202,6 +1202,79 @@ def _ratio_text(check_result):
             f"{100 * check_result['deviation']:.4f} % from sqrt(3))")
 
 
+def test_field_of_view_from_log(n, workdir):
+    """--size-nm-from-log must read the corrected canvas, not the input canvas.
+
+    A correction log states the field of view twice: the input canvas first and the
+    corrected canvas later (the correction resamples onto a larger canvas at a
+    constant nm/px).  The script analyses the corrected CSV, so the corrected line
+    is the right one; reading the first match silently wrong scales every radius.
+    """
+    section("field of view from a correction log (corrected canvas, not input canvas)")
+    env = dict(os.environ)
+    env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    base = workdir / "fov_from_log"
+    base.mkdir(parents=True, exist_ok=True)
+    csv_path = base / "synthetic.csv"
+    write_synthetic_csv(csv_path, n)
+    size_nm, gain = 50.0, 1.03
+    log_path = base / "correction.log"
+    log_path.write_text(
+        "# geometry correction through the bragg_peak package (skill version 2.0)\n"
+        f"# canvas {n} x {n} px, field of view {size_nm:g} nm ({size_nm / n:.6f} nm/px)\n"
+        f"# corrected canvas: {int(round(n * gain))} x {int(round(n * gain))} px, "
+        f"field of view {size_nm * gain:.4f} nm ({size_nm / n:.6f} nm/px)\n")
+    outdir = base / "out"
+    completed = run_script("stm_phase_analysis.py",
+                           [str(csv_path), "-o", str(outdir), "--size-nm-from-log",
+                            str(log_path), "--detector", "builtin", "--no-figures"],
+                           env)
+    log = (outdir / "phase_stats.log").read_text() if (outdir / "phase_stats.log").is_file() else ""
+    payload = (json.loads((outdir / "phase_stats.json").read_text())
+               if (outdir / "phase_stats.json").is_file() else {})
+    check("--size-nm-from-log takes the corrected canvas line, not the input canvas one",
+          completed.returncode == 0
+          and payload.get("field_of_view_nm") == size_nm * gain
+          and f"field of view {size_nm * gain:g} nm" in log
+          and "corrected canvas line" in (payload.get("field_of_view_source") or ""),
+          f"exit code {completed.returncode}, field_of_view_nm = "
+          f"{payload.get('field_of_view_nm')} (input canvas {size_nm:g} nm, corrected "
+          f"canvas {size_nm * gain:.4f} nm), log header "
+          f"{'has' if f'field of view {size_nm * gain:g} nm' in log else 'MISSING'} "
+          f"the corrected value",
+          f"{size_nm * gain:.4f} nm from the corrected canvas line")
+    plain = base / "plain.log"
+    plain.write_text(f"# canvas {n} x {n} px, field of view {size_nm:g} nm\n")
+    outdir_plain = base / "out_plain"
+    completed = run_script("stm_phase_analysis.py",
+                           [str(csv_path), "-o", str(outdir_plain), "--size-nm-from-log",
+                            str(plain), "--detector", "builtin", "--no-figures"],
+                           env)
+    payload_plain = (json.loads((outdir_plain / "phase_stats.json").read_text())
+                     if (outdir_plain / "phase_stats.json").is_file() else {})
+    check("--size-nm-from-log falls back to the last 'field of view' match",
+          completed.returncode == 0
+          and payload_plain.get("field_of_view_nm") == size_nm,
+          f"exit code {completed.returncode}, field_of_view_nm = "
+          f"{payload_plain.get('field_of_view_nm')} for a log whose only line is "
+          f"{size_nm:g} nm", f"{size_nm:.4f} nm")
+    empty = base / "empty.log"
+    empty.write_text("# no field of view line at all\n")
+    outdir_empty = base / "out_empty"
+    completed = run_script("stm_phase_analysis.py",
+                           [str(csv_path), "-o", str(outdir_empty), "--size-nm-from-log",
+                            str(empty), "--detector", "builtin", "--no-figures"],
+                           env)
+    text = completed.stderr + completed.stdout
+    needle = "no 'field of view"
+    check("--size-nm-from-log without any match is an explicit error",
+          completed.returncode != 0 and needle in text,
+          f"exit code {completed.returncode}, message "
+          f"{'present' if needle in text else 'MISSING'}",
+          "non-zero exit with an explicit message")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--workdir", default=None,
@@ -1239,6 +1312,7 @@ def main(argv=None):
               "informational")
     else:
         test_pipeline_contract(args.size, workdir)
+        test_field_of_view_from_log(args.size, workdir)
         test_correction_stage(args.size, workdir)
 
     failed = [name for name, ok, _ in RESULTS if not ok]

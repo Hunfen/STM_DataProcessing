@@ -13,7 +13,7 @@
 | `scripts/phasepipe.py` | 管线层（反射检测/环聚类/1/√3 配对/单反射场/统计/合成地面真值/重采样） |
 | `scripts/phasemath.py` | 纯数学：加权圆统计（圆均值/中位数/分位数/FWHM/簇/R/幅度）+ 晶格参考规范固定 |
 | `scripts/atlas.py` | 图集：绘图、manifest、PNG 内嵌注解（`tEXt: stm-atlas`）与独立核对器 `--check` |
-| `scripts/selftest.py` | **一键自我验证**（**69 项**：恒等式、估计量、判别边界、环定位分支、图集契约、确定性、矫正阶段） |
+| `scripts/selftest.py` | **一键自我验证**（**72 项**：恒等式、估计量、判别边界、环定位分支、图集契约、确定性、`--size-nm-from-log` 解析、矫正阶段） |
 | `SKILL.md` | 完整方法学、图集清单（每族 25 张 = 每峰 3 张 ×6 + 汇总 7 张）、口径与限制 |
 | `CHANGES.md` | 相对仓库现有版本（v1）的逐条改动与理由 |
 
@@ -53,15 +53,17 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 1. **锚定环显式**：包内数据锚定检测认定的"第一个环"未必是 1x1 环。当 r3 环在内侧（半径比 1/√3）时，
    按 1x1 给参考晶格会把 r3 环拉到 1x1 半径上、破坏几何。`--anchor-ring r3` 把 `a_ref` 取为 `√3·a`。
    报告给出 `method/fallback`、`|b1|` 前后、`n_out`、视场、NaN 比、反演晶格常数，以及**非循环**的
-   `anchor verdict`（矫正后两强环是否构成 1 : √3 对）。
+   `anchor verdict`（矫正后两强环是否构成 1 : √3 对**且**全局拉伸尺度 `|det M|^(1/2)` 在 5 % 容差内——
+   后者才挡得住"原始数据本身已有精确 1 : √3 环对"时的错锚，见 `CHANGES.md` v2.1 的 F2）。
 2. **两族同口径**：`ring_r3` 由 `ring_1x1` 半径的 1/√3 定位（容差可配）；定位不到就如实报
    "r3 ring not found"（退出码 2，不画图，不猜）。
 3. **唯一的相位估计量**：相位值 = mask 内**未加门**的幅度加权圆均值（= 该反射全局相位）；
    中位数/FWHM/簇/簇宽是**加门**样本的形状描述量——引用时门必须一起给出。
 4. **图集契约**：每族 25 张（每峰 3 张 ×6 + 汇总 7 张）、两族 50 张；逐峰 φ(r) 相位图是
-   `RING_p{i}_phi_dist.png` 的**左面板**；每张图的标题、manifest（含 `panels`）与 PNG `tEXt` 用**同一份
-   注解字典**，注解数字指向 `phase_stats.json` 的路径，可用 `atlas.py --check` 一条命令第三方复核
-   （self-test 与 `e2e_scratch/run_smoke.sh` 都以命令行方式真跑这一步）。
+   `RING_p{i}_phi_dist.png` 的**左面板**；`RING_qspace_mask.png` 的六个 mask 圆在圆外沿径向标
+   `p0…p5`（与 `phase_stats.json` 峰号一一对应）；每张图的标题、manifest（含 `panels`）与 PNG `tEXt`
+   用**同一份注解字典**，注解数字指向 `phase_stats.json` 的路径，可用 `atlas.py --check` 一条命令
+   第三方复核（self-test 与 `e2e_scratch/run_smoke.sh` 都以命令行方式真跑这一步）。
 5. **gauge 与漂移**：单峰绝对相位随图像原点按 `φ → φ − (2π/N)q·δ` 漂移（精确律；加窗画布上
    残差 0.003°，实测漂移率可达 20 °/px）；gauge 后相位（mod 120°，变化 0.0037°）、θ（0.0000°）、
    R、FWHM、簇数不变——self-test 会把这些漂移率与残差逐条打印出来。

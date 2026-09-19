@@ -59,11 +59,24 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
 `|det M|^(1/2)`、画布 `n_out`、矫正后视场与 nm/px、NaN 比例、锚定环反演的晶格常数
 （`a_ref` 与 1x1 的 `a`）。
 
-**锚定自检（非循环）**：矫正只把**锚定环**放到理想半径上，所以"矫正后锚定环 = 理想值"不能
+**锚定自检（非循环，两条 tell-tale）**：矫正只把**锚定环**放到理想半径上，所以"矫正后锚定环 = 理想值"不能
 证明锚定正确；判据是**另一族**——正确的锚定会让矫正后两个最强环构成 1 : √3 对。
-脚本给出 `anchor verdict` ∈ {`consistent`, `inconsistent`, `unverifiable`} 并在非 consistent 时
-打 WARNING。实测：正确锚定 `ratio = 1.732311`（偏 0.015 %）→ consistent；错误锚定
-`ratio = 1.957` → inconsistent（另一组几何下矫正后退化为不足两环 → unverifiable）。
+**但环对比值单独用是不够的**：若**原始数据本身**就有精确的 1 : √3 环对，错的锚定会把整个拟合按一个
+全局因子拉伸（1/√3 或 √3），而矫正后两个最强环仍然相差 √3 ⇒ 只看比值会误报 consistent。
+所以自检同时给出**全局拉伸尺度 `|det M|^(1/2)`**：锚定环或视场 `L` 标错都会让拟合成比例地整体缩放，
+正确锚定的 `|det M|^(1/2)` 只含"要被 undo 的那点各向异性"（≈1），错锚定则给出 0.5774 / 1.7321。
+判定：两条 tell-tale 都通过才 `consistent`；任一条失败即 `inconsistent`（**比值通过、拉伸尺度失败也是
+inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容差内则 `unverifiable`。容差**5 %**
+（`STRETCH_SCALE_TOL`：超出 `[1/1.05, 1.05]` 即失败；包自身口径是环聚类 3 % / 标签匹配 2 %，
+5 % 两侧都有余量——正确实测 ≤2 %，错锚实测偏 42 %/73 %）。log 打印每条 tell-tale 的判词与
+合并后的 `anchor verdict`，`correction_report.json` 的 `anchor_self_check` 里除原有字段外还有
+`stretch_scale_sqrt_det` / `stretch_scale_deviation` / `stretch_scale_consistent` /
+`ratio_consistent` / `verdict_reason`。
+实测（50 nm 视场真实数据，raw 三环本身是 1 : 1/√3 : 1/2）：正确锚定 `--anchor-ring r3`
+→ `|det M|^(1/2) = 1.00187`（偏 0.1868 %）、比值 1.731497（偏 0.0320 %）→ consistent；
+错锚定 `--anchor-ring 1x1` → `|det M|^(1/2) = 0.57843`（≈1/√3，偏 42 %）、反演 1x1 晶格常数
+偏离 +73.9 %，**而环对比值仍是 1 : √3** ⇒ 现在判 inconsistent 并打 WARNING（旧版此处误报 consistent）。
+另一组几何下矫正后退化为不足两环 → unverifiable。
 
 **已知限制**：矫正需要先有**带标签**的晶格；环半径聚类容差 3 %、`match_labels` 容差 2 %
 决定了可用范围 ≈ 各向异性 ≤ 3 %。超出时包返回 `method="identity_fallback"`、`fallback=True`，
@@ -83,6 +96,19 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
   OUT/INPUT_corrected.csv -o OUT/phase --size-nm-from-log OUT/correction.log \
   --pct 5 --gate p50 --anchor auto
 ```
+
+**`--size-nm-from-log` 读的是矫正后画布的视场**：`stm_topo_correct.py` 的 log 里有两处
+`field of view <value> nm`——第一处是**输入画布**（`# canvas ... field of view 50 nm`），
+第二处是**矫正后画布**（`# corrected canvas: ... field of view 51.7090 nm`）。本脚本分析的是
+**矫正后的 CSV**，所以解析按以下优先级取值：
+① 优先取带 `corrected canvas` 标签的那一行；
+② 没有该行时取 log 里**最后一处**匹配（单行 log 即那一行）；
+③ 一处都没有 → 报错退出。
+取值后 log 打印一行来源说明（如
+`# field of view from log: 51.7090 nm (corrected canvas line; .../correction.log)`），
+`phase_stats.json` 的 `field_of_view_source` 同文。实测：直接用矫正产物 log 时，
+旧版取到的是输入画布的 50 nm（nm/px 与环半径全错），现在取到 51.7090 nm。
+手工指定 `-L` 时以命令行值为准（同一行也打印来源）。
 
 **约定（全脚本唯一一套定义）**
 
@@ -209,7 +235,7 @@ manifest 与 `phase_stats.json` 的 `atlas` 段同时声明 25/族。
 | 1 | `RING_p{i}_mask_in.png` | `["amplitude (log)", "phase"]` |
 | 2 | `RING_p{i}_mask_out.png` | `["amplitude (log)", "phase"]` |
 | 3 | `RING_p{i}_phi_dist.png` | `["phi(r) map", "phi distribution"]` —— **逐峰 φ(r) 相位图就是这张图的左面板**（与 v1 的逐峰 map+直方图合图同构），不是缺失的独立文件 |
-| 4 | `RING_qspace_mask.png` | FFT2 对数幅度 + 该族六个 mask 圆 |
+| 4 | `RING_qspace_mask.png` | `["FFT2 log amplitude with the ring masks (p0-p5 labelled at the circle rims)"]` —— 六个 mask 圆各在**圆外沿径向外侧**标 `p0`…`p5`（编号 = `phase_stats.json` 的峰号 0…5，标签颜色同圆框 `#39ff14`，不遮住被 mask 的反射本身） |
 | 5 | `RING_mask_all_in.png` | 六峰一起 mask 的场：幅度 + 相位 |
 | 6 | `RING_mask_all_out.png` | 上述 mask 的补集场：幅度 + 相位 |
 | 7 | `RING_case_phase_histograms.png` | 0/π 相位直方图三联：FFT2、mask OUT、mask IN |
@@ -267,7 +293,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 # 可选：--quick（跳过端到端阶段，约 20 s）、--workdir DIR、--size N、--keep
 ```
 
-覆盖与验收阈值（实测 **69/69** 通过，全程约 3 min；`--quick` 约 25 s）。
+覆盖与验收阈值（实测 **72/72** 通过，全程约 3 min；`--quick` 约 25 s）。
 **两类量的阈值分开定**（与 §3 的口径一致）：
 
 | 类 | 量 | 验收阈值 |
@@ -315,6 +341,10 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 10. **矫正阶段**（能 import 包时）：注入 2 % 各向异性 → 回收 `M = [[1.00995, −0.00006],
    [−0.00006, 0.98994]]`、`|det M|^(1/2) = 0.99990`、反演 `a = 0.2460 nm`；
    锚定自检 consistent；错误锚定被判 not consistent。
+11. **`--size-nm-from-log`**（v2.1 新增，真跑三次）：① 含 `corrected canvas` 行的 log
+   → 取矫正后画布值（实测 51.5000 nm，而非输入画布的 50 nm），log 写明 `corrected canvas line`；
+   ② 只有一行 `field of view` 的 log → 取该行（回退规则）；③ 一处都没有 → 非零退出码 +
+   明确信息。
 
 ## 6 变与不变（引用任何一个数字前请读）
 
@@ -357,3 +387,6 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 r3 由 1/√3 定位与「未检出」分支、唯一的相位估计量定义 + 分布描述量分离、
 Friedel/三独立/三重积/折叠分布/R 全套、图集清单与图-数字契约、一键 self-test、
 命名中性化、`phasepipe`/`phasemath`/`atlas` 三个模块入库。
+2026-09（v2.1）：见 `CHANGES.md` 顶部——`--size-nm-from-log` 改读**矫正后画布**视场（含回退规则与
+来源打印）、锚定自检新增**全局拉伸尺度 tell-tale**（错锚不再误报 consistent）、`qspace_mask` 图标注
+峰号 `p0–p5`；三处均为 v2 自身缺陷的修复，未改任何相位口径、未重新处理数据。
