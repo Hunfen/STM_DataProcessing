@@ -21,7 +21,7 @@ read_atomic_positions raised RuntimeError even when the lattice vectors were
 available; now positions_frac = positions_ang @ inv(avecs) is used.
 
 All fixtures are synthetic OpenMX-style files written to
-tmp_verify/openmx_fixture/ (no real OpenMX output exists in this repo).
+var/openmx_fixture/ (no real OpenMX output exists in this repo).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from stm_data_processing.dft.openmx.dos import load_dos_tree
 from stm_data_processing.dft.openmx.parser import OpenMX
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURE_ROOT = REPO_ROOT / "tmp_verify" / "openmx_fixture"
+FIXTURE_ROOT = REPO_ROOT / "var" / "openmx_fixture"
 
 DOS_CONTENT = "# E DOS IDOS\n-10.0 0.5 1.0\n-9.0 0.4 1.4\n"
 PDOS_1S = "# E DOS IDOS\n-10.0 0.1 0.3\n-9.0 0.2 0.5\n"
@@ -51,7 +51,7 @@ PDOS_1TOTAL = "# E DOS IDOS\n-10.0 0.3 0.9\n-9.0 0.25 1.15\n"
 
 
 def build_fixtures() -> None:
-    """Write the synthetic OpenMX fixtures under tmp_verify/openmx_fixture/."""
+    """Write the synthetic OpenMX fixtures under var/openmx_fixture/."""
     flat = FIXTURE_ROOT / "flat_dos"
     subdir = FIXTURE_ROOT / "subdir_dos"
     bands_dir = FIXTURE_ROOT / "bands"

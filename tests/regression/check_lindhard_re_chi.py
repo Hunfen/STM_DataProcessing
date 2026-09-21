@@ -188,7 +188,7 @@ _PACKAGE_DIR = _WANNIER90_DIR.parents[1]
 _REGRESSION_DIR = Path(__file__).resolve().parent
 _CLI_PATH = _REGRESSION_DIR.parents[1] / "scripts" / "run_lindhard_re_chi_parallel.py"
 _PLOT_SCRIPT = (
-    _REGRESSION_DIR.parents[1] / "tmp_verify/dl/serverpkg/scripts/plot_lindhard_rechi_cwf53.py"
+    _REGRESSION_DIR.parents[1] / "var/dl/serverpkg/scripts/plot_lindhard_rechi_cwf53.py"
 )
 
 # Real Wannier models used by the wide-model smoke check.  The 75-orbital

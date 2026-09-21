@@ -18,7 +18,7 @@ R2  standard-data acceptance -- the two standard graphene STM datasets are
     lattice fit with an inferred a within +- 7 % of 0.246 nm and <= 60 s per
     image; the data files are opened read-only and their md5 must not change;
 R3  evidence -- one log-magnitude |FFT| PNG per dataset in
-    ``tmp_verify/bragg_rewrite/``: first-ring peaks in **cyan** (``#33d1ff``) and
+    ``var/bragg_rewrite/``: first-ring peaks in **cyan** (``#33d1ff``) and
     weaker labelled peaks in orange (``#ff9f40``).  Cyan is deliberate and
     supersedes the contract's "red" wording (captain ruling R-3): red is hard to
     read on the inferno log-magnitude background, where the strong first-ring
@@ -82,8 +82,8 @@ GAP_TOLERANCE_DEG = 4.0
 WEAK_ANNULUS = (1.2, 3.0)
 WEAK_MIN_PEAKS = 4
 RUNTIME_LIMIT_S = 60.0
-EVIDENCE_DIR = ROOT / "tmp_verify" / "bragg_rewrite"
-CORRECTION_DIR = ROOT / "tmp_verify" / "bragg_correct"
+EVIDENCE_DIR = ROOT / "var" / "bragg_rewrite"
+CORRECTION_DIR = ROOT / "var" / "bragg_correct"
 # Array-axis swap between physical (x, y) and array (row, col) order.
 _AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
 
@@ -311,7 +311,7 @@ def run_orientation_sweep(
     Both sweep axes matter: the 12 axis-aligned orientations cover the three
     folded-angle rotations and the three noise seeds cover the detection draws
     that make a spanning triple appear.  The seed set is deliberately chosen (not
-    0, 1, 2): measured with ``tmp_verify/bragg_rewrite/r6_probe.py``, restoring the
+    0, 1, 2): measured with ``var/bragg_rewrite/r6_probe.py``, restoring the
     round-1 body in-process scores 34/36 cases and 10/12 orientations under this
     configuration (it mislabels the ring at 180 and 240 degrees with seed 3),
     while the shipped code scores 36/36 and 12/12.

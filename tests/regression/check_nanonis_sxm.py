@@ -14,7 +14,7 @@ writes one Z(forward) topography PNG per file for manual inspection.
 
 Every real file carries the b"\x1a\x04" marker, so the fallback to the
 legacy offset (skip two lines, seek two bytes) is additionally exercised
-on marker-stripped copies written to tmp_verify/: the copy must load the
+on marker-stripped copies written to var/: the copy must load the
 identical payload and emit the fallback warning.
 
 Run from the repository root:
@@ -58,10 +58,10 @@ SXM_FILES = [
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0020.sxm",
 ]
 
-PNG_DIR = Path(__file__).resolve().parents[2] / "tmp_verify" / "m15_sxm"
+PNG_DIR = Path(__file__).resolve().parents[2] / "var" / "m15_sxm"
 
 # Marker-stripped copies that exercise the legacy-offset fallback path.
-FALLBACK_DIR = Path(__file__).resolve().parents[2] / "tmp_verify" / "m15_fallback"
+FALLBACK_DIR = Path(__file__).resolve().parents[2] / "var" / "m15_fallback"
 
 
 def old_sxm_raw(f_path: str) -> np.ndarray:
@@ -287,7 +287,7 @@ def check_fallback_path(f_path: str) -> None:
     All real files carry the b"\x1a\x04" binary start marker, so the
     marker-locating path is what runs in production. To cover the fallback
     (legacy skip-two-lines + seek-two-bytes offset), copy the file to
-    tmp_verify with the two marker bytes replaced by b"\x00\x00" and verify
+    var with the two marker bytes replaced by b"\x00\x00" and verify
     the loader still returns the identical payload - it can only do so via
     the fallback - and that the fallback warning was emitted. The real data
     directory is only ever read.

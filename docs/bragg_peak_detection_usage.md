@@ -61,7 +61,7 @@ img2 = load_image("/Users/hunfen/Documents/论文/c6lic6/data_processing/2025111
 result2 = detect_bragg_peaks(img2, 30.0)
 ```
 
-实测基线（默认调用、不调参）见 §6；证据图（log FFT + 峰叠加）在 `tmp_verify/bragg_rewrite/`。
+实测基线（默认调用、不调参）见 §6；证据图（log FFT + 峰叠加）在 `var/bragg_rewrite/`。
 
 ### 1.3 真实 Nanonis 数据
 
@@ -219,7 +219,7 @@ for f in tests/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
 .venv/bin/python -m ruff check src/stm_data_processing/utils/ tests/regression/check_bragg_peak_detection.py
 ```
 
-> 标准数据文件缺失时 R2/R3 打印 SKIP 并仍 exit 0，保证其他机器回归全绿。证据图与验证报告（`verification_report.md`、`review.md`）在 `tmp_verify/bragg_rewrite/`（已 gitignore，仅本地）。
+> 标准数据文件缺失时 R2/R3 打印 SKIP 并仍 exit 0，保证其他机器回归全绿。证据图与验证报告（`verification_report.md`、`review.md`）在 `var/bragg_rewrite/`（已 gitignore，仅本地）。
 
 ---
 

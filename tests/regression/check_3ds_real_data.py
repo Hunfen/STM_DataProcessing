@@ -55,7 +55,7 @@ GRID_3DS = (
     "Grid Spectroscopy001.3ds"
 )
 
-PNG_DIR = Path(__file__).resolve().parents[2] / "tmp_verify" / "m16_3ds"
+PNG_DIR = Path(__file__).resolve().parents[2] / "var" / "m16_3ds"
 
 HEADER_FIELDS = (
     "Grid dim",

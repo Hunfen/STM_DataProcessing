@@ -232,4 +232,4 @@ nk=32 时效率偏低来自**不可分片的固定开销**：每个 worker 都�
 * (t) 日志契约：上述全部 record 真实存在（含进度行与摘要 digest），模块内无 psutil/cupy/get_backend，`_HK_ROW_BLOCK ≤ 512`；
 * (u) 性能数据（只打印不断言）、内存估算上界性、检查点签名拒绝异模型分片。
 
-证据报告：`tmp_verify/lindhard_verify/report.md`、`tmp_verify/lindhard_verify/report_r1r3.md`（独立验证）、`tmp_verify/lindhard_review/report.md`（对抗式评审）、`tmp_verify/lindhard_deploy/report.md`（集成）、`tmp_verify/lindhard_repair/report.md`（findings 修复）。
+证据报告：`var/lindhard_verify/report.md`、`var/lindhard_verify/report_r1r3.md`（独立验证）、`var/lindhard_review/report.md`（对抗式评审）、`var/lindhard_deploy/report.md`（集成）、`var/lindhard_repair/report.md`（findings 修复）。

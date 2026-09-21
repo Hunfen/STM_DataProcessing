@@ -79,7 +79,7 @@ _HEAVY_STAGE_BYTES_PER_ENTRY = 115  # see _MAX_BLOCK_ENTRIES in the engine
 #: Fixed per-worker overhead (interpreter, NumPy, h5py and its read buffers).
 #: Calibrated so that :func:`estimate_worker_rss_bytes` stays an upper bound of
 #: the measured peak RSS (see the estimate-vs-measured table in
-#: ``tmp_verify/lindhard_repair/r4_estimate_check.py``) without making the
+#: ``var/lindhard_repair/r4_estimate_check.py``) without making the
 #: memory guard refuse a legitimate multi-worker run.
 _STATIC_OVERHEAD_BYTES = 1_100_000_000
 
@@ -326,7 +326,7 @@ def estimate_worker_rss_bytes(
     NumPy, h5py and the load buffers.
 
     The result is calibrated to be an *upper bound* of the measured per-worker
-    peak RSS (see ``tmp_verify/lindhard_repair/r4_estimate_check.py`` for the
+    peak RSS (see ``var/lindhard_repair/r4_estimate_check.py`` for the
     estimate-vs-measured table); ``nrpts=None`` only drops the model-array term,
     which the caller should avoid when the model is readable.
     """

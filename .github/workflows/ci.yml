@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Guard against committed measurement data
+        run: |
+          if git ls-files | grep -iE '\.(sxm|3ds|dat|ibw|spm|stp|nid|sm4|npy|npz|h5|hdf5|mat)$'; then
+            echo "::error::measurement data must not be tracked"; exit 1;
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

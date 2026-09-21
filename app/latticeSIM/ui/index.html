@@ -1302,7 +1302,7 @@
   // Electron diffraction figures (LEED / RHEED). Physics comes from
   // ui/diffraction.js (window.Diffraction); numerical equivalence to the
   // Python reference is verified by
-  // tmp_verify/diffraction_js_verify.mjs. LEED has its own tab. The RHEED
+  // var/diffraction_js_verify.mjs. LEED has its own tab. The RHEED
   // tab merges the RHEED spot pattern (RHEEDSIM-style angle projection,
   // replacing the former vertical rod streaks) with the Kikuchi lines of
   // the same grazing-incidence beam k_in (energy E, grazing angle alpha)
@@ -1717,7 +1717,7 @@
     setDiffractionNote(rheedNoteEl, note);
 
     // Expose the last projection state for the headless smoke tests in
-    // tmp_verify/latticesim_rheed_smoke.mjs (drawing-call-independent
+    // var/latticesim_rheed_smoke.mjs (drawing-call-independent
     // assertions on the spot geometry).
     window.__rheedView = {
       energyKeV: E, alphaDeg: alphaDeg, phiDeg: phiDeg,

@@ -62,10 +62,42 @@ cuda-keyring_1.1-1_all.deb.1
 .agent-teams/
 
 # Temporary verification artifacts
-tmp_verify/
+var/
 
 # CodeGraph index
 .codegraph/
 
 # uv cache (workspace-local cache directory for sandboxed runs)
 .uv-cache/
+
+# ---------------------------------------------------------------------------
+# Measurement data must never be committed.  This repository's history already
+# contains real scans (the user decided not to purge it), so these rules plus
+# the CI guard in .github/workflows/ci.yml are the whole prevention story.
+# ---------------------------------------------------------------------------
+
+# Raw instrument formats.  Deliberately UNANCHORED: a stray scan copied into
+# any directory of the tree is caught, not just one at the repository root.
+*.sxm
+*.3ds
+*.dat
+*.ibw
+*.spm
+*.stp
+*.nid
+*.sm4
+
+# Measurement data trees at the repository root.  Anchored with a leading
+# slash ON PURPOSE: a future tests/data/ fixture directory must not be
+# silently swallowed by a bare `data/` rule.
+/sample/
+/data/
+/raw_data/
+/measurements/
+
+# Bulk arrays and containers.
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.mat
