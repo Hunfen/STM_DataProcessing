@@ -56,7 +56,68 @@ Checks
   (o) wide-model smoke: the 75-orbital C6LiC6_CWF model at nk=32 (1024 rows,
       the mesh whose unblocked H(k) build segfaults in Accelerate's zgemm)
       completes with the blocked eigen stage, in both the overlap and the scalar
-      vertex (skipped when no real model directory is present).
+      vertex (skipped when no real model directory is present),
+  (p) q row slices: ``calculate(q_index_range=(start, stop))`` returns the raw
+      FFT-order slabs of the full-mesh result bit for bit (np.array_equal) for
+      nk in (5, 8, 16) split into >= 2 contiguous segments, with the raw
+      ``fftfreq`` grids and the ``q_index_range``/``fft_order`` metadata, and
+      rejects every illegal range and the slice + output_path / slice + q_range
+      combinations with ValueError,
+  (q) slice assembly: ``lindhard_re_chi_parallel.assemble_slices`` reproduces
+      ``calculate()`` bit for bit for one segment, three contiguous segments and
+      a shuffled segment list, and rejects overlapping, missing or wrongly
+      shaped slice lists,
+  (r) mirror assembly: the ``chi0(q) = chi0(-q)`` mirror of
+      ``lindhard_re_chi_parallel`` stays within 1e-12 of the single-process
+      reference for nk in (4, 5, 6, 8, 16) (measured value printed), is
+      symmetric under the reflection permutation of the frozen
+      ``fftshift(fftfreq)`` grid to the same order, gives the same map whether
+      the canonical half is one slice or several, and is off unless asked for,
+  (s) parallel execution: a two-worker ``spawn`` run on a tiny synthetic model
+      reproduces the single-process product bit for bit, lands the
+      ``rows_<start>_<stop>.npz`` + ``.json`` + ``.done`` checkpoint triple,
+      re-dispatches exactly the slice whose ``npz`` was deleted or corrupted
+      when ``resume=True``, returns non-zero and writes no h5 when a worker
+      exits non-zero, and the CLI pins the four BLAS thread variables before
+      NumPy is imported (``--dry-run`` exits 0),
+  (t) logging contract: configuration echo, BLAS thread advisory (WARNING when a
+      thread variable is unset or > 1), one timed ``stage=`` record per stage
+      (diagonalize, occupations, q_sum, fftshift, h5_write), throttled progress
+      records carrying rows/rate/px per s/elapsed/eta/rss_peak and the
+      machine-readable ``lindhard_progress`` extra, and the closing summary with
+      the three array digests and max|data-(intra+inter)|; the two modules use
+      the standard library only for the peak RSS (no GPU-array, psutil or
+      backend code) and ``_HK_ROW_BLOCK`` stays <= 512,
+  (u) real-model performance and end-to-end: the 75-orbital C6LiC6_CWF model at
+      nk=32 (Li projection) single-process vs two spawned workers, with the wall
+      clocks and the parallel efficiency printed as non-asserting performance
+      data, plus the bit-for-bit equality of the two HDF5 products, their
+      ``max|data-(intra+inter)| <= 1e-13`` and ``min(data) >= -1e-12``, the
+      loader round trip and the handover plotting script rendering the file
+      (skipped when no real model directory is present).
+  (v) broken checkpoints: an empty and a truncated ``rows_*.npz`` are treated as
+      missing slices (WARNING with the reader's exception type, no exception
+      escaping ``run_parallel(resume=True)``), the affected slice is recomputed,
+      the final h5 stays byte-identical to the clean control, and
+      ``assemble_from_checkpoints`` refuses a directory holding such a slice,
+  (w) checkpoint-resume log file: ``run_parallel(log_file=...)`` really writes
+      the parent records to that file (non-empty, one plan/summary record), the
+      CLI's own handler is not duplicated, and no public parameter of
+      ``run_parallel`` is silently ignored,
+  (x) ``q_index_range`` validation: three-entry tuples, length 1/4 sequences,
+      string/float/None entries, a 2-character string, a 2-D array and
+      non-iterable numbers all raise ValueError, while None and the legal
+      two-entry ranges keep the behaviour of the full run,
+  (y) worker RSS estimate: ``read_model_shape``/``model_identity`` report the
+      real ``(num_wann, nrpts)`` of the model, the estimate is an upper bound of
+      the measured peak RSS for nk=8/16/32 in the full and Li projections, and
+      the nk=256 full eight-worker plan is printed through ``--dry-run`` together
+      with the memory-guard decision (a refusal is only accepted when the
+      eigenvector arrays alone already exceed the budget),
+  (z) checkpoint signature: a slice produced for another model (different
+      ``num_wann`` or different ``bvecs``, including a tampered sidecar) is
+      rejected on resume and recomputed instead of being reused silently, and
+      the same model still reuses its slices.
 
 Usage
 -----
@@ -66,10 +127,17 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<package root> python check_lindhard_re_chi
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import inspect
+import json
+import logging
 import os
+import subprocess
+import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -77,19 +145,36 @@ import numpy as np
 # Keep matplotlib cache warnings out of the regression output.
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
 
-from stm_data_processing.dft.wannier90 import lindhard_re_chi as merged_module  # noqa: E402
-from stm_data_processing.dft.wannier90.lindhard_re_chi import (  # noqa: E402
+from stm_data_processing.dft.wannier90 import (
+    lindhard_re_chi as merged_module,
+)
+from stm_data_processing.dft.wannier90 import (
+    lindhard_re_chi_parallel as parallel_module,
+)
+from stm_data_processing.dft.wannier90.lindhard_re_chi import (
     _HK_ROW_BLOCK,
     RealLindhardCalculator,
     _shifted_ranges,
 )
-from stm_data_processing.dft.wannier90.mlwf_hamiltonian import (  # noqa: E402
+from stm_data_processing.dft.wannier90.lindhard_re_chi_parallel import (
+    _memory_guard,
+    assemble_from_checkpoints,
+    assemble_slices,
+    available_memory_bytes,
+    estimate_worker_rss_bytes,
+    model_identity,
+    plan_row_slices,
+    read_model_shape,
+    run_parallel,
+    scan_checkpoints,
+)
+from stm_data_processing.dft.wannier90.mlwf_hamiltonian import (
     MLWFHamiltonian,
 )
-from stm_data_processing.io.susceptibility_io import (  # noqa: E402
+from stm_data_processing.io.susceptibility_io import (
     load_susceptibility_from_h5,
 )
-from stm_data_processing.utils.miscellaneous import fermi  # noqa: E402
+from stm_data_processing.utils.miscellaneous import fermi
 
 _EF = 0.0  # eV
 _TEMPERATURE = 100.0  # K
@@ -97,9 +182,14 @@ _ETA = 0.05  # eV
 _DEGENERACY_TOLERANCE = 1e-12  # eV, matches the module default
 
 _MODULE_PATH = Path(merged_module.__file__).resolve()
+_PARALLEL_MODULE_PATH = Path(parallel_module.__file__).resolve()
 _WANNIER90_DIR = _MODULE_PATH.parent
 _PACKAGE_DIR = _WANNIER90_DIR.parents[1]
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+_CLI_PATH = _SCRIPTS_DIR.parent / "run_lindhard_re_chi_parallel.py"
+_PLOT_SCRIPT = (
+    _SCRIPTS_DIR.parents[1] / "tmp_verify/dl/serverpkg/scripts/plot_lindhard_rechi_cwf53.py"
+)
 
 # Real Wannier models used by the wide-model smoke check.  The 75-orbital
 # C6LiC6_CWF model (num_wann = 75, 1681 R points) is the case for which an
@@ -119,6 +209,22 @@ _RETIRED_MODULE = "bare" + "_lindhard"
 _RETIRED_CLASS = "Bare" + "LindhardCalculator"
 _GPU_LIB = "cu" + "py"
 _PSUTIL = "psu" + "til"
+_BACKEND_FN = "get_" + "backend"
+
+# BLAS thread variables the parallel CLI must pin to one thread before NumPy is
+# imported (the pools are created during that import, so a later assignment has
+# no effect).
+_BLAS_THREAD_VARS = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+# Li projection (orbitals 48-52) of the 75-orbital C6LiC6_CWF model: the
+# production configuration of the multi-process driver, and the cheapest
+# configuration that still runs the full 75-orbital eigen stage.
+_WIDE_ORBITALS = [48, 49, 50, 51, 52]
 
 
 # ----------------------------------------------------------------------
@@ -773,11 +879,11 @@ def check_h5_load_grid_parity(nk: int) -> None:
 
 def check_im_module_type(nk: int) -> None:
     """(l) Im module: one shared ``imag_Lindhard`` tag in file and metadata."""
+    import h5py
+
     from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import (
         SusceptibilityCalculator_wang2012,
     )
-
-    import h5py
 
     calc = SusceptibilityCalculator_wang2012(build_two_band_model(), nk=nk, eta=_ETA)
     with tempfile.TemporaryDirectory() as tmp:
@@ -1104,6 +1210,1409 @@ def check_structure() -> None:
     )
 
 
+def _split_ranges(nk: int, parts: int) -> list[tuple[int, int]]:
+    """Split ``[0, nk)`` into ``parts`` contiguous, balanced row ranges."""
+    base, remainder = divmod(nk, parts)
+    ranges = []
+    start = 0
+    for index in range(parts):
+        stop = start + base + (1 if index < remainder else 0)
+        ranges.append((start, stop))
+        start = stop
+    return ranges
+
+
+def _display_rows(raw_rows, nk: int) -> np.ndarray:
+    """Displayed (fftshift) index of a raw FFT-order q row/column."""
+    return (np.asarray(raw_rows, dtype=int) + nk // 2) % nk
+
+
+def _mirror_permutation(nk: int) -> np.ndarray:
+    """Displayed-index permutation of the reflection ``q -> -q``.
+
+    On the frozen grid ``fftshift(fftfreq(nk))`` the reflection maps the raw FFT
+    index ``iq`` to ``(nk - iq) % nk``, which in displayed indices is ``j ->
+    (-j) % nk``, i.e. ``[0, nk-1, nk-2, ..., 1]``: a plain index reversal rolled
+    by one.  A literal ``m[::-1, ::-1]`` is a *different* permutation for every
+    nk (for even nk it sends the Nyquist entry q = -0.5 to q = 0.25), so it is
+    not the mirror symmetry of this grid; (r) prints that residual explicitly.
+    """
+    shifted_raw = (np.arange(nk) - nk // 2) % nk
+    return ((nk - shifted_raw) % nk + nk // 2) % nk
+
+
+def _dummy_blocks(slices, nk: int) -> list[dict[str, np.ndarray]]:
+    """Zero blocks with the shape ``assemble_slices`` expects for each slice."""
+    return [
+        {
+            key: np.zeros((stop - start, nk), dtype=float)
+            for key in ("data", "intraband", "interband")
+        }
+        for start, stop in slices
+    ]
+
+
+def _pinned_env() -> dict[str, str]:
+    """Environment with the four BLAS thread pools pinned to one thread."""
+    env = dict(os.environ)
+    for name in _BLAS_THREAD_VARS:
+        env[name] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+@contextmanager
+def _quiet_engine() -> Iterator[None]:
+    """Silence the engine logger while an expected ValueError is provoked."""
+    logger = logging.getLogger("stm_data_processing.dft.wannier90.lindhard_re_chi")
+    previous = logger.level
+    logger.setLevel(logging.CRITICAL + 1)
+    try:
+        yield
+    finally:
+        logger.setLevel(previous)
+
+
+def _first_existing_model() -> Path | None:
+    """Real wide model used by the checks that need one, or None."""
+    for candidate in (_WIDE_MODEL_DIR, _LESSORB_MODEL_DIR):
+        if (candidate / f"{_WIDE_MODEL_SEED}_hr.dat").exists():
+            return candidate
+    return None
+
+
+def write_mock_model(
+    folder: Path,
+    num_wann: int,
+    seedname: str = "mock",
+    bvecs: tuple[tuple[float, float, float], ...] | None = None,
+) -> Path:
+    """Write a tiny Wannier90 ``<seedname>_hr.dat`` (+ ``.wout``) model pair.
+
+    The multi-process checks need a model that loads through the same
+    ``MLWFHamiltonian.from_seedname`` path as the production model but costs
+    nothing to build, so they write their own three-R-point model instead of
+    touching the 472 MB C6LiC6_CWF file.  ``bvecs`` overrides the reciprocal
+    vectors of the ``.wout`` file, which is what the checkpoint-signature check
+    uses to build a second model with the *same* orbital count.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    r_points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    onsite = np.zeros((num_wann, num_wann), dtype=np.complex128)
+    hopping = np.zeros((num_wann, num_wann), dtype=np.complex128)
+    for index in range(num_wann):
+        onsite[index, index] = -1.0 + 0.6 * index
+        hopping[index, index] = -(0.3 + 0.05 * index)
+    for index in range(num_wann - 1):
+        onsite[index, index + 1] = onsite[index + 1, index] = 0.2
+    lines = [
+        "written on mock model for the parallel regression checks",
+        f"      {num_wann}",
+        f"      {len(r_points)}",
+        "".join("    1" for _ in r_points),
+    ]
+    for index, (r1, r2, r3) in enumerate(r_points):
+        matrix = onsite if index == 0 else hopping
+        for m in range(num_wann):
+            for n in range(num_wann):
+                value = matrix[m, n]
+                lines.append(
+                    f"{r1:5d}{r2:5d}{r3:5d}{m + 1:5d}{n + 1:5d}"
+                    f"{value.real:22.12f}{value.imag:22.12f}"
+                )
+    hr_path = folder / f"{seedname}_hr.dat"
+    hr_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if bvecs is None:
+        bvecs = (
+            (1.474634, 0.851380, 0.0),
+            (0.0, 1.702760, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    (folder / f"{seedname}.wout").write_text(
+        "mock wout for the parallel regression checks\n\n"
+        " Reciprocal-Space Vectors (Ang^-1)\n"
+        + "".join(
+            f"        b_{index + 1}   {row[0]:.6f}   {row[1]:.6f}   {row[2]:.6f}\n"
+            for index, row in enumerate(bvecs)
+        ),
+        encoding="utf-8",
+    )
+    return hr_path
+
+
+def _stage_seconds(message: str) -> float:
+    """Elapsed seconds of a ``stage=... s=<seconds>`` record.
+
+    The scan is token based on purpose: ``q_sum`` also carries a ``px_per_s=``
+    throughput field, so a naive ``rsplit("s=")`` would read that rate instead of
+    the stage duration.
+    """
+    for token in message.split():
+        if token.startswith("s=") and token != "s=":
+            return float(token[2:])
+    raise AssertionError(f"no s=<seconds> field in {message!r}")
+
+
+class _LogCollector(logging.Handler):
+    """Collect the records of one logger for the (t) logging contract."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+    def messages(self) -> list[str]:
+        return [record.getMessage() for record in self.records]
+
+
+def _attach_log_collector(name: str) -> _LogCollector:
+    """Attach a collector to ``name`` and make sure INFO records are created."""
+    logger = logging.getLogger(name)
+    collector = _LogCollector()
+    logger.addHandler(collector)
+    if logger.level == logging.NOTSET or logger.level > logging.INFO:
+        logger.setLevel(logging.INFO)
+    return collector
+
+
+def check_row_slices(nk: int) -> None:
+    """(p) q row slices equal the raw rows of the full-mesh result bit for bit."""
+    calc = RealLindhardCalculator(build_two_band_model(), nk=nk, eta=_ETA)
+    arguments = {"chemical_potential": _EF, "temperature": _TEMPERATURE}
+    full = calc.calculate(**arguments)
+    display = _display_rows(np.arange(nk), nk)
+    raw_q = np.fft.fftfreq(nk)
+    slabs = 0
+    for parts in (2, 3):
+        for start, stop in _split_ranges(nk, parts):
+            part = calc.calculate(q_index_range=(start, stop), **arguments)
+            rows = display[start:stop]
+            assert part["data"].shape == (stop - start, nk), (
+                f"nk={nk}: slice rows=[{start}, {stop}) has shape {part['data'].shape}"
+            )
+            for key in ("data", "intraband", "interband"):
+                expected = full[key][np.ix_(rows, display)]
+                assert np.array_equal(part[key], expected), (
+                    f"nk={nk}: slice rows=[{start}, {stop}) {key} is not bitwise equal "
+                    f"to the single-process raw rows (max |diff| = "
+                    f"{float(np.max(np.abs(part[key] - expected))):.3e})"
+                )
+                assert part[key].shape == (stop - start, nk)
+            np.testing.assert_array_equal(part["q1_grid"][:, 0], raw_q[start:stop])
+            np.testing.assert_array_equal(part["q2_grid"][0, :], raw_q)
+            np.testing.assert_array_equal(
+                part["q1_grid"],
+                np.broadcast_to(raw_q[start:stop, None], (stop - start, nk)),
+            )
+            np.testing.assert_array_equal(
+                part["q2_grid"], np.broadcast_to(raw_q[None, :], (stop - start, nk))
+            )
+            metadata = part["metadata"]
+            assert metadata["q_index_range"] == (start, stop), (
+                f"nk={nk}: metadata q_index_range = {metadata['q_index_range']!r}"
+            )
+            assert metadata["fft_order"] is True, f"nk={nk}: fft_order is not True"
+            assert metadata["nk"] == nk
+            slabs += 1
+
+    rejected = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        invalid = [
+            ({"q_index_range": (-1, 2)}, "start < 0"),
+            ({"q_index_range": (0, nk + 1)}, "stop > nk"),
+            ({"q_index_range": (nk, nk)}, "start == stop"),
+            ({"q_index_range": (2, 1)}, "start > stop"),
+            (
+                {"q_index_range": (0, nk), "output_path": str(Path(tmp) / "slice.h5")},
+                "slice + output_path",
+            ),
+            ({"q_index_range": (0, nk), "q_range": (-0.5, 0.5)}, "slice + q_range"),
+        ]
+        with _quiet_engine():
+            for kwargs, message in invalid:
+                try:
+                    calc.calculate(**arguments, **kwargs)
+                except ValueError:
+                    rejected += 1
+                else:
+                    raise AssertionError(
+                        f"nk={nk}: q_index_range with {message} was not rejected"
+                    )
+    assert slabs == 5, f"nk={nk}: unexpected slab count {slabs}"
+    print(
+        f"  [p] nk={nk}: {slabs} slabs from 2- and 3-segment splits are bitwise equal "
+        "(np.array_equal) to the raw rows of calculate(); grids are raw fftfreq and "
+        f"metadata carries q_index_range/fft_order; {rejected} invalid calls rejected "
+        "with ValueError (start < 0, stop > nk, start >= stop, slice + output_path, "
+        "slice + q_range)"
+    )
+
+
+def check_slice_assembly(nk: int) -> None:
+    """(q) ``assemble_slices`` reproduces ``calculate()`` bit for bit."""
+    calc = RealLindhardCalculator(build_two_band_model(), nk=nk, eta=_ETA)
+    arguments = {"chemical_potential": _EF, "temperature": _TEMPERATURE}
+    full = calc.calculate(**arguments)
+    plans = (
+        ("one segment", [(0, nk)]),
+        ("three contiguous segments", _split_ranges(nk, 3)),
+        ("shuffled segment list", list(reversed(_split_ranges(nk, 4)))),
+    )
+    comparisons = 0
+    for label, slices in plans:
+        blocks = [
+            calc.calculate(q_index_range=row_range, **arguments) for row_range in slices
+        ]
+        assembled = assemble_slices(slices, blocks, nk)
+        for key in ("data", "intraband", "interband", "q1_grid", "q2_grid"):
+            assert np.array_equal(assembled[key], full[key]), (
+                f"nk={nk} {label}: assembled {key} differs from calculate() (max |diff| "
+                f"= {float(np.max(np.abs(assembled[key] - full[key]))):.3e})"
+            )
+            comparisons += 1
+
+    half = [(0, nk // 2)]
+    rejected = 0
+    for slices, blocks, kwargs, message in (
+        ([(0, nk // 2), (0, nk)], _dummy_blocks([(0, nk // 2), (0, nk)], nk), {}, "overlapping rows"),
+        (half, _dummy_blocks(half, nk), {}, "missing rows"),
+        (half, _dummy_blocks(half, nk), {"mirror": True}, "rows the mirror cannot complete"),
+        (
+            [(0, nk)],
+            [
+                {
+                    key: np.zeros((1, nk), dtype=float)
+                    for key in ("data", "intraband", "interband")
+                }
+            ],
+            {},
+            "a wrongly shaped block",
+        ),
+        ([(0, nk)], [], {}, "a slice/block count mismatch"),
+    ):
+        try:
+            assemble_slices(slices, blocks, nk, **kwargs)
+        except ValueError:
+            rejected += 1
+        else:
+            raise AssertionError(f"nk={nk}: assemble_slices accepted {message}")
+    print(
+        f"  [q] nk={nk}: one / three contiguous / shuffled segment lists all reproduce "
+        f"calculate() bitwise ({comparisons} np.array_equal comparisons over "
+        "data/intraband/interband/q1_grid/q2_grid); "
+        f"{rejected} invalid slice lists rejected with ValueError (overlap, missing "
+        "rows, mirror gap, wrong block shape, count mismatch)"
+    )
+
+
+def check_mirror_assembly(nk: int) -> None:
+    """(r) Mirror assembly vs the single-process reference (<= 1e-12)."""
+    calc = RealLindhardCalculator(build_two_band_model(), nk=nk, eta=_ETA)
+    arguments = {"chemical_potential": _EF, "temperature": _TEMPERATURE}
+    full = calc.calculate(**arguments)
+    permutation = _mirror_permutation(nk)
+    assemblies: dict[str, dict] = {}
+    worst = 0.0
+    for n_workers, label in ((1, "1 slice"), (3, "3 slices")):
+        slices = plan_row_slices(nk, n_workers, mirror=True)
+        blocks = [
+            calc.calculate(q_index_range=row_range, **arguments) for row_range in slices
+        ]
+        mirrored = assemble_slices(slices, blocks, nk, mirror=True)
+        for key in ("data", "intraband", "interband"):
+            delta = float(np.max(np.abs(mirrored[key] - full[key])))
+            worst = max(worst, delta)
+            assert delta <= 1e-12, (
+                f"nk={nk} mirror ({label}) {key}: max |mirror - reference| = {delta:.3e} "
+                "exceeds 1e-12"
+            )
+        symmetry = max(
+            float(
+                np.max(
+                    np.abs(mirrored[key] - mirrored[key][np.ix_(permutation, permutation)])
+                )
+            )
+            for key in ("data", "intraband", "interband")
+        )
+        assert symmetry <= 1e-12, (
+            f"nk={nk} mirror ({label}): reflection residual {symmetry:.3e} exceeds 1e-12"
+        )
+        reversal = float(np.max(np.abs(mirrored["data"] - mirrored["data"][::-1, ::-1])))
+        assemblies[label] = {
+            "mirrored": mirrored,
+            "slices": slices,
+            "symmetry": symmetry,
+            "reversal": reversal,
+            "reversal_equal": bool(
+                np.array_equal(mirrored["data"], mirrored["data"][::-1, ::-1])
+            ),
+        }
+
+    for key in ("data", "intraband", "interband", "q1_grid", "q2_grid"):
+        assert np.array_equal(
+            assemblies["1 slice"]["mirrored"][key], assemblies["3 slices"]["mirrored"][key]
+        ), f"nk={nk}: the mirror changed when the canonical half was split"
+
+    assert inspect.signature(assemble_slices).parameters["mirror"].default is False
+    assert inspect.signature(run_parallel).parameters["mirror"].default is False
+    full_plan = plan_row_slices(nk, 2)
+    assert sum(stop - start for start, stop in full_plan) == nk, (
+        f"nk={nk}: the default plan does not cover every row: {full_plan}"
+    )
+    partial = plan_row_slices(nk, 2, mirror=True)
+    try:
+        assemble_slices(partial, _dummy_blocks(partial, nk), nk)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            f"nk={nk}: a partial slice list was assembled although mirror defaulted to off"
+        )
+
+    single = assemblies["1 slice"]
+    print(
+        f"  [r] nk={nk}: mirror vs single process max|Δ| = {worst:.3e} (np.array_equal "
+        f"bitwise=False, tol 1e-12); reflection residual = {single['symmetry']:.3e} "
+        f"(<= 1e-12); mirror + 3 slices == mirror + 1 slice bitwise; default mirror off; "
+        f"literal m == m[::-1, ::-1] -> {single['reversal_equal']} "
+        f"(max {single['reversal']:.3e}: the reflection of the fftshift(fftfreq) grid "
+        f"is {permutation.tolist()}, not a plain reversal)"
+    )
+
+
+def check_parallel_execution() -> None:
+    """(s) Two spawned workers, checkpoints, resume and failure containment."""
+    nk = 6
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        model_dir = root / "model"
+        write_mock_model(model_dir, 4, "mock")
+        ham = MLWFHamiltonian.from_seedname(str(model_dir), "mock")
+        reference = RealLindhardCalculator(ham, nk=nk, eta=_ETA).calculate(
+            chemical_potential=_EF, temperature=_TEMPERATURE
+        )
+        ckpt = root / "ckpt"
+        h5 = root / "parallel.h5"
+
+        def run_cli(*extra: str, output: Path = h5, checkpoint: Path = ckpt, model: Path = model_dir):
+            command = [
+                sys.executable,
+                str(_CLI_PATH),
+                "--model-dir",
+                str(model),
+                "--seedname",
+                "mock",
+                "--nk",
+                str(nk),
+                "--eta",
+                repr(_ETA),
+                "--temperature",
+                repr(_TEMPERATURE),
+                "--mu",
+                repr(_EF),
+                "--workers",
+                "2",
+                "--output",
+                str(output),
+                "--checkpoint-dir",
+                str(checkpoint),
+                "--progress-interval",
+                "0",
+                *extra,
+            ]
+            return subprocess.run(
+                command,
+                cwd=str(_SCRIPTS_DIR.parents[1]),
+                env=_pinned_env(),
+                capture_output=True,
+                text=True,
+            )
+
+        completed = run_cli()
+        assert completed.returncode == 0, (
+            f"two-worker run failed (exit {completed.returncode}):\n"
+            f"{completed.stderr[-3000:]}"
+        )
+        assert h5.exists(), "the successful run wrote no h5"
+        loaded = load_susceptibility_from_h5(str(h5))
+        assert np.array_equal(loaded["data"], reference["data"]), (
+            "the two-worker h5 differs from the single-process reference (max |diff| = "
+            f"{float(np.max(np.abs(loaded['data'] - reference['data']))):.3e})"
+        )
+
+        slices = plan_row_slices(nk, 2)
+        assert slices == [(0, 3), (3, 6)], f"unexpected plan for nk={nk}: {slices}"
+        for start, stop in slices:
+            stem = f"rows_{start}_{stop}"
+            for suffix in (".npz", ".json", ".done"):
+                assert (ckpt / f"{stem}{suffix}").exists(), f"missing {stem}{suffix}"
+            assert (ckpt / f"{stem}.done").read_text(encoding="utf-8").strip() == "ok"
+        assert scan_checkpoints(ckpt) == slices, (
+            f"scan_checkpoints returned {scan_checkpoints(ckpt)} instead of {slices}"
+        )
+
+        reference_bytes = h5.read_bytes()
+        (ckpt / "rows_3_6.npz").unlink()
+        completed = run_cli("--resume")
+        assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
+        dispatched = [
+            line for line in completed.stderr.splitlines() if "dispatched worker=" in line
+        ]
+        reused = [
+            line for line in completed.stderr.splitlines() if "already complete" in line
+        ]
+        assert len(dispatched) == 1 and "rows=[3, 6)" in dispatched[0], (
+            f"resume dispatched {len(dispatched)} slice(s) instead of the deleted one: "
+            f"{dispatched}"
+        )
+        assert len(reused) == 1 and "rows=[0, 3)" in reused[0], (
+            f"resume did not reuse the intact slice: {reused}"
+        )
+        assert h5.read_bytes() == reference_bytes, "resume changed the h5 product"
+        assert np.array_equal(load_susceptibility_from_h5(str(h5))["data"], reference["data"])
+
+        np.savez(
+            ckpt / "rows_0_3.npz",
+            data=np.zeros((1, nk)),
+            intraband=np.zeros((1, nk)),
+            interband=np.zeros((1, nk)),
+        )
+        completed = run_cli("--resume")
+        assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
+        dispatched = [
+            line for line in completed.stderr.splitlines() if "dispatched worker=" in line
+        ]
+        assert len(dispatched) == 1 and "rows=[0, 3)" in dispatched[0], (
+            f"resume with a corrupted shard dispatched {len(dispatched)} slice(s): {dispatched}"
+        )
+        assert h5.read_bytes() == reference_bytes, "the corrupted shard was not repaired"
+
+        fail_h5 = root / "failed.h5"
+        completed = run_cli(output=fail_h5, checkpoint=root / "ckpt_fail", model=root / "missing")
+        assert completed.returncode != 0, "a failing worker did not make the parent fail"
+        assert not fail_h5.exists(), "the failed run still wrote the final h5"
+        assert "exited with code" in completed.stderr, (
+            "the parent did not report the failing worker exit code"
+        )
+        worker_exit = completed.returncode
+
+        dry = subprocess.run(
+            [
+                sys.executable,
+                str(_CLI_PATH),
+                "--model-dir",
+                str(model_dir),
+                "--seedname",
+                "mock",
+                "--nk",
+                str(nk),
+                "--workers",
+                "2",
+                "--mirror",
+                "--dry-run",
+            ],
+            cwd=str(_SCRIPTS_DIR.parents[1]),
+            env=_pinned_env(),
+            capture_output=True,
+            text=True,
+        )
+        assert dry.returncode == 0, f"--dry-run failed:\n{dry.stderr[-2000:]}"
+        assert "DRY-RUN" in dry.stdout and "segments=" in dry.stdout and "mirror=True" in dry.stdout
+        pinned = [
+            line
+            for line in dry.stderr.splitlines()
+            if "pinned before importing NumPy" in line
+        ]
+        assert pinned and all(name in pinned[-1] for name in _BLAS_THREAD_VARS), (
+            f"the CLI did not pin all four BLAS thread variables: {pinned}"
+        )
+
+    source = _CLI_PATH.read_text(encoding="utf-8")
+    for name in _BLAS_THREAD_VARS:
+        assert f'"{name}"' in source, f"the CLI does not mention {name}"
+    assert "os.environ.setdefault" in source, "the CLI does not setdefault the BLAS threads"
+    assert source.index("setdefault") < min(
+        source.index("import argparse"), source.index("from stm_data_processing")
+    ), "the CLI must pin the BLAS threads before the first NumPy import"
+    signature = inspect.signature(run_parallel)
+    assert signature.parameters["start_method"].default == "spawn", (
+        "the driver no longer defaults to the spawn start method"
+    )
+    assert signature.parameters["mirror"].default is False
+
+    print(
+        f"  [s] mock model nk={nk}, workers=2 spawn: h5 bitwise equal to the single "
+        "process (np.array_equal True); checkpoint triples rows_0_3/rows_3_6 present "
+        "with .done=ok; resume after deleting rows_3_6.npz re-dispatched only [3, 6) "
+        "and reproduced the identical h5; resume after corrupting rows_0_3.npz "
+        f"re-dispatched only [0, 3); a failing worker -> exit {worker_exit}, no h5; "
+        "CLI --dry-run exit 0 with the plan; the four BLAS thread variables are "
+        "pinned before the first NumPy import"
+    )
+
+
+def check_logging_contract(nk: int) -> None:
+    """(t) The engine logging contract and the structural re-checks."""
+    logger_name = "stm_data_processing.dft.wannier90.lindhard_re_chi"
+    collector = _attach_log_collector(logger_name)
+    saved = {name: os.environ.pop(name, None) for name in _BLAS_THREAD_VARS}
+    try:
+        calc = RealLindhardCalculator(build_two_band_model(), nk=nk, eta=_ETA)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / f"logs_nk{nk}.h5")
+            calc.calculate(
+                chemical_potential=_EF,
+                temperature=_TEMPERATURE,
+                output_path=path,
+                progress_interval_s=1e-6,
+            )
+        records = list(collector.records)
+        messages = collector.messages()
+    finally:
+        logging.getLogger(logger_name).removeHandler(collector)
+        for name, value in saved.items():
+            if value is not None:
+                os.environ[name] = value
+
+    assert any("config nk=" in message for message in messages), "no configuration echo"
+    config = next(message for message in messages if "config nk=" in message)
+    for field in ("q_index_range=full", "band_block=", "block_entries=", "degeneracy_tolerance=1.000e-12"):
+        assert field in config, f"the configuration echo is missing {field!r}: {config}"
+
+    assert any("threads OMP_NUM_THREADS=" in message for message in messages), (
+        "no BLAS thread advisory"
+    )
+    assert any(
+        record.levelno >= logging.WARNING and "unset or > 1" in record.getMessage()
+        for record in records
+    ), "no WARNING for the unset BLAS thread variables"
+
+    stage_times = {}
+    for stage in ("diagonalize", "occupations", "q_sum", "fftshift", "h5_write"):
+        timed = [
+            message
+            for message in messages
+            if f"stage={stage} " in message and " s=" in message
+        ]
+        assert timed, f"no stage={stage} timing record"
+        stage_times[stage] = _stage_seconds(timed[-1])
+        assert stage_times[stage] >= 0.0
+
+    progress = [
+        record for record in records if getattr(record, "lindhard_progress", None) is not None
+    ]
+    assert progress, "no throttled progress record (progress_interval_s was tiny)"
+    for record in progress:
+        message = record.getMessage()
+        for field in ("rows=", "rate=", "px/s=", "elapsed=", "eta=", "rss_peak="):
+            assert field in message, f"the progress record is missing {field!r}: {message}"
+        rows_done, rows_total, pixels = record.lindhard_progress
+        assert 0 < rows_done <= rows_total and pixels == rows_done * nk
+
+    assert any("summary rows=" in message for message in messages), "no closing summary"
+    summary = next(message for message in messages if "summary rows=" in message)
+    assert "max|data-(intra+inter)|=" in summary, f"the summary lacks the residual: {summary}"
+    for name in ("data", "intraband", "interband"):
+        digest = [message for message in messages if f"digest {name} sum=" in message]
+        assert digest, f"no digest record for {name}"
+        assert " max=" in digest[-1] and " min=" in digest[-1]
+    assert any("px_per_s=" in message for message in messages), "no throughput record"
+
+    for path in (_MODULE_PATH, _PARALLEL_MODULE_PATH):
+        source = path.read_text(encoding="utf-8")
+        lowered = source.lower()
+        # The GPU-array library may only be *named* in prose (the engine
+        # docstring says it has no such path); what must not exist is a code
+        # path, which is exactly the token set check (k) uses.
+        for token in (
+            "import " + _GPU_LIB,
+            _GPU_LIB + " as cp",
+            "cp.asarray",
+            "cp.zeros",
+            "cp.sum",
+            "_cuda",
+            _PSUTIL,
+            _BACKEND_FN,
+        ):
+            assert token not in lowered, f"{path.name} contains '{token}'"
+        assert "BACKEND" not in source, f"{path.name} consults the package backend"
+    assert _HK_ROW_BLOCK <= 512, (
+        f"_HK_ROW_BLOCK={_HK_ROW_BLOCK} left the range Accelerate's zgemm handles"
+    )
+    engine_source = _MODULE_PATH.read_text(encoding="utf-8")
+    assert "import resource" in engine_source, "the peak RSS no longer uses the stdlib"
+
+    print(
+        f"  [t] nk={nk}: configuration echo, BLAS advisory + WARNING for the four unset "
+        f"thread variables, timed stages "
+        + ", ".join(f"{name}={stage_times[name]:.3f}s" for name in stage_times)
+        + f", {len(progress)} progress records with rows/rate/px per s/elapsed/eta/"
+        f"rss_peak and the lindhard_progress extra, closing summary with "
+        "max|data-(intra+inter)| and the three digests; no psutil/GPU-array/backend "
+        f"token in either module; _HK_ROW_BLOCK={_HK_ROW_BLOCK} <= 512"
+    )
+
+
+_SINGLE_RUN_CODE = """
+import json
+import time
+
+import numpy as np
+
+from stm_data_processing.dft.wannier90.lindhard_re_chi import RealLindhardCalculator
+from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+
+ham = MLWFHamiltonian.from_seedname({model!r}, {seed!r})
+calc = RealLindhardCalculator(ham, nk={nk}, eta={eta!r})
+started = time.perf_counter()
+result = calc.calculate(
+    chemical_potential={mu!r},
+    temperature={temperature!r},
+    orbital_select={orbitals!r},
+    output_path={h5!r},
+)
+wall = time.perf_counter() - started
+np.savez(
+    {npz!r},
+    **{{key: result[key] for key in ("data", "intraband", "interband")}},
+)
+print("SINGLE_WALL", json.dumps({{"wall_s": wall}}))
+"""
+
+
+def check_real_model_parallel(nk: int = 32) -> None:
+    """(u) Real wide model: single process vs two workers, and the product checks."""
+    model_dir = _first_existing_model()
+    if model_dir is None:
+        print(
+            f"  [u] real-model performance SKIPPED: no model under {_WIDE_MODEL_DIR} or "
+            f"{_LESSORB_MODEL_DIR}"
+        )
+        return
+    eta = 5e-3
+    temperature = 4.2
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        single_h5 = root / "single.h5"
+        single_npz = root / "single.npz"
+        code = _SINGLE_RUN_CODE.format(
+            model=str(model_dir),
+            seed=_WIDE_MODEL_SEED,
+            nk=nk,
+            eta=eta,
+            mu=_EF,
+            temperature=temperature,
+            orbitals=_WIDE_ORBITALS,
+            h5=str(single_h5),
+            npz=str(single_npz),
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(_SCRIPTS_DIR.parents[1]),
+            env=_pinned_env(),
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, (
+            f"the single-process run failed (exit {completed.returncode}):\n"
+            f"{completed.stderr[-2000:]}"
+        )
+        reported = [
+            line for line in completed.stdout.splitlines() if line.startswith("SINGLE_WALL")
+        ]
+        assert reported, f"the single-process run printed no wall clock:\n{completed.stdout}"
+        wall_single = json.loads(reported[-1].split(" ", 1)[1])["wall_s"]
+
+        parallel_h5 = root / "parallel.h5"
+        started = time.perf_counter()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(_CLI_PATH),
+                "--model-dir",
+                str(model_dir),
+                "--seedname",
+                _WIDE_MODEL_SEED,
+                "--nk",
+                str(nk),
+                "--eta",
+                repr(eta),
+                "--temperature",
+                repr(temperature),
+                "--mu",
+                repr(_EF),
+                "--orbitals",
+                ",".join(str(orbital) for orbital in _WIDE_ORBITALS),
+                "--projection-label",
+                "li",
+                "--workers",
+                "2",
+                "--output",
+                str(parallel_h5),
+                "--checkpoint-dir",
+                str(root / "ckpt"),
+                "--progress-interval",
+                "5",
+            ],
+            cwd=str(_SCRIPTS_DIR.parents[1]),
+            env=_pinned_env(),
+            capture_output=True,
+            text=True,
+        )
+        wall_parallel = time.perf_counter() - started
+        assert completed.returncode == 0, (
+            f"the two-worker run failed (exit {completed.returncode}):\n"
+            f"{completed.stderr[-3000:]}"
+        )
+        assert parallel_h5.exists(), "the two-worker run wrote no h5"
+
+        with np.load(single_npz) as stored:
+            arrays = {
+                key: np.asarray(stored[key]) for key in ("data", "intraband", "interband")
+            }
+        residual = float(
+            np.max(np.abs(arrays["data"] - (arrays["intraband"] + arrays["interband"])))
+        )
+        minimum = float(np.min(arrays["data"]))
+        assert residual <= 1e-13, (
+            f"nk={nk}: max|data-(intraband+interband)| = {residual:.3e} exceeds 1e-13"
+        )
+        assert minimum >= -1e-12, f"nk={nk}: min(data) = {minimum:.6e} < -1e-12"
+
+        loaded_single = load_susceptibility_from_h5(str(single_h5))
+        loaded_parallel = load_susceptibility_from_h5(str(parallel_h5))
+        equal = np.array_equal(loaded_single["data"], loaded_parallel["data"])
+        assert equal, (
+            "the two-worker h5 differs from the single-process h5 (max |diff| = "
+            f"{float(np.max(np.abs(loaded_single['data'] - loaded_parallel['data']))):.3e})"
+        )
+
+        plotted = "plot script absent"
+        if _PLOT_SCRIPT.exists():
+            spec = importlib.util.spec_from_file_location("handover_plot_cwf53", _PLOT_SCRIPT)
+            plot_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(plot_module)
+            png = root / f"li_nk{nk}_parallel.png"
+            plot_module.plot_one(
+                str(parallel_h5), str(png), f"cwf53, nk={nk}, Re chi0, Li(48-52)"
+            )
+            size = png.stat().st_size if png.exists() else 0
+            assert size > 10_000, f"the handover plot script produced {size} bytes"
+            plotted = f"{_PLOT_SCRIPT.name} -> {png.name} ({size} bytes)"
+
+    speedup = wall_single / wall_parallel if wall_parallel > 0 else float("nan")
+    print(
+        f"  [u] {model_dir.name} nk={nk} Li(48-52), workers=2 spawn: wall single = "
+        f"{wall_single:.1f}s, parallel = {wall_parallel:.1f}s -> speedup {speedup:.2f}x, "
+        f"parallel efficiency {speedup / 2.0:.2f} of 2 workers (performance data, no "
+        f"assertion); h5 bitwise equal (np.array_equal True); "
+        f"max|data-(intra+inter)| = {residual:.3e} <= 1e-13; min(data) = {minimum:.6e} "
+        f">= -1e-12; loader round trip OK; {plotted}"
+    )
+
+
+_CLI_SCRIPT_PATH = _CLI_PATH
+_PARALLEL_LOGGER = "stm_data_processing.dft.wannier90.lindhard_re_chi_parallel"
+
+
+def _run_parallel_cli(
+    model_dir: Path,
+    seedname: str,
+    nk: int,
+    *,
+    output: Path,
+    checkpoint: Path,
+    workers: int = 2,
+    resume: bool = False,
+    orbitals: list[int] | None = None,
+    extra: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess:
+    """Run ``scripts/run_lindhard_re_chi_parallel.py`` on the pinned-BLAS env."""
+    command = [
+        sys.executable,
+        str(_CLI_SCRIPT_PATH),
+        "--model-dir",
+        str(model_dir),
+        "--seedname",
+        seedname,
+        "--nk",
+        str(nk),
+        "--eta",
+        repr(_ETA),
+        "--temperature",
+        repr(_TEMPERATURE),
+        "--mu",
+        repr(_EF),
+        "--workers",
+        str(workers),
+        "--output",
+        str(output),
+        "--checkpoint-dir",
+        str(checkpoint),
+        "--progress-interval",
+        "0",
+    ]
+    if orbitals is not None:
+        command += ["--orbitals", ",".join(str(orbital) for orbital in orbitals)]
+    if resume:
+        command.append("--resume")
+    command += list(extra)
+    return subprocess.run(
+        command,
+        cwd=str(_SCRIPTS_DIR.parents[1]),
+        env=_pinned_env(),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _cli_report(completed: subprocess.CompletedProcess) -> dict[str, list[str]]:
+    """Parent-side log lines of one CLI run, grouped by what they prove."""
+    lines = completed.stderr.splitlines()
+    return {
+        "dispatched": [line for line in lines if "dispatched worker=" in line],
+        "reused": [line for line in lines if "already complete" in line],
+        "incompatible": [
+            line for line in lines if "does not match the requested parameters" in line
+        ],
+        "unreadable": [line for line in lines if "unreadable checkpoint" in line],
+    }
+
+
+@contextmanager
+def _isolated_root_logging() -> Iterator[None]:
+    """Undo the root handlers ``run_parallel(log_file=...)`` installs."""
+    root = logging.getLogger()
+    before = list(root.handlers)
+    level = root.level
+    try:
+        yield
+    finally:
+        for handler in list(root.handlers):
+            if handler not in before:
+                root.removeHandler(handler)
+                handler.close()
+        root.setLevel(level)
+
+
+def check_bad_shard_recovery() -> None:
+    """(v) A truncated checkpoint slice is discarded and recomputed (R1).
+
+    A worker killed mid-write leaves a ``.npz`` that is empty or cut short; the
+    resume path must treat it exactly like a missing slice instead of letting
+    the reader's ``EOFError``/``BadZipFile`` escape.  The check drives the
+    library API for the empty slice (so the "does not raise" claim is about
+    ``run_parallel`` itself), the CLI for the truncated one, and finally asserts
+    that ``assemble_from_checkpoints`` refuses an incomplete slice.
+    """
+    nk = 6
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        model_dir = root / "model"
+        write_mock_model(model_dir, 4, "mock")
+        ham = MLWFHamiltonian.from_seedname(str(model_dir), "mock")
+        reference = RealLindhardCalculator(ham, nk=nk, eta=_ETA).calculate(
+            chemical_potential=_EF, temperature=_TEMPERATURE
+        )
+        ckpt = root / "ckpt"
+        h5 = root / "out.h5"
+        options = {
+            "eta": _ETA,
+            "temperature": _TEMPERATURE,
+            "chemical_potential": _EF,
+            "n_workers": 2,
+            "output_path": str(h5),
+            "checkpoint_dir": str(ckpt),
+            "progress_interval_s": 0.0,
+        }
+        collector = _attach_log_collector(_PARALLEL_LOGGER)
+        observed = []
+        try:
+            code = run_parallel(str(model_dir), "mock", nk, **options)
+            assert code == 0, f"the control run returned {code} instead of 0"
+            control = h5.read_bytes()
+            assert np.array_equal(
+                load_susceptibility_from_h5(str(h5))["data"], reference["data"]
+            )
+
+            # --- empty .npz through the library API ---
+            shard = ckpt / "rows_0_3.npz"
+            shard.write_bytes(b"")
+            collector.records.clear()
+            code = run_parallel(str(model_dir), "mock", nk, resume=True, **options)
+            assert code == 0, f"resume with an empty slice returned {code} instead of 0"
+            messages = collector.messages()
+            warnings = [message for message in messages if "unreadable checkpoint" in message]
+            dispatched = [message for message in messages if "dispatched worker=" in message]
+            reused = [message for message in messages if "already complete" in message]
+            assert warnings, "the empty slice was discarded without a WARNING"
+            assert any("rows_0_3.npz" in message for message in warnings)
+            assert any(
+                "EOFError" in message or "BadZipFile" in message for message in warnings
+            ), f"unexpected read failure for an empty slice: {warnings}"
+            assert len(dispatched) == 1 and "rows=[0, 3)" in dispatched[0], (
+                f"the empty slice was not recomputed: {dispatched}"
+            )
+            assert len(reused) == 1 and "rows=[3, 6)" in reused[0]
+            assert h5.read_bytes() == control, "the empty slice changed the product"
+            observed.append((0, warnings[-1]))
+
+            # --- truncated .npz (valid shard cut in half) through the CLI ---
+            shard = ckpt / "rows_3_6.npz"
+            valid = shard.read_bytes()
+            shard.write_bytes(valid[: max(1, len(valid) // 2)])
+            completed = _run_parallel_cli(
+                model_dir, "mock", nk, output=h5, checkpoint=ckpt, resume=True
+            )
+            assert completed.returncode == 0, (
+                f"resume with a truncated slice failed:\n{completed.stderr[-2000:]}"
+            )
+            report = _cli_report(completed)
+            assert report["unreadable"], "the truncated slice was not reported"
+            assert len(report["dispatched"]) == 1 and "rows=[3, 6)" in report["dispatched"][0]
+            assert len(report["reused"]) == 1 and "rows=[0, 3)" in report["reused"][0]
+            assert h5.read_bytes() == control, "the truncated slice changed the product"
+            observed.append((len(valid) // 2, report["unreadable"][-1]))
+
+            # --- the same broken slice makes the assembly refuse ---
+            (ckpt / "rows_0_3.npz").write_bytes(b"")
+            try:
+                assemble_from_checkpoints(ckpt, nk=nk, orbital_select=[0, 1, 2, 3])
+            except ValueError as exc:
+                assert "incomplete" in str(exc), f"unexpected assembly error: {exc}"
+            else:
+                raise AssertionError(
+                    "assemble_from_checkpoints assembled a directory with a broken slice"
+                )
+        finally:
+            logging.getLogger(_PARALLEL_LOGGER).removeHandler(collector)
+
+    empty_type = observed[0][1].split("(")[-1].split(")")[0]
+    print(
+        f"  [v] mock model nk={nk}, workers=2 spawn, resume=True: an empty "
+        f"rows_0_3.npz ({empty_type}) and a rows_3_6.npz cut to {observed[1][0]} bytes "
+        "were both discarded with a WARNING, each slice was recomputed, and the h5 "
+        "stayed byte-identical to the clean control; assemble_from_checkpoints "
+        "refuses an incomplete slice with ValueError('checkpoint rows=[0, 3) is "
+        "incomplete')"
+    )
+
+
+def check_log_file_parameter() -> None:
+    """(w) ``run_parallel(log_file=...)`` really writes the parent log (R2)."""
+    nk = 6
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        model_dir = root / "model"
+        write_mock_model(model_dir, 4, "mock")
+        ham = MLWFHamiltonian.from_seedname(str(model_dir), "mock")
+        reference = RealLindhardCalculator(ham, nk=nk, eta=_ETA).calculate(
+            chemical_potential=_EF, temperature=_TEMPERATURE
+        )
+        api_log = root / "api.log"
+        api_h5 = root / "api.h5"
+        with _isolated_root_logging():
+            code = run_parallel(
+                str(model_dir),
+                "mock",
+                nk,
+                eta=_ETA,
+                temperature=_TEMPERATURE,
+                chemical_potential=_EF,
+                n_workers=2,
+                output_path=str(api_h5),
+                checkpoint_dir=str(root / "ckpt_api"),
+                log_file=str(api_log),
+                progress_interval_s=0.0,
+            )
+        assert code == 0, f"the API run with log_file returned {code}"
+        assert api_log.exists(), "run_parallel(log_file=...) wrote no file"
+        api_text = api_log.read_text(encoding="utf-8")
+        assert api_log.stat().st_size > 0 and api_text.strip(), "the API log file is empty"
+        for expected in ("plan nk=", "summary rows=", "worker digests verified"):
+            assert expected in api_text, f"the API log file lacks {expected!r}"
+        assert api_text.count("plan nk=") == 1, (
+            "the parent log line was duplicated: " f"{api_text.count('plan nk=')} plan lines"
+        )
+        api_bytes = api_log.stat().st_size
+        assert np.array_equal(
+            load_susceptibility_from_h5(str(api_h5))["data"], reference["data"]
+        )
+
+        # The CLI installs the handler itself: no duplicated records either.
+        cli_log = root / "cli.log"
+        completed = _run_parallel_cli(
+            model_dir,
+            "mock",
+            nk,
+            output=root / "cli.h5",
+            checkpoint=root / "ckpt_cli",
+            extra=("--log-file", str(cli_log)),
+        )
+        assert completed.returncode == 0, f"the CLI run failed:\n{completed.stderr[-2000:]}"
+        cli_text = cli_log.read_text(encoding="utf-8")
+        assert cli_text.count("plan nk=") == 1 and cli_text.count("summary rows=") == 1, (
+            "the CLI log has duplicated parent records (handler added twice)"
+        )
+        cli_bytes = cli_log.stat().st_size
+
+    source = inspect.getsource(run_parallel)
+    ignored = [
+        name
+        for name in inspect.signature(run_parallel).parameters
+        if source.count(name) < 2
+    ]
+    assert not ignored, f"run_parallel ignores the parameter(s) {ignored}"
+    docstring = inspect.getdoc(run_parallel) or ""
+    assert "log_file" in docstring, "run_parallel does not document log_file"
+
+    # The command line entry point must not ignore a public option either: every
+    # destination its parser produces has to be read by main().
+    spec = importlib.util.spec_from_file_location("cli_entry_point", _CLI_SCRIPT_PATH)
+    cli_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli_module)
+    parser = cli_module.build_parser()
+    cli_source = _CLI_SCRIPT_PATH.read_text(encoding="utf-8")
+    cli_ignored = [
+        action.dest
+        for action in parser._actions
+        if action.dest != "help" and f"args.{action.dest}" not in cli_source
+    ]
+    assert not cli_ignored, f"the CLI parser produces unused destination(s) {cli_ignored}"
+    options = len([action for action in parser._actions if action.option_strings])
+
+    print(
+        f"  [w] run_parallel(log_file=...): parent log really written ({api_bytes} B) and "
+        f"contains the plan/summary/verification records exactly once; the CLI "
+        f"--log-file path (handler already installed) stays at one record per line "
+        f"({cli_bytes} B); every parameter of run_parallel is used in its body, "
+        f"log_file is documented, and all {options} CLI options are consumed by "
+        "main() (no silently ignored public parameter)"
+    )
+
+
+def check_q_index_range_validation(nk: int) -> None:
+    """(x) Exactly two integer entries are accepted, everything else raises (R3)."""
+    calc = RealLindhardCalculator(build_two_band_model(), nk=nk, eta=_ETA)
+    arguments = {"chemical_potential": _EF, "temperature": _TEMPERATURE}
+    full = calc.calculate(**arguments)
+    invalid = (
+        ((0, 1, 2), "a 3-entry tuple (start, stop, step)"),
+        ((0,), "a 1-entry tuple"),
+        ((0, 1, 2, 3), "a 4-entry tuple"),
+        (["0", "1"], "string entries"),
+        ((0, 1.5), "a float entry"),
+        ((0, None), "a None entry"),
+        ("ab", "a 2-character string"),
+        (np.zeros((2, 2)), "a 2-D array of length 2"),
+        (np.array([0.0, 3.0]), "a float array of length 2"),
+        (3, "a non-iterable int"),
+        (2.5, "a non-iterable float"),
+        (None, "an explicit None"),
+    )
+    rejected = 0
+    with _quiet_engine():
+        for value, message in invalid:
+            if value is None:
+                # None is the documented default, not an error: it must behave
+                # exactly like omitting the argument.  Asserted below, not here.
+                continue
+            try:
+                calc.calculate(q_index_range=value, **arguments)
+            except ValueError as exc:
+                assert "q_index_range" in str(exc), (
+                    f"unclear error for {message}: {exc}"
+                )
+                rejected += 1
+            else:
+                raise AssertionError(f"q_index_range with {message} was not rejected")
+
+    explicit_none = calc.calculate(q_index_range=None, **arguments)
+    for key in ("data", "intraband", "interband", "q1_grid", "q2_grid"):
+        assert np.array_equal(explicit_none[key], full[key]), (
+            f"q_index_range=None changed {key} against the default call"
+        )
+
+    rows = _display_rows(np.arange(nk), nk)
+    whole = calc.calculate(q_index_range=(0, nk), **arguments)
+    for key in ("data", "intraband", "interband"):
+        assert np.array_equal(whole[key], full[key][np.ix_(rows, rows)]), (
+            f"q_index_range=(0, {nk}) changed {key} against the full run"
+        )
+    middle = calc.calculate(q_index_range=(2, nk - 1), **arguments)
+    assert middle["data"].shape == (nk - 3, nk)
+    assert np.array_equal(middle["data"], full["data"][np.ix_(rows[2 : nk - 1], rows)])
+    print(
+        f"  [x] nk={nk}: {rejected} illegal q_index_range forms rejected with "
+        "ValueError ((0,1,2), length 1/4, string/float/None entries, a 2-character "
+        "string, a 2-D array, non-iterable numbers); None behaves exactly like the "
+        f"default and (0, {nk}) / (2, {nk - 1}) still return the raw rows of the full run"
+    )
+
+
+_PEAK_RUN_CODE = """
+import json
+import time
+
+import numpy as np
+
+from stm_data_processing.dft.wannier90.lindhard_re_chi import (
+    RealLindhardCalculator,
+    peak_rss_bytes,
+)
+from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+
+ham = MLWFHamiltonian.from_seedname({model!r}, {seed!r})
+calc = RealLindhardCalculator(ham, nk={nk}, eta={eta!r})
+started = time.perf_counter()
+result = calc.calculate(
+    chemical_potential={mu!r},
+    temperature={temperature!r},
+    orbital_select={orbitals!r},
+)
+print("PEAK", json.dumps({{"rss_peak": peak_rss_bytes(), "wall_s": time.perf_counter() - started,
+                          "max_data": float(np.max(result["data"]))}}))
+"""
+
+
+def check_estimate_upper_bound(nk_list: tuple[int, ...] = (8, 16, 32)) -> None:
+    """(y) The worker RSS estimate is an upper bound of the measured peak (R4)."""
+    model_dir = _first_existing_model()
+    if model_dir is None:
+        print(
+            f"  [y] estimate upper bound SKIPPED: no model under {_WIDE_MODEL_DIR} or "
+            f"{_LESSORB_MODEL_DIR}"
+        )
+        return
+    ham = MLWFHamiltonian.from_seedname(str(model_dir), _WIDE_MODEL_SEED)
+    shape = read_model_shape(str(model_dir), _WIDE_MODEL_SEED)
+    assert shape == (ham.num_wann, len(ham.r_list)), (
+        f"read_model_shape returned {shape} but the model has "
+        f"{ham.num_wann} orbitals and {len(ham.r_list)} R points"
+    )
+    num_wann, nrpts = shape
+    identity_wann, identity_bvecs = model_identity(str(model_dir), _WIDE_MODEL_SEED)
+    assert identity_wann == num_wann, (
+        f"the checkpoint signature reads num_wann={identity_wann}, expected {num_wann}"
+    )
+    assert identity_bvecs is not None and np.array_equal(
+        np.asarray(identity_bvecs, dtype=float), np.asarray(ham.bvecs, dtype=float)
+    ), "the checkpoint signature must read the bvecs through the worker's loader"
+
+    table = []
+    for nk in nk_list:
+        for label, orbitals in (("full", None), ("li", _WIDE_ORBITALS)):
+            code = _PEAK_RUN_CODE.format(
+                model=str(model_dir),
+                seed=_WIDE_MODEL_SEED,
+                nk=nk,
+                eta=5e-3,
+                mu=_EF,
+                temperature=4.2,
+                orbitals=orbitals,
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=str(_SCRIPTS_DIR.parents[1]),
+                env=_pinned_env(),
+                capture_output=True,
+                text=True,
+            )
+            assert completed.returncode == 0, (
+                f"the nk={nk} {label} peak run failed:\n{completed.stderr[-1500:]}"
+            )
+            reported = [
+                line for line in completed.stdout.splitlines() if line.startswith("PEAK ")
+            ]
+            assert reported, f"the nk={nk} {label} run printed no peak"
+            measured = json.loads(reported[-1].split(" ", 1)[1])
+            n_orb = num_wann if orbitals is None else len(orbitals)
+            estimate = estimate_worker_rss_bytes(nk, num_wann, n_orb, nrpts)
+            assert estimate >= measured["rss_peak"], (
+                f"nk={nk} {label}: estimate {estimate / 1024**2:.1f} MB is below the "
+                f"measured peak {measured['rss_peak'] / 1024**2:.1f} MB"
+            )
+            table.append((nk, label, estimate, measured["rss_peak"], measured["wall_s"]))
+
+    assert num_wann != 75 or nrpts != 0  # the estimate really uses the model numbers
+    production_nk, production_workers = 256, 8
+    estimate_production = estimate_worker_rss_bytes(
+        production_nk, num_wann, num_wann, nrpts
+    )
+    total = estimate_production * production_workers
+    available = available_memory_bytes()
+    budget = None if available is None else 0.8 * available
+    structural = (
+        production_nk * production_nk * num_wann * num_wann * 16 * production_workers
+    )
+    completed = _run_parallel_cli(
+        model_dir,
+        _WIDE_MODEL_SEED,
+        production_nk,
+        output=Path(tempfile.gettempdir()) / "t6_dry_run.h5",
+        checkpoint=Path(tempfile.gettempdir()) / "t6_dry_run_ckpt",
+        workers=production_workers,
+        extra=("--dry-run",),
+    )
+    assert completed.returncode == 0, f"--dry-run failed:\n{completed.stderr[-2000:]}"
+    dry = completed.stdout.strip().splitlines()[-1]
+    assert (
+        f"DRY-RUN workers={production_workers} nk={production_nk}" in dry
+        and f"num_wann={num_wann}" in dry
+        and f"nrpts={nrpts}" in dry
+    ), f"the dry-run plan does not report the real model size: {dry}"
+    refused = budget is not None and total > budget
+    # The guard must decide exactly on the printed estimate: a budget just above
+    # the estimate is admitted, one just below is refused.  That rules out both a
+    # hidden over-refusal and a silent admission of an undersized plan.
+    _memory_guard(estimate_production, production_workers, 1.01 * total / 1024**3)
+    try:
+        _memory_guard(estimate_production, production_workers, 0.99 * total / 1024**3)
+    except MemoryError:
+        pass
+    else:
+        raise AssertionError(
+            "the memory guard admitted a plan whose estimate exceeds the budget"
+        )
+
+    worst = max(table, key=lambda row: row[3] / row[2])
+    print(
+        "  [y] estimate vs measured peak RSS on "
+        f"{model_dir.name} (num_wann={num_wann}, nrpts={nrpts} read from the model "
+        "header): "
+        + "; ".join(
+            f"nk={nk} {label} est={estimate / 1024**2:.0f}MB >= measured="
+            f"{measured / 1024**2:.0f}MB"
+            for nk, label, estimate, measured, _wall in table
+        )
+    )
+    print(
+        f"      worst ratio measured/estimate = {worst[3] / worst[2]:.3f} "
+        f"(nk={worst[0]} {worst[1]}); nk={production_nk} full x {production_workers} "
+        f"workers: estimate {estimate_production / 1024**3:.2f} GB/worker, total "
+        f"{total / 1024**3:.1f} GB, default budget "
+        + ("unknown" if budget is None else f"{budget / 1024**3:.1f} GB")
+        + (
+            (
+                f" -> the guard refuses; the printed estimate total {total / 1024**3:.1f} GB"
+                f" exceeds the budget, and the eigenvector floor "
+                f"{structural / 1024**3:.1f} GB is "
+                + (
+                    "also above it, so the real per-worker arrays do not fit here"
+                    if structural > budget
+                    else "below it, i.e. the refusal comes from the estimate's "
+                    "safety margin (use --max-mem-gb when the real footprint fits)"
+                )
+            )
+            if refused
+            else " -> the guard admits the plan"
+        )
+        + "; the decision boundary sits exactly at the estimate (a budget 1% above "
+        "is admitted, 1% below is refused), so an operator on a machine whose budget "
+        "lies between the measured need and the estimate can use the documented "
+        "--max-mem-gb. Plan: " + dry
+    )
+
+
+def check_foreign_shard_rejection() -> None:
+    """(z) A checkpoint slice from another model is never silently reused (R5)."""
+    nk = 6
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        model_a = root / "model_a"
+        model_c = root / "model_c"
+        model_b = root / "model_b"
+        write_mock_model(model_a, 4, "mock")
+        write_mock_model(
+            model_c,
+            4,
+            "mock",
+            bvecs=((1.30, 0.85, 0.0), (0.0, 1.70, 0.0), (0.0, 0.0, 1.0)),
+        )
+        write_mock_model(model_b, 6, "mock")
+        ham_a = MLWFHamiltonian.from_seedname(str(model_a), "mock")
+        reference_a = RealLindhardCalculator(ham_a, nk=nk, eta=_ETA).calculate(
+            chemical_potential=_EF, temperature=_TEMPERATURE
+        )
+        ham_b = MLWFHamiltonian.from_seedname(str(model_b), "mock")
+        reference_b = RealLindhardCalculator(ham_b, nk=nk, eta=_ETA).calculate(
+            chemical_potential=_EF, temperature=_TEMPERATURE
+        )
+        assert not np.array_equal(reference_a["data"], reference_b["data"]), (
+            "the two mock models must differ numerically for this check"
+        )
+        ckpt = root / "ckpt"
+        h5 = root / "out.h5"
+        options = {"output": h5, "checkpoint": ckpt, "workers": 2}
+
+        completed = _run_parallel_cli(model_a, "mock", nk, **options)
+        assert completed.returncode == 0, f"the model A run failed:\n{completed.stderr[-1500:]}"
+        assert np.array_equal(
+            load_susceptibility_from_h5(str(h5))["data"], reference_a["data"]
+        )
+        bytes_a = h5.read_bytes()
+
+        # (1) same orbital count, different bvecs -> incompatible signature
+        completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
+        assert completed.returncode == 0, f"the model C resume failed:\n{completed.stderr[-1500:]}"
+        report = _cli_report(completed)
+        assert len(report["dispatched"]) == 2 and not report["reused"], (
+            "the shards of model A were reused for model C: " f"{report}"
+        )
+        assert len(report["incompatible"]) == 2, (
+            f"the incompatible shards were not reported: {report['incompatible']}"
+        )
+
+        # (2) resuming the same model again reuses both slices (no false alarm)
+        completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
+        assert completed.returncode == 0, f"the second model C resume failed:\n{completed.stderr[-1500:]}"
+        report = _cli_report(completed)
+        assert not report["dispatched"] and len(report["reused"]) == 2, (
+            "the bvecs comparison produces a false incompatibility: " f"{report}"
+        )
+        bytes_c = h5.read_bytes()
+
+        # (3) one tampered shard is recomputed, the other one is reused
+        meta_path = ckpt / "rows_3_6.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["num_wann"] = 999
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
+        assert completed.returncode == 0, f"the tampered-shard resume failed:\n{completed.stderr[-1500:]}"
+        report = _cli_report(completed)
+        assert len(report["dispatched"]) == 1 and "rows=[3, 6)" in report["dispatched"][0], (
+            f"the tampered shard was not recomputed alone: {report}"
+        )
+        assert len(report["reused"]) == 1 and "rows=[0, 3)" in report["reused"][0]
+        assert len(report["incompatible"]) == 1
+        assert h5.read_bytes() == bytes_c, "recomputing an identical slice changed the h5"
+
+        # (4) another orbital count: every shard is rejected and replaced
+        completed = _run_parallel_cli(model_b, "mock", nk, resume=True, **options)
+        assert completed.returncode == 0, f"the model B resume failed:\n{completed.stderr[-1500:]}"
+        report = _cli_report(completed)
+        assert len(report["dispatched"]) == 2 and not report["reused"], (
+            f"the shards of model C were reused for model B: {report}"
+        )
+        final = load_susceptibility_from_h5(str(h5))["data"]
+        assert np.array_equal(final, reference_b["data"]), (
+            "the final product does not carry model B's numbers"
+        )
+        assert not np.array_equal(final, reference_a["data"]) and h5.read_bytes() != bytes_a
+
+    print(
+        f"  [z] mock models nk={nk}, workers=2 spawn, shared checkpoint dir: a model "
+        "with the same 4 orbitals but different bvecs re-dispatched both slices "
+        "(2 incompatible WARNINGs) and a second resume of the same model reused both "
+        "(exactly 2 'already complete' records, no false incompatibility); tampering "
+        "one shard's num_wann recomputed only that slice; switching to the 6-orbital "
+        "model re-dispatched both and the final h5 equals the 6-orbital reference "
+        "bitwise and differs from the 4-orbital product"
+    )
+
+
 def main() -> None:
     """Run every check and summarize."""
     checks = [
@@ -1135,6 +2644,24 @@ def main() -> None:
         ("(n) shifted view blocks equal np.roll", check_shifted_view_blocks),
         ("(n) blocked eigen stage bitwise equal (nk=32)", lambda: check_blocked_eigen_equivalence(32)),
         ("(o) wide-model nk=32 smoke (blocked zgemm)", lambda: check_wide_model_smoke(32)),
+        ("(p) q row slices bitwise equal (odd nk=5)", lambda: check_row_slices(5)),
+        ("(p) q row slices bitwise equal (nk=8)", lambda: check_row_slices(8)),
+        ("(p) q row slices bitwise equal (nk=16)", lambda: check_row_slices(16)),
+        ("(q) slice assembly bitwise equal (odd nk=5)", lambda: check_slice_assembly(5)),
+        ("(q) slice assembly bitwise equal (nk=8)", lambda: check_slice_assembly(8)),
+        ("(r) mirror assembly (nk=4)", lambda: check_mirror_assembly(4)),
+        ("(r) mirror assembly (odd nk=5)", lambda: check_mirror_assembly(5)),
+        ("(r) mirror assembly (nk=6)", lambda: check_mirror_assembly(6)),
+        ("(r) mirror assembly (nk=8)", lambda: check_mirror_assembly(8)),
+        ("(r) mirror assembly (nk=16)", lambda: check_mirror_assembly(16)),
+        ("(s) parallel workers/checkpoints/resume (mock model)", check_parallel_execution),
+        ("(t) logging contract + structural re-checks", lambda: check_logging_contract(8)),
+        ("(u) real-model nk=32 parallel performance + end-to-end", check_real_model_parallel),
+        ("(v) truncated/empty checkpoint self-heals (R1)", check_bad_shard_recovery),
+        ("(w) run_parallel(log_file=...) really logs (R2)", check_log_file_parameter),
+        ("(x) q_index_range validation (R3)", lambda: check_q_index_range_validation(8)),
+        ("(y) worker RSS estimate is an upper bound (R4)", check_estimate_upper_bound),
+        ("(z) foreign-model checkpoint rejection (R5)", check_foreign_shard_rejection),
     ]
     failed = []
     for name, fn in checks:

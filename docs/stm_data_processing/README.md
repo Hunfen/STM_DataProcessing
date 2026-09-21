@@ -28,6 +28,7 @@
 | `mlwf_ek2d.py` | [dft/wannier90/mlwf_ek2d.md](dft/wannier90/mlwf_ek2d.md) |
 | `mlwf_im_susceptibility.py` | [dft/wannier90/mlwf_im_susceptibility.md](dft/wannier90/mlwf_im_susceptibility.md) |
 | `lindhard_re_chi.py`（CPU 静态实部） | [dft/wannier90/Lindhard_Re_chi_from_Wannier90_hr.md](dft/wannier90/Lindhard_Re_chi_from_Wannier90_hr.md) |
+| `lindhard_re_chi_parallel.py`（q 行分片多进程） | [dft/wannier90/lindhard_re_chi_parallel.md](dft/wannier90/lindhard_re_chi_parallel.md) |
 
 ## io
 
