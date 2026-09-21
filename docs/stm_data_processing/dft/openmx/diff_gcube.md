@@ -167,8 +167,8 @@ diff_cube_files("input1.cube", "input2.cube", "output.cube")
 from stm_data_processing.dft.openmx.diff_gcube import CubeFile
 
 cube = CubeFile.read("input1.cube")
-print(cube.ngrid)      # [n1, n2, n3]
-print(cube.origin)     # [x, y, z]
+print(cube.ngrid)  # [n1, n2, n3]
+print(cube.origin)  # [x, y, z]
 print(len(cube.data))  # n1
 
 cube.write("copy.cube")
@@ -181,7 +181,7 @@ from stm_data_processing.dft.openmx.diff_gcube import CubeFile
 
 c1 = CubeFile.read("input1.cube")
 c2 = CubeFile.read("input2.cube")
-c1.validate_compatibility(c2)   # 不兼容时抛 ValueError
+c1.validate_compatibility(c2)  # 不兼容时抛 ValueError
 ```
 
 ### 命令行

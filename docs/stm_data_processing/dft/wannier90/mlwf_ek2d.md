@@ -112,6 +112,7 @@ result = calc.calculate(
 
 # Load from file (structure identical)
 from stm_data_processing.io.ek2d_io import EK2DIO
+
 loaded = EK2DIO.load_ek2d("./ek2d.h5", k_range=(-1.0, 1.0))
 # loaded is fully consistent with result
 ```
@@ -200,8 +201,8 @@ calc = EK2DCalculator(ham, nk=256)
 # Calculate original BZ bands
 result = calc.calculate()
 energies = result["energies"]  # shape: (num_wann, 256, 256)
-kx = result["kx"]              # shape: (256, 256)
-ky = result["ky"]              # shape: (256, 256)
+kx = result["kx"]  # shape: (256, 256)
+ky = result["ky"]  # shape: (256, 256)
 
 # Access specific band
 band_0 = energies[0]  # First band

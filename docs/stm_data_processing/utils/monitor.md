@@ -77,8 +77,8 @@ if dis.size:
     print("最后一次 delta:", dis[2, -1])
 
 # 最局域化展宽与 O_D
-print("展宽数组形状:", data["wannierise_spreads"].shape)   # (num_cycle, num_wann, 1)
-print("O_D 数组形状:", data["wannierise_od"].shape)         # (num_cycle, 1)
+print("展宽数组形状:", data["wannierise_spreads"].shape)  # (num_cycle, num_wann, 1)
+print("O_D 数组形状:", data["wannierise_od"].shape)  # (num_cycle, 1)
 
 # 收敛容差
 print("退纠缠容差:", data["disentangle_tar"])

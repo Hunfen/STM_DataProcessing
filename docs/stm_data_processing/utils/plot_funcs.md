@@ -261,9 +261,10 @@ from stm_data_processing.utils.plot_funcs import (
 plot_sxm_topo(Path("scan.sxm"), Path("topo.tif"))
 
 # 第 0 个偏压的 dI/dV map 与 QPI
-out = Path("out"); out.mkdir(exist_ok=True)
-map_img = plot_map_bias(Path("grid.3ds"), 0, out)      # out/temp_map_0.tif
-qpi_img = plot_qpi_bias(Path("grid.3ds"), 0, out)      # out/temp_QPI_0.tif
+out = Path("out")
+out.mkdir(exist_ok=True)
+map_img = plot_map_bias(Path("grid.3ds"), 0, out)  # out/temp_map_0.tif
+qpi_img = plot_qpi_bias(Path("grid.3ds"), 0, out)  # out/temp_QPI_0.tif
 
 # STS 单谱 + 形貌标记
 sts_img, topo_marked = plot_sts(Path("spec.dat"), Path("scan.sxm"), out)
@@ -271,6 +272,7 @@ sts_img, topo_marked = plot_sts(Path("spec.dat"), Path("scan.sxm"), out)
 # 平面扣除（作为预处理）
 import nanonispy as nap
 import numpy as np
+
 topo = nap.read.Scan("scan.sxm").signals["Z"]["forward"]
 topo_flat = subtractMeanPlane(topo)
 ```

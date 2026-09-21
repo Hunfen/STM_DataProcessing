@@ -564,7 +564,7 @@ class OpenMX:
                 z = float(parts[4])
                 positions.append([x, y, z])
                 elements.append(element)
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 continue
 
         if not positions:
@@ -645,14 +645,14 @@ class OpenMX:
                     try:
                         up_spin = float(parts[5])
                         down_spin = float(parts[6])
-                    except (ValueError, IndexError):
+                    except ValueError, IndexError:
                         pass
 
                 positions.append([x, y, z])
                 elements.append(element)
                 spin_weights.append([up_spin, down_spin])
 
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 continue
 
         if not positions:

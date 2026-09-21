@@ -176,18 +176,18 @@ from stm_data_processing.utils.lindhard1dfree import (
 )
 
 # 自由电子色散
-E = free_electron_energy(k=1.0)      # eV
+E = free_electron_energy(k=1.0)  # eV
 
 # 费米-狄拉克分布（T=300 K, μ=0 eV）
 f = fermi_dirac_from_energy(0.0, mu=0.0, t=300.0)
 
 # 构造 Lindhard 响应函数计算器
 lin = Lindhard1DFreeElectron(
-    q_max=1.0,        # Å⁻¹
-    k_f=0.5,          # Å⁻¹
+    q_max=1.0,  # Å⁻¹
+    k_f=0.5,  # Å⁻¹
     temperature=300.0,  # K
-    omega=0.1,        # eV
-    eta=0.01,         # eV
+    omega=0.1,  # eV
+    eta=0.01,  # eV
     q_points=200,
 )
 
@@ -195,8 +195,8 @@ lin = Lindhard1DFreeElectron(
 q = lin.q_array
 chi = lin.chi_array
 
-re_chi = np.real(chi)   # 实部
-im_chi = np.imag(chi)   # 虚部
+re_chi = np.real(chi)  # 实部
+im_chi = np.imag(chi)  # 虚部
 ```
 
 ---

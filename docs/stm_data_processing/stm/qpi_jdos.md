@@ -129,6 +129,7 @@ result = qpi.calculate(energy_range=0.5, output_path="./qpi.h5")
 
 # 从文件加载（结构相同）
 from stm_data_processing.io.qpi_io import load_qpi_from_h5
+
 loaded = load_qpi_from_h5("./qpi.h5", q_range=(-0.3, 0.3))
 # loaded 与 result 结构完全一致
 ```

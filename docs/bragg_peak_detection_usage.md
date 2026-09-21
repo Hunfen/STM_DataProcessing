@@ -21,7 +21,7 @@ from stm_data_processing.utils.bragg_peak import LatticeSpec, detect_bragg_peaks
 
 # 合成演示图：30 nm 场、六方 a = 2 nm 的反射 + 高斯噪声（固定种子）
 n, size_nm = 256, 30.0
-b_px = 4 * np.pi / (np.sqrt(3) * 2.0) / (2 * np.pi / size_nm)   # |b1|，单位 px
+b_px = 4 * np.pi / (np.sqrt(3) * 2.0) / (2 * np.pi / size_nm)  # |b1|，单位 px
 axis = np.arange(n) - n // 2
 xg, yg = np.meshgrid(axis, axis)
 b1 = np.array([b_px, 0.0])
@@ -32,12 +32,14 @@ for h in range(-2, 3):
         q = h * b1 + k * b2
         if (h, k) == (0, 0) or np.hypot(*q) > 0.6 * (n // 2):
             continue
-        image += np.exp(-(np.hypot(*q) / 40.0) ** 2) * np.cos(
+        image += np.exp(-((np.hypot(*q) / 40.0) ** 2)) * np.cos(
             2 * np.pi * (q[0] * xg + q[1] * yg) / n
         )
 image += 1.0 * np.random.default_rng(20260917).normal(size=(n, n))
 
-result = detect_bragg_peaks(image, size_nm, lattice=LatticeSpec(a_nm=2.0, symmetry="hexagonal"))
+result = detect_bragg_peaks(
+    image, size_nm, lattice=LatticeSpec(a_nm=2.0, symmetry="hexagonal")
+)
 print(len(result.peaks), result.lattice.fit_ok if result.lattice else None)
 for peak in result.peaks[:3]:
     print(peak.index_hk, peak.q_px, peak.sigma_q_px)
@@ -51,13 +53,19 @@ for peak in result.peaks[:3]:
 from stm_data_processing.utils.bragg_peak import detect_bragg_peaks, load_image
 
 # 100 nm 场，2048²，tab 分隔
-img = load_image("/Users/hunfen/Documents/论文/c6lic6/data_processing/final/topo0009.txt")
-result = detect_bragg_peaks(img, 100.0)          # lattice=None，默认参数即可
-print(result.lattice.fit_ok)                     # True（harmonic_ladder）
-print([p.index_hk for p in result.peaks if p.index_hk is not None][:6])  # 一环 ±(1,0) ±(0,1) ±(1,−1)
+img = load_image(
+    "/Users/hunfen/Documents/论文/c6lic6/data_processing/final/topo0009.txt"
+)
+result = detect_bragg_peaks(img, 100.0)  # lattice=None，默认参数即可
+print(result.lattice.fit_ok)  # True（harmonic_ladder）
+print(
+    [p.index_hk for p in result.peaks if p.index_hk is not None][:6]
+)  # 一环 ±(1,0) ±(0,1) ±(1,−1)
 
 # 30 nm 场，1024²，tab 分隔（扩展名 .csv 但内容仍是 tab）
-img2 = load_image("/Users/hunfen/Documents/论文/c6lic6/data_processing/20251117_topo4_30nm.csv")
+img2 = load_image(
+    "/Users/hunfen/Documents/论文/c6lic6/data_processing/20251117_topo4_30nm.csv"
+)
 result2 = detect_bragg_peaks(img2, 30.0)
 ```
 
@@ -73,10 +81,12 @@ from stm_data_processing.utils.bragg_peak import LatticeSpec, detect_bragg_peaks
 
 loader = NanonisFileLoader("path/to/topo0002.sxm")
 z_index = loader.channels.index("Z") if "Z" in loader.channels else 0
-image = np.asarray(loader.data[2 * z_index], dtype=float)   # 前向/后向两通道交错
-size_nm = float(loader.range[0]) * 1e9                     # 场边长（nm）
+image = np.asarray(loader.data[2 * z_index], dtype=float)  # 前向/后向两通道交错
+size_nm = float(loader.range[0]) * 1e9  # 场边长（nm）
 
-result = detect_bragg_peaks(image, size_nm, lattice=LatticeSpec(a_nm=0.246, symmetry="hexagonal"))
+result = detect_bragg_peaks(
+    image, size_nm, lattice=LatticeSpec(a_nm=0.246, symmetry="hexagonal")
+)
 print(result.lattice.fit_ok if result.lattice else None, result.meta["basis_source"])
 ```
 
@@ -85,23 +95,35 @@ print(result.lattice.fit_ok if result.lattice else None, result.meta["basis_sour
 ```python
 from stm_data_processing.utils.bragg_peak import BraggPeakDetector, compute_fft2
 
-fft2 = compute_fft2(image, size_nm, window="hann", subtract_plane=True, nan_policy="plane")
+fft2 = compute_fft2(
+    image, size_nm, window="hann", subtract_plane=True, nan_policy="plane"
+)
 detector = BraggPeakDetector(lattice=LatticeSpec(a_nm=0.246, symmetry="hexagonal"))
-result = detector.detect_from_fft2(fft2, size_nm)          # 不再做加窗/去平面
+result = detector.detect_from_fft2(fft2, size_nm)  # 不再做加窗/去平面
 ```
 
 ### 1.5 畸变矫正（把歪掉的扫描拉回理想倒格几何）
 
 ```python
-from stm_data_processing.utils.bragg_peak import LatticeSpec, correct_bragg_peaks, load_image
+from stm_data_processing.utils.bragg_peak import (
+    LatticeSpec,
+    correct_bragg_peaks,
+    load_image,
+)
 
 image = load_image("topo0009.txt")
-spec = LatticeSpec(a_nm=0.246, symmetry="hexagonal")   # 显式点群：不做自动推断
+spec = LatticeSpec(a_nm=0.246, symmetry="hexagonal")  # 显式点群：不做自动推断
 correction = correct_bragg_peaks(image, 100.0, lattice=spec)
 
-print(correction.meta["method"])        # "weighted_lsq" = 成功；"two_vector_fallback" / "identity_fallback" = 回退
-print(correction.measured_radius_px, correction.target_radius_px, correction.residual_ratio)
-print(correction.size_nm)               # 矫正后视场：换算 q_nm_inv 必须用它
+print(
+    correction.meta["method"]
+)  # "weighted_lsq" = 成功；"two_vector_fallback" / "identity_fallback" = 回退
+print(
+    correction.measured_radius_px,
+    correction.target_radius_px,
+    correction.residual_ratio,
+)
+print(correction.size_nm)  # 矫正后视场：换算 q_nm_inv 必须用它
 # correction.image 为矫正后图（NaN 填充），correction.fft2 为其复数谱
 ```
 

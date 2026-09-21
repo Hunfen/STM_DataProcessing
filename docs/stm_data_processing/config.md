@@ -69,6 +69,7 @@ def set_backend(backend: Literal["cpu", "gpu", "auto"]) -> None
 
 ```python
 from stm_data_processing.config import set_backend
+
 set_backend("cpu")  # 强制 CPU
 ```
 
@@ -98,6 +99,7 @@ def get_xp()
 
 ```python
 from stm_data_processing.config import get_xp
+
 xp = get_xp()
 array = xp.array([1, 2, 3])  # CPU/GPU 通用
 ```
@@ -237,8 +239,8 @@ def __getattr__(self, name)
 from stm_data_processing.config import get_xp, get_backend
 
 xp = get_xp()
-arr = xp.array([1, 2, 3])   # CPU: numpy, GPU: cupy
-print(get_backend())        # 'cpu' 或 'gpu'
+arr = xp.array([1, 2, 3])  # CPU: numpy, GPU: cupy
+print(get_backend())  # 'cpu' 或 'gpu'
 ```
 
 ### 在导入计算模块前强制后端
@@ -257,12 +259,12 @@ from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.config import get_backend_status, is_gpu_available
 
 status = get_backend_status()
-print(status["backend"])          # 'cpu' 或 'gpu'
+print(status["backend"])  # 'cpu' 或 'gpu'
 print(status["cupy_importable"])  # bool
-print(status["cuda_devices"])     # int
-print(status["cupy_version"])     # str 或 None
+print(status["cuda_devices"])  # int
+print(status["cupy_version"])  # str 或 None
 
-print(is_gpu_available())         # bool
+print(is_gpu_available())  # bool
 ```
 
 ### 使用 BackendArray
@@ -270,10 +272,10 @@ print(is_gpu_available())         # bool
 ```python
 from stm_data_processing.config import BackendArray
 
-ba = BackendArray()                # 跟随全局 BACKEND
+ba = BackendArray()  # 跟随全局 BACKEND
 arr = ba.array([1, 2, 3])
-result = ba.sum(arr)               # 通过 __getattr__ 委托到 xp.sum
-cpu_arr = ba.to_cpu(result)        # 转回 NumPy
+result = ba.sum(arr)  # 通过 __getattr__ 委托到 xp.sum
+cpu_arr = ba.to_cpu(result)  # 转回 NumPy
 
 ba_gpu = BackendArray(backend="gpu")  # 显式指定后端
 ```

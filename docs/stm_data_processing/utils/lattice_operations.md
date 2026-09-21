@@ -206,11 +206,13 @@ import numpy as np
 from stm_data_processing.utils.lattice import LATTICE
 
 a = 2.46
-avecs = np.array([
-    [a, 0.0, 0.0],
-    [-a / 2, a * np.sqrt(3) / 2, 0.0],
-    [0.0, 0.0, 10.0],
-])
+avecs = np.array(
+    [
+        [a, 0.0, 0.0],
+        [-a / 2, a * np.sqrt(3) / 2, 0.0],
+        [0.0, 0.0, 10.0],
+    ]
+)
 lat = LATTICE(avecs=avecs)
 
 # 第一布里渊区六个顶点（列向 (2, 6)）

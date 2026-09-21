@@ -327,8 +327,8 @@ result = qpi.calculate(energy_range=0.5)
 
 # 访问元数据
 print(result["metadata"]["module_type"])  # "born"
-print(result["metadata"]["eta"])          # 0.005
-print(result["metadata"]["V"].shape)      # (num_wann, num_wann)
+print(result["metadata"]["eta"])  # 0.005
+print(result["metadata"]["V"].shape)  # (num_wann, num_wann)
 ```
 
 ---

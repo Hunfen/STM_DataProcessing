@@ -66,11 +66,11 @@ pip install -e ".[gpu]"
 ```python
 from stm_data_processing.config import set_backend, get_backend, get_xp
 
-set_backend("gpu")   # 尝试 GPU（不可用时自动回退 CPU）
-set_backend("cpu")   # 强制 CPU
+set_backend("gpu")  # 尝试 GPU（不可用时自动回退 CPU）
+set_backend("cpu")  # 强制 CPU
 set_backend("auto")  # 自动探测（默认）
 
-xp = get_xp()        # 返回 cupy 或 numpy，二者接口一致
+xp = get_xp()  # 返回 cupy 或 numpy，二者接口一致
 ```
 
 ### 1. 加载 Nanonis 实验数据
@@ -79,9 +79,9 @@ xp = get_xp()        # 返回 cupy 或 numpy，二者接口一致
 from stm_data_processing.io.nanonis_loader import NanonisFileLoader
 
 loader = NanonisFileLoader("topography.sxm")  # 支持 .sxm / .dat / .3ds
-img = loader.data     # 懒加载，首次访问时解析，自动校正扫描方向
+img = loader.data  # 懒加载，首次访问时解析，自动校正扫描方向
 header = loader.header
-bias = loader.bias    # 常用 SPM 参数便捷属性
+bias = loader.bias  # 常用 SPM 参数便捷属性
 ```
 
 ### 2. 加载 Wannier90 紧束缚哈密顿量
@@ -105,7 +105,7 @@ qpi = JDOSQPI(ham, nk=256, eta=0.001)
 result = qpi.calculate(
     energy_range=np.linspace(-1.0, 1.0, 50),
     q_range=(-0.3, 0.3),
-    output_path="./qpi.h5",     # 可选：保存为 HDF5
+    output_path="./qpi.h5",  # 可选：保存为 HDF5
 )
 qpi_maps = result["qpi_layers"]  # shape: (n_energies, nq, nq)
 metadata = result["metadata"]
@@ -132,11 +132,11 @@ result = sus.calculate(omega_limit=1.0, resolution=0.01, q_range=(-0.5, 0.5))
 ```python
 from stm_data_processing.utils.lattice import LATTICE
 
-lat = LATTICE(bvecs=bvecs)            # 或 avecs=...，内部用 mpmath 高精度计算
-lat.set_precision(100)                # 调整计算精度（十进制有效位数）
+lat = LATTICE(bvecs=bvecs)  # 或 avecs=...，内部用 mpmath 高精度计算
+lat.set_precision(100)  # 调整计算精度（十进制有效位数）
 print(lat.a1, lat.b1, lat.volume)
-lat.rotate(30)                        # 旋转晶格
-lat.verify_consistency()              # 一致性校验
+lat.rotate(30)  # 旋转晶格
+lat.verify_consistency()  # 一致性校验
 ```
 
 ### 6. BTK 超导隧道谱
@@ -144,9 +144,9 @@ lat.verify_consistency()              # 一致性校验
 ```python
 from stm_data_processing.utils.btk import BTK
 
-btk = BTK(Delta=1.5, Z=0.3)           # 超导能隙 Δ、势垒强度 Z
+btk = BTK(Delta=1.5, Z=0.3)  # 超导能隙 Δ、势垒强度 Z
 dI_dV = btk.spectrum(E_min=-5, E_max=5, n_points=500, T=0)  # 零温
-dI_dV_T = btk.spectrum(T=4.2)         # 有限温度
+dI_dV_T = btk.spectrum(T=4.2)  # 有限温度
 ```
 
 ### 7. OpenMX 输出解析
@@ -174,7 +174,7 @@ from stm_data_processing.utils.bragg_peak_detection import (
 
 # 合成演示：30 nm 场、六方 a = 2 nm 的反射 + 高斯噪声
 n, size_nm = 256, 30.0
-b_px = 4 * np.pi / (np.sqrt(3) * 2.0) / (2 * np.pi / size_nm)   # |b1|，单位 px
+b_px = 4 * np.pi / (np.sqrt(3) * 2.0) / (2 * np.pi / size_nm)  # |b1|，单位 px
 axis = np.arange(n) - n // 2
 xg, yg = np.meshgrid(axis, axis)
 b1 = np.array([b_px, 0.0])
@@ -185,7 +185,7 @@ for h in range(-2, 3):
         q = h * b1 + k * b2
         if (h, k) == (0, 0) or np.hypot(*q) > 0.6 * (n // 2):
             continue
-        image += np.exp(-(np.hypot(*q) / 40.0) ** 2) * np.cos(
+        image += np.exp(-((np.hypot(*q) / 40.0) ** 2)) * np.cos(
             2 * np.pi * (q[0] * xg + q[1] * yg) / n
         )
 image += 1.0 * np.random.default_rng(20260917).normal(size=(n, n))
@@ -194,7 +194,7 @@ result = detect_bragg_peaks(
     image, size_nm, lattice=LatticeSpec(a_nm=2.0, symmetry="hexagonal")
 )
 print(len(result.peaks), result.lattice.fit_ok, result.lattice.quality)
-for peak in result.peaks[:3]:                    # 亚像素 q 与不确定度（px）
+for peak in result.peaks[:3]:  # 亚像素 q 与不确定度（px）
     print(peak.index_hk, peak.q_px, peak.sigma_q_px, peak.q_model_px)
 ```
 

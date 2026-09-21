@@ -187,7 +187,7 @@ def peak_rss_bytes() -> int:
             statm = Path("/proc/self/statm").read_text(encoding="ascii")
             resident_pages = int(statm.split()[1])
             return resident_pages * os.sysconf("SC_PAGE_SIZE")
-        except (OSError, ValueError, IndexError):
+        except OSError, ValueError, IndexError:
             pass
     try:
         import resource

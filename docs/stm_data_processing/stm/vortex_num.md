@@ -72,8 +72,8 @@ print(n_zero)  # 0.0
 from stm_data_processing.stm.vortex_num import vortex_num
 
 # 10 T 磁场下，1 µm × 1 µm 区域内的涡旋数
-B = 10.0              # T
-area = (1e-6) ** 2    # m² (1 µm²)
+B = 10.0  # T
+area = (1e-6) ** 2  # m² (1 µm²)
 n_vortices = vortex_num(B, area)
 print(f"涡旋数 = {n_vortices:.4f}")
 ```

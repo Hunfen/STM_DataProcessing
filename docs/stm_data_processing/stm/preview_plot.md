@@ -26,9 +26,9 @@ gwyddion = LinearSegmentedColormap("gwyddion", segmentdata=cdict_gwyddion, N=409
 
 ```python
 cdict_gwyddion: dict = {
-    "red":   [...],  # 4 个锚点
+    "red": [...],  # 4 个锚点
     "green": [...],  # 4 个锚点
-    "blue":  [...],  # 4 个锚点
+    "blue": [...],  # 4 个锚点
 }
 ```
 
@@ -67,11 +67,11 @@ plt.show()
 ```python
 from stm_data_processing.stm.preview_plot import gwyddion
 
-print(gwyddion.name)   # 'gwyddion'
-print(gwyddion.N)      # 4096
+print(gwyddion.name)  # 'gwyddion'
+print(gwyddion.N)  # 4096
 
 # 将归一化值映射为 RGBA 颜色
-rgba = gwyddion(0.5)   # 返回 (r, g, b, a) 元组
+rgba = gwyddion(0.5)  # 返回 (r, g, b, a) 元组
 print(rgba)
 ```
 

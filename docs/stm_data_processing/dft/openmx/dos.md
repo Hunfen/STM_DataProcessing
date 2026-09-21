@@ -91,14 +91,14 @@ dos = load_dos_tree("DOS")
 # 系统总态密度
 total_df = dos["total"]
 if total_df is not None:
-    print(total_df.columns.tolist())   # ['E', 'DOS', 'IDOS']
-    print(total_df["E"].values)        # 能量轴 (eV)
+    print(total_df.columns.tolist())  # ['E', 'DOS', 'IDOS']
+    print(total_df["E"].values)  # 能量轴 (eV)
 
 # 原子 1 的投影态密度
 atom1 = dos["pdos"][1]
-print(atom1.keys())                    # dict_keys(['p', 'd', ...])
-print(atom1["p"]["p1"].head())         # p1 轨道 PDOS
-print(atom1["total"].head())           # 原子总 PDOS
+print(atom1.keys())  # dict_keys(['p', 'd', ...])
+print(atom1["p"]["p1"].head())  # p1 轨道 PDOS
+print(atom1["total"].head())  # 原子总 PDOS
 ```
 
 ### 指定自定义目录

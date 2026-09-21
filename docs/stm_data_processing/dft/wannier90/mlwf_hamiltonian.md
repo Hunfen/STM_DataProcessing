@@ -129,8 +129,8 @@ k_points = np.array([[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0]])
 h_batch = ham.hk(k_points)  # shape: (3, nw, nw)
 
 # ❌ 不支持
-ham.hk((0, 0, 0))              # tuple 不支持
-ham.hk(np.array([0, 0, 0]))    # (3,) 不支持
+ham.hk((0, 0, 0))  # tuple 不支持
+ham.hk(np.array([0, 0, 0]))  # (3,) 不支持
 ```
 
 ---
@@ -234,15 +234,17 @@ ham = MLWFHamiltonian.from_seedname("./wannier", "silicon")
 # 计算 Γ 点 (注意使用 (1, 3) 形状)
 k_gamma = np.array([[0.0, 0.0, 0.0]])
 h_gamma = ham.hk(k_gamma)  # shape: (1, nw, nw)
-h_gamma_0 = h_gamma[0]     # 取第一个 k 点的结果 (nw, nw)
+h_gamma_0 = h_gamma[0]  # 取第一个 k 点的结果 (nw, nw)
 
 # 计算 k 点路径
-k_path = np.array([
-    [0.0, 0.0, 0.0],   # Γ
-    [0.5, 0.0, 0.0],   # X
-    [0.5, 0.5, 0.0],   # M
-    [0.0, 0.0, 0.0],   # Γ
-])
+k_path = np.array(
+    [
+        [0.0, 0.0, 0.0],  # Γ
+        [0.5, 0.0, 0.0],  # X
+        [0.5, 0.5, 0.0],  # M
+        [0.0, 0.0, 0.0],  # Γ
+    ]
+)
 h_path = ham.hk(k_path)  # shape: (4, nw, nw)
 ```
 
@@ -271,10 +273,10 @@ else:
 ```python
 ham = MLWFHamiltonian(
     num_wann=10,
-    r_list=r_list,          # (nrpts, 3)
-    h_list_flat=h_flat,     # (nrpts, 100)
-    ndegen=ndegen,          # (nrpts,)
-    bvecs=bvecs,            # (3, 3) 可选
+    r_list=r_list,  # (nrpts, 3)
+    h_list_flat=h_flat,  # (nrpts, 100)
+    ndegen=ndegen,  # (nrpts,)
+    bvecs=bvecs,  # (3, 3) 可选
 )
 ```
 
@@ -300,6 +302,7 @@ else:
 def make_k_points(*k_list: tuple[float, float, float]) -> np.ndarray:
     """Convert k-point tuples to (N, 3) array."""
     return np.array(k_list, dtype=np.float64)
+
 
 # 使用
 k_points = make_k_points(

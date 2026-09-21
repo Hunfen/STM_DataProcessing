@@ -181,7 +181,10 @@ k(1/Å) = k(Bohr⁻¹) / 0.52917721092
 
 ```python
 from stm_data_processing.dft.openmx.parser import OpenMX
-from stm_data_processing.dft.openmx.unfolding import read_unfold_orbup, compute_spectral_function
+from stm_data_processing.dft.openmx.unfolding import (
+    read_unfold_orbup,
+    compute_spectral_function,
+)
 
 # 1. 解析原子数据（列名生成所需）
 mx = OpenMX(folder="./work", systemname="C6LiC6")
@@ -190,11 +193,11 @@ mx.read_atomic_positions()
 
 # 2. 读取权重
 df = read_unfold_orbup("./work/C6LiC6.unfold_orbup", mx)
-print(df.columns.tolist())   # ['kpath', 'energy', '0-C-0s', ...]
+print(df.columns.tolist())  # ['kpath', 'energy', '0-C-0s', ...]
 
 # 3. 计算谱函数
 k, e, a = compute_spectral_function(df)
-print(k.shape, e.shape, a.shape)   # (512, 512) (512, 512) (512, 512)
+print(k.shape, e.shape, a.shape)  # (512, 512) (512, 512) (512, 512)
 ```
 
 ### 投影到指定元素/原子
@@ -216,9 +219,9 @@ k, e, a = compute_spectral_function(
     df,
     nk=1024,
     ne=1024,
-    delta_k_input_nm=50,   # 相干长度 50 nm
-    delta_e_input_k=10,    # 温度 10 K
-    use_gpu=False,         # 强制 CPU
+    delta_k_input_nm=50,  # 相干长度 50 nm
+    delta_e_input_k=10,  # 温度 10 K
+    use_gpu=False,  # 强制 CPU
 )
 ```
 

@@ -120,10 +120,10 @@ from stm_data_processing.dft.openmx.band import parse_dft_band_data
 
 data = parse_dft_band_data(fname_band="./C6LiC6.Band")
 
-print(data["bands"].shape)       # (nk_total, n_bands)
-print(data["fermi_energy"])      # 费米能级 (eV)
-print(data["tick_label"])        # 高对称点标签，如 ['G', 'K', 'M', 'G']
-print(data["tick_pos"])          # 对应累计距离位置
+print(data["bands"].shape)  # (nk_total, n_bands)
+print(data["fermi_energy"])  # 费米能级 (eV)
+print(data["tick_label"])  # 高对称点标签，如 ['G', 'K', 'M', 'G']
+print(data["tick_pos"])  # 对应累计距离位置
 ```
 
 ### 通过目录与系统名自动构造路径

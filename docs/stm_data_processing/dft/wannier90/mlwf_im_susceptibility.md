@@ -169,7 +169,7 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
 
    ```python
    # CPU path: H(k) is diagonalized once before the loop (eigvals, eigvecs).
-   spectra_occ = self._spectral_from_eigh(eigvals, eigvecs, eps_occ[i])      # A(k, ε)
+   spectra_occ = self._spectral_from_eigh(eigvals, eigvecs, eps_occ[i])  # A(k, ε)
    spectra_unocc = self._spectral_from_eigh(eigvals, eigvecs, eps_unocc[i])  # A(k, ε+ω)
    ```
 
@@ -178,7 +178,9 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
    $$ A_{\text{occ}} \leftarrow M_{init} \cdot A_{\text{occ}}, \quad A_{\text{unocc}} \leftarrow M_{fin} \cdot A_{\text{unocc}} $$
 
    ```python
-   spectra_occ = np.matmul(self._minit, spectra_occ)    # same contraction as einsum("ac,ijcb->ijab")
+   spectra_occ = np.matmul(
+       self._minit, spectra_occ
+   )  # same contraction as einsum("ac,ijcb->ijab")
    spectra_unocc = np.matmul(self._mfin, spectra_unocc)
    ```
 
@@ -200,7 +202,9 @@ so the occupied spectrum is reversed in k ($\mathbf{k}\to-\mathbf{k}$, periodic)
    $$ P(\mathbf{r}, \epsilon, \omega) = \tilde{A}_{init}(-\mathbf{r}, \epsilon)\,\tilde{A}_{fin}(\mathbf{r}, \epsilon + \omega)$$
 
    ```python
-   b_prod = np.einsum("ijab,ijba->ij", b_occ_shifted, b_unocc_shifted)  # Tr[M_init·A·M_fin·A]
+   b_prod = np.einsum(
+       "ijab,ijba->ij", b_occ_shifted, b_unocc_shifted
+   )  # Tr[M_init·A·M_fin·A]
    ```
 
 6. **Inverse Fourier Transform**: Transform back to q-space.
@@ -282,7 +286,9 @@ The `minit` and `mfin` matrices allow selective orbital contributions to the sus
 
 ```python
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
-from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import SusceptibilityCalculator_wang2012
+from stm_data_processing.dft.wannier90.mlwf_im_susceptibility import (
+    SusceptibilityCalculator_wang2012,
+)
 import numpy as np
 
 # 1. Load Hamiltonian
@@ -291,8 +297,8 @@ ham = MLWFHamiltonian.from_seedname(folder="./wannier", seedname="material")
 # 2. Initialize calculator
 calculator = SusceptibilityCalculator_wang2012(
     hamiltonian=ham,
-    nk=256,          # k-grid density
-    eta=5e-3,        # broadening
+    nk=256,  # k-grid density
+    eta=5e-3,  # broadening
     # Optional: orbital selection matrices
     # minit=np.eye(ham.num_wann),
     # mfin=np.eye(ham.num_wann),
@@ -300,10 +306,10 @@ calculator = SusceptibilityCalculator_wang2012(
 
 # 3. Execute calculation
 results = calculator.calculate(
-    omega_limit=1.0,      # integration limit 1.0 eV
-    resolution=0.01,      # nominal energy step (eV)
+    omega_limit=1.0,  # integration limit 1.0 eV
+    resolution=0.01,  # nominal energy step (eV)
     q_range=(-0.5, 0.5),  # output q range
-    output_path="./output/susceptibility.h5"
+    output_path="./output/susceptibility.h5",
 )
 
 # 4. Access results

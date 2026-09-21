@@ -132,7 +132,9 @@ from stm_data_processing.utils.miscellaneous import extend_qpi, crop_qpi, fermi,
 
 # QPI 扩展后裁剪回基本布里渊区
 nk = 32
-q1, q2 = np.meshgrid(np.linspace(-0.5, 0.5, nk), np.linspace(-0.5, 0.5, nk), indexing="ij")
+q1, q2 = np.meshgrid(
+    np.linspace(-0.5, 0.5, nk), np.linspace(-0.5, 0.5, nk), indexing="ij"
+)
 qpi = np.random.rand(nk, nk)
 qpi_ext, q1_ext, q2_ext = extend_qpi(qpi, q1, q2, -1.5, 1.5)
 qpi_back, q1_back, q2_back = crop_qpi(qpi_ext, q1_ext, q2_ext, -0.5, 0.5)  # (32, 32)

@@ -77,7 +77,8 @@ def get_logger(name: str | None = None, level: str | int | None = None) -> loggi
 
 ```python
 from stm_data_processing.logger import get_logger
-logger = get_logger()       # name = 当前模块 __name__
+
+logger = get_logger()  # name = 当前模块 __name__
 logger.info("hello")
 ```
 
@@ -100,6 +101,7 @@ def set_level(level: str | int) -> None
 
 ```python
 from stm_data_processing.logger import set_level
+
 set_level("debug")
 ```
 
@@ -139,6 +141,7 @@ def enable_file(path: str | Path, level: str | int | None = None) -> logging.Fil
 
 ```python
 from stm_data_processing.logger import enable_file
+
 enable_file("logs/run.log")
 ```
 
@@ -176,6 +179,7 @@ def setup(
 
 ```python
 from stm_data_processing.logger import setup
+
 logger = setup(level="debug", file="run.log")
 logger.info("ready")
 ```
@@ -204,7 +208,7 @@ logger.info("ready")
 ```python
 from stm_data_processing.logger import get_logger
 
-logger = get_logger()   # name = 当前模块 __name__
+logger = get_logger()  # name = 当前模块 __name__
 logger.debug("verbose detail")
 logger.info("loading data")
 logger.warning("something odd")
@@ -219,10 +223,10 @@ from stm_data_processing.logger import get_logger, set_level
 a = get_logger("module.a")
 b = get_logger("module.b")
 
-set_level("debug")   # a、b 级别实时降为 DEBUG
+set_level("debug")  # a、b 级别实时降为 DEBUG
 
 fixed = get_logger("module.c", level="error")  # 显式 level，免疫 set_level
-set_level("info")     # a、b 升为 INFO，c 仍为 ERROR
+set_level("info")  # a、b 升为 INFO，c 仍为 ERROR
 ```
 
 ### 一次性配置
@@ -241,7 +245,7 @@ from stm_data_processing.logger import enable_file, disable_file
 
 handler = enable_file("logs/run.log", level="debug")
 # ... 记录日志 ...
-disable_file()   # 关闭并移除文件 handler
+disable_file()  # 关闭并移除文件 handler
 ```
 
 ### 自定义格式

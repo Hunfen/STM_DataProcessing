@@ -85,8 +85,8 @@ MULTIPROBE 10. Appendix: K-type thermocouple table
 """
 
 data = parse_thermocouple_table(pdf_text)  # {0: 0.000, 1: 0.039, ..., 10: 0.397, ...}
-data = fix_first_row(data)                 # 确保 -270 -> -6.458 存在
-save_csv(data, "thermocouple.csv")         # 写入 CSV（副作用显式由调用方触发）
+data = fix_first_row(data)  # 确保 -270 -> -6.458 存在
+save_csv(data, "thermocouple.csv")  # 写入 CSV（副作用显式由调用方触发）
 ```
 
 > 说明：模块导入本身不会执行 `__main__` 块，因此不会写文件或打印；`save_csv` 需显式调用才会产生副作用。

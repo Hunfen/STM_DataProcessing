@@ -87,12 +87,13 @@ from stm_data_processing.io.w90hr_loader import Wannier90HRLoader
 data = Wannier90HRLoader.load(folder="./wannier", seedname="silicon")
 
 num_wann = data["num_wann"]
-r_list   = data["r_list"]      # (nrpts, 3)
-h_flat   = data["h_list_flat"] # (nrpts, num_wann*num_wann)
-bvecs    = data["bvecs"]       # (3, 3) 或 None
+r_list = data["r_list"]  # (nrpts, 3)
+h_flat = data["h_list_flat"]  # (nrpts, num_wann*num_wann)
+bvecs = data["bvecs"]  # (3, 3) 或 None
 
 # 更常见用法：经 MLWFHamiltonian 间接加载
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+
 ham = MLWFHamiltonian.from_seedname("./wannier", "silicon")
 ```
 

@@ -255,15 +255,17 @@ from stm_data_processing.utils.lattice import LATTICE
 
 # 六方晶格（石墨烯类，a=2.46 Å）
 a = 2.46
-avecs = np.array([
-    [a, 0.0, 0.0],
-    [-a / 2, a * np.sqrt(3) / 2, 0.0],
-    [0.0, 0.0, 10.0],
-])
+avecs = np.array(
+    [
+        [a, 0.0, 0.0],
+        [-a / 2, a * np.sqrt(3) / 2, 0.0],
+        [0.0, 0.0, 10.0],
+    ]
+)
 lat = LATTICE(avecs=avecs)
 
-print(lat.bvecs)      # 倒格矢 (3, 3)
-print(lat.volume)     # 晶胞体积
+print(lat.bvecs)  # 倒格矢 (3, 3)
+print(lat.volume)  # 晶胞体积
 lat.verify_consistency()  # True
 ```
 
@@ -279,8 +281,8 @@ print(np.allclose(lat2.avecs, lat.avecs))
 ```python
 # 2x2 变换矩阵（嵌入 xy 平面）
 M = np.array([[2, 0], [0, 2]])
-super_lat = lat.supercell(M)   # A_new = M.T @ A_old
-sub_lat = super_lat.subcell(M) # 恢复原胞
+super_lat = lat.supercell(M)  # A_new = M.T @ A_old
+sub_lat = super_lat.subcell(M)  # 恢复原胞
 
 # 往返变换误差
 err = sub_lat.get_transform_error(lat)
@@ -290,16 +292,16 @@ print(f"round-trip error: {err:.2e}")
 ### 旋转与精度设置
 
 ```python
-rot_lat = lat.rotate(30.0)     # 绕 z 轴逆时针旋转 30°
-LATTICE.set_precision(100)     # 提升精度到 100 位
-print(LATTICE.get_precision()) # 100
+rot_lat = lat.rotate(30.0)  # 绕 z 轴逆时针旋转 30°
+LATTICE.set_precision(100)  # 提升精度到 100 位
+print(LATTICE.get_precision())  # 100
 ```
 
 ### 字符串表示
 
 ```python
-print(lat)         # 多行文本，列出 a1..a3, b1..b3, 体积, 旋转角
-print(repr(lat))   # LATTICE(precision=50dps, volume=..., degree=...)
+print(lat)  # 多行文本，列出 a1..a3, b1..b3, 体积, 旋转角
+print(repr(lat))  # LATTICE(precision=50dps, volume=..., degree=...)
 ```
 
 ---

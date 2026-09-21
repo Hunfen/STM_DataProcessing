@@ -159,7 +159,7 @@ EK2DIO.save_ek2d(
 
 # 加载（不扩展）
 data = EK2DIO.load_ek2d("./ek2d.h5")
-print(data["energies"].shape)      # (num_wann, 256, 256)
+print(data["energies"].shape)  # (num_wann, 256, 256)
 print(data["metadata"]["generator"])  # 'EK2DCalculator'
 
 # 加载并扩展到 [-1.0, 1.0)

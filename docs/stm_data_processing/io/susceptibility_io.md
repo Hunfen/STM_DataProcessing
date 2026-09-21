@@ -143,12 +143,12 @@ save_susceptibility_to_h5(
 
 # 加载（不扩展）
 data = load_susceptibility_from_h5("./chi.h5")
-print(data["data"].shape)            # (256, 256)
+print(data["data"].shape)  # (256, 256)
 print(data["metadata"]["omega_limit"])  # 1.0
 
 # 加载并扩展/裁剪到 [-0.3, 0.3)
 data_ext = load_susceptibility_from_h5("./chi.h5", q_range=(-0.3, 0.3))
-print(data_ext["q1_grid"].shape)     # 扩展后网格
+print(data_ext["q1_grid"].shape)  # 扩展后网格
 ```
 
 ---

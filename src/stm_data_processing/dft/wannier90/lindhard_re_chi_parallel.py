@@ -276,7 +276,7 @@ def read_model_shape(model_dir: str | Path, seedname: str) -> tuple[int, int] | 
         try:
             with h5py.File(h5_path, "r") as handle:
                 return int(handle.attrs["num_wann"]), int(handle.attrs["nrpts"])
-        except (OSError, KeyError, ValueError):
+        except OSError, KeyError, ValueError:
             return None
     dat_path = folder / f"{seedname}_hr.dat"
     if not dat_path.exists():
@@ -290,7 +290,7 @@ def read_model_shape(model_dir: str | Path, seedname: str) -> tuple[int, int] | 
             else:
                 num_wann = int(first_line.split()[0])
                 nrpts = int(handle.readline().split()[0])
-    except (OSError, ValueError, IndexError):
+    except OSError, ValueError, IndexError:
         return None
     return num_wann, nrpts
 
@@ -361,14 +361,14 @@ def available_memory_bytes() -> int | None:
             for line in meminfo.read_text(encoding="ascii").splitlines():
                 if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) * 1024
-        except (OSError, ValueError, IndexError):
+        except OSError, ValueError, IndexError:
             return None
         return None
     page_size = None
     for name in ("SC_PAGE_SIZE", "SC_AVPHYS_PAGES", "SC_PHYS_PAGES"):
         try:
             value = int(os.sysconf(name))
-        except (ValueError, OSError, AttributeError):
+        except ValueError, OSError, AttributeError:
             value = None
         if name == "SC_PAGE_SIZE":
             page_size = value
@@ -1104,7 +1104,7 @@ class _CheckpointLock:
     def _read_owner(self) -> int | None:
         try:
             return int(self.path.read_text(encoding="ascii").split()[0])
-        except (OSError, ValueError, IndexError):
+        except OSError, ValueError, IndexError:
             return None
 
     def release(self) -> None:

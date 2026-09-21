@@ -113,10 +113,10 @@ ham = MLWFHamiltonian.from_seedname("./wannier", "silicon")
 tmat = TmatQPI(ham, nk=128, eta=0.001)
 
 # 检查初始化后的属性
-print(tmat.num_wann)   # 正整数的 Wannier 函数数量
-print(tmat.nk)         # 128
-print(tmat.eta)        # 0.001
-print(tmat.gf)         # GreenFunction 实例
+print(tmat.num_wann)  # 正整数的 Wannier 函数数量
+print(tmat.nk)  # 128
+print(tmat.eta)  # 0.001
+print(tmat.gf)  # GreenFunction 实例
 ```
 
 ### ⚠️ 不要调用计算接口

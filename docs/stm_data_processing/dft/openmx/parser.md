@@ -229,18 +229,18 @@ mx = OpenMX(folder="./work", systemname="C6LiC6")
 
 # 倒格矢 (3,3)，单位 1/Å
 bvecs = mx.read_bvecs_from_out()
-print(bvecs.shape)   # (3, 3)
+print(bvecs.shape)  # (3, 3)
 
 # 原子种类定义
 species = mx.read_atomic_species_from_out()
 print(species["n_species"])
-print(species["species_list"][0]["orbitals"])   # {'s': 3, 'p': 2, 'd': 2}
+print(species["species_list"][0]["orbitals"])  # {'s': 3, 'p': 2, 'd': 2}
 
 # 原子坐标（含自旋权重）
 pos = mx.read_atomic_positions()
-print(pos["positions_frac"].shape)   # (n_atoms, 3)
-print(pos["elements"])               # ['C', 'Li', ...]
-print(pos["source"])                 # 'final_structure'
+print(pos["positions_frac"].shape)  # (n_atoms, 3)
+print(pos["elements"])  # ['C', 'Li', ...]
+print(pos["source"])  # 'final_structure'
 ```
 
 ### 不传路径、直接指定文件
@@ -248,10 +248,12 @@ print(pos["source"])                 # 'final_structure'
 ```python
 from stm_data_processing.dft.openmx.parser import OpenMX
 
-mx = OpenMX()   # 不自动加载
+mx = OpenMX()  # 不自动加载
 result = mx.read_openmx_file("./work/C6LiC6.out")
-print(result.keys())            # dict_keys(['lines', 'avecs', 'bvecs', 'species_list', 'n_species', 'raw_lines', 'fermi_level'])
-print(mx.fermi_level)           # eV
+print(
+    result.keys()
+)  # dict_keys(['lines', 'avecs', 'bvecs', 'species_list', 'n_species', 'raw_lines', 'fermi_level'])
+print(mx.fermi_level)  # eV
 print(mx.n_species)
 ```
 

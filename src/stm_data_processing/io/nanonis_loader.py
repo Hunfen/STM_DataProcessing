@@ -876,7 +876,7 @@ class NanonisFileLoader:
             return (
                 tuple(int(x) for x in parts) if len(parts) == expected_parts else (0, 0)
             )
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             return (0, 0)
 
     @property
@@ -1049,7 +1049,7 @@ class NanonisFileLoader:
                 return [
                     str(name).strip('"').strip() for name in df[1:]["Name"].tolist()
                 ]
-            except (KeyError, IndexError, ValueError):
+            except KeyError, IndexError, ValueError:
                 return []
         return []
 
