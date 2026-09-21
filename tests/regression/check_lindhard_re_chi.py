@@ -75,8 +75,8 @@ Checks
       the canonical half is one slice or several, and is off unless asked for,
   (s) parallel execution: a two-worker ``spawn`` run on a tiny synthetic model
       reproduces the single-process product bit for bit, lands the
-      ``rows_<start>_<stop>.npz`` + ``.json`` + ``.done`` checkpoint triple,
-      re-dispatches exactly the slice whose ``npz`` was deleted or corrupted
+      ``rows_<start>_<stop>.h5`` shard + ``.done`` marker checkpoint pair,
+      re-dispatches exactly the slice whose shard was deleted or corrupted
       when ``resume=True``, returns non-zero and writes no h5 when a worker
       exits non-zero, and the CLI pins the four BLAS thread variables before
       NumPy is imported (``--dry-run`` exits 0),
@@ -95,7 +95,7 @@ Checks
       ``max|data-(intra+inter)| <= 1e-13`` and ``min(data) >= -1e-12``, the
       loader round trip and the handover plotting script rendering the file
       (skipped when no real model directory is present).
-  (v) broken checkpoints: an empty and a truncated ``rows_*.npz`` are treated as
+  (v) broken checkpoints: an empty and a truncated ``rows_*.h5`` are treated as
       missing slices (WARNING with the reader's exception type, no exception
       escaping ``run_parallel(resume=True)``), the affected slice is recomputed,
       the final h5 stays byte-identical to the clean control, and
@@ -1675,7 +1675,7 @@ def check_parallel_execution() -> None:
         assert slices == [(0, 3), (3, 6)], f"unexpected plan for nk={nk}: {slices}"
         for start, stop in slices:
             stem = f"rows_{start}_{stop}"
-            for suffix in (".npz", ".json", ".done"):
+            for suffix in (".h5", ".done"):
                 assert (ckpt / f"{stem}{suffix}").exists(), f"missing {stem}{suffix}"
             assert (ckpt / f"{stem}.done").read_text(encoding="utf-8").strip() == "ok"
         assert scan_checkpoints(ckpt) == slices, (
@@ -1683,7 +1683,7 @@ def check_parallel_execution() -> None:
         )
 
         reference_bytes = h5.read_bytes()
-        (ckpt / "rows_3_6.npz").unlink()
+        (ckpt / "rows_3_6.h5").unlink()
         completed = run_cli("--resume")
         assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
         dispatched = [
@@ -1706,12 +1706,11 @@ def check_parallel_execution() -> None:
             load_susceptibility_from_h5(str(h5))["data"], reference["data"]
         )
 
-        np.savez(
-            ckpt / "rows_0_3.npz",
-            data=np.zeros((1, nk)),
-            intraband=np.zeros((1, nk)),
-            interband=np.zeros((1, nk)),
-        )
+        import h5py
+
+        with h5py.File(ckpt / "rows_0_3.h5", "w") as tampered:
+            for key in ("data", "intraband", "interband"):
+                tampered.create_dataset(key, data=np.zeros((1, nk)))
         completed = run_cli("--resume")
         assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
         dispatched = [
@@ -1792,8 +1791,8 @@ def check_parallel_execution() -> None:
     print(
         f"  [s] mock model nk={nk}, workers=2 spawn: h5 bitwise equal to the single "
         "process (np.array_equal True); checkpoint triples rows_0_3/rows_3_6 present "
-        "with .done=ok; resume after deleting rows_3_6.npz re-dispatched only [3, 6) "
-        "and reproduced the identical h5; resume after corrupting rows_0_3.npz "
+        "with .done=ok; resume after deleting rows_3_6.h5 re-dispatched only [3, 6) "
+        "and reproduced the identical h5; resume after corrupting rows_0_3.h5 "
         f"re-dispatched only [0, 3); a failing worker -> exit {worker_exit}, no h5; "
         "CLI --dry-run exit 0 with the plan; the four BLAS thread variables are "
         "pinned before the first NumPy import"
@@ -2165,7 +2164,7 @@ def _isolated_root_logging() -> Iterator[None]:
 def check_bad_shard_recovery() -> None:
     """(v) A truncated checkpoint slice is discarded and recomputed (R1).
 
-    A worker killed mid-write leaves a ``.npz`` that is empty or cut short; the
+    A worker killed mid-write leaves a ``.h5`` shard that is empty or cut short; the
     resume path must treat it exactly like a missing slice instead of letting
     the reader's ``EOFError``/``BadZipFile`` escape.  The check drives the
     library API for the empty slice (so the "does not raise" claim is about
@@ -2202,8 +2201,8 @@ def check_bad_shard_recovery() -> None:
                 load_susceptibility_from_h5(str(h5))["data"], reference["data"]
             )
 
-            # --- empty .npz through the library API ---
-            shard = ckpt / "rows_0_3.npz"
+            # --- empty shard through the library API ---
+            shard = ckpt / "rows_0_3.h5"
             shard.write_bytes(b"")
             collector.records.clear()
             code = run_parallel(str(model_dir), "mock", nk, resume=True, **options)
@@ -2217,10 +2216,10 @@ def check_bad_shard_recovery() -> None:
             ]
             reused = [message for message in messages if "already complete" in message]
             assert warnings, "the empty slice was discarded without a WARNING"
-            assert any("rows_0_3.npz" in message for message in warnings)
-            assert any(
-                "EOFError" in message or "BadZipFile" in message for message in warnings
-            ), f"unexpected read failure for an empty slice: {warnings}"
+            assert any("rows_0_3.h5" in message for message in warnings)
+            assert any("OSError" in message for message in warnings), (
+                f"unexpected read failure for an empty slice: {warnings}"
+            )
             assert len(dispatched) == 1 and "rows=[0, 3)" in dispatched[0], (
                 f"the empty slice was not recomputed: {dispatched}"
             )
@@ -2228,8 +2227,8 @@ def check_bad_shard_recovery() -> None:
             assert h5.read_bytes() == control, "the empty slice changed the product"
             observed.append((0, warnings[-1]))
 
-            # --- truncated .npz (valid shard cut in half) through the CLI ---
-            shard = ckpt / "rows_3_6.npz"
+            # --- truncated shard (valid HDF5 cut in half) through the CLI ---
+            shard = ckpt / "rows_3_6.h5"
             valid = shard.read_bytes()
             shard.write_bytes(valid[: max(1, len(valid) // 2)])
             completed = _run_parallel_cli(
@@ -2249,7 +2248,7 @@ def check_bad_shard_recovery() -> None:
             observed.append((len(valid) // 2, report["unreadable"][-1]))
 
             # --- the same broken slice makes the assembly refuse ---
-            (ckpt / "rows_0_3.npz").write_bytes(b"")
+            (ckpt / "rows_0_3.h5").write_bytes(b"")
             try:
                 assemble_from_checkpoints(ckpt, nk=nk, orbital_select=[0, 1, 2, 3])
             except ValueError as exc:
@@ -2264,7 +2263,7 @@ def check_bad_shard_recovery() -> None:
     empty_type = observed[0][1].split("(")[-1].split(")")[0]
     print(
         f"  [v] mock model nk={nk}, workers=2 spawn, resume=True: an empty "
-        f"rows_0_3.npz ({empty_type}) and a rows_3_6.npz cut to {observed[1][0]} bytes "
+        f"rows_0_3.h5 ({empty_type}) and a rows_3_6.h5 cut to {observed[1][0]} bytes "
         "were both discarded with a WARNING, each slice was recomputed, and the h5 "
         "stayed byte-identical to the clean control; assemble_from_checkpoints "
         "refuses an incomplete slice with ValueError('checkpoint rows=[0, 3) is "
@@ -2664,10 +2663,11 @@ def check_foreign_shard_rejection() -> None:
         bytes_c = h5.read_bytes()
 
         # (3) one tampered shard is recomputed, the other one is reused
-        meta_path = ckpt / "rows_3_6.json"
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta["num_wann"] = 999
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        meta_path = ckpt / "rows_3_6.h5"
+        import h5py
+
+        with h5py.File(meta_path, "r+") as handle:
+            handle.attrs["num_wann"] = 999
         completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
         assert completed.returncode == 0, (
             f"the tampered-shard resume failed:\n{completed.stderr[-1500:]}"

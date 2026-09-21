@@ -13,8 +13,10 @@ Guarantees
   in a worker is copied through unchanged.  ``assemble_slices`` only permutes
   rows/columns (the chi0(q) = chi0(-q) mirror, which is an exact copy) before
   the single ``fftshift`` of the whole map.
-* **Checkpoints.**  Every worker atomically lands ``rows_<start>_<stop>.npz``
-  plus a JSON sidecar and a ``.done`` marker, so ``resume=True`` re-dispatches
+* **Checkpoints.**  Every worker atomically lands an HDF5 shard
+  ``rows_<start>_<stop>.h5`` - written through
+  :mod:`stm_data_processing.io.h5_convention`, checkpoint metadata as file
+  attributes - plus a ``.done`` marker, so ``resume=True`` re-dispatches
   only the missing slices.
 * **Failure containment.**  A worker that exits non-zero (including a BLAS
   segmentation fault, which leaves no traceback) aborts the remaining dispatch,
@@ -60,7 +62,9 @@ from stm_data_processing.dft.wannier90.lindhard_re_chi import (
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.io.h5_convention import (
     CREATION_DATE_ATTR,
+    create_dataset,
     read_creation_date,
+    write_file_metadata,
 )
 from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
 from stm_data_processing.io.w90hr_loader import Wannier90HRLoader
@@ -73,6 +77,12 @@ logger = logging.getLogger(__name__)
 _LINDHARD_LOGGER = "stm_data_processing.dft.wannier90.lindhard_re_chi"
 
 _ARRAY_KEYS = ("data", "intraband", "interband")
+#: ``generator`` recorded in every shard file (see h5_convention).
+_SHARD_GENERATOR = "lindhard_re_chi_parallel"
+#: Suffix used for metadata entries that have to be stored as JSON text
+#: (nested mappings such as the per-array digests); HDF5 attributes only
+#: hold scalars, strings and regular numeric arrays.
+_SHARD_JSON_SUFFIX = "_json"
 
 #: Console/file format: the parent logs ``pid=...``, a worker adds ``worker=<id>``.
 LOG_FORMAT = (
@@ -385,32 +395,78 @@ def _shard_stem(row_range: tuple[int, int]) -> str:
     return f"rows_{int(row_range[0])}_{int(row_range[1])}"
 
 
-def _shard_paths(ckpt_dir: Path, row_range: tuple[int, int]) -> tuple[Path, Path, Path]:
+def _shard_paths(ckpt_dir: Path, row_range: tuple[int, int]) -> tuple[Path, Path]:
+    """``(shard_file, done_marker)`` of one slice.
+
+    A shard is a single HDF5 file written through
+    :mod:`stm_data_processing.io.h5_convention` - one dataset per result array
+    plus the checkpoint metadata as file attributes - together with a ``.done``
+    marker that is only created once the shard is complete.
+    """
     stem = _shard_stem(row_range)
-    return (
-        ckpt_dir / f"{stem}.npz",
-        ckpt_dir / f"{stem}.json",
-        ckpt_dir / f"{stem}.done",
-    )
+    return ckpt_dir / f"{stem}.h5", ckpt_dir / f"{stem}.done"
 
 
-def _json_default(value: Any) -> Any:
+def _shard_attrs(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """Checkpoint metadata -> HDF5 attributes.
+
+    Scalars, strings and regular numeric arrays are stored as they are; nested
+    mappings (the per-array digests) and any ragged sequence become JSON text
+    under ``<key>_json``, because HDF5 attributes cannot hold them.
+    """
+    attrs: dict[str, Any] = {}
+    for key, value in meta.items():
+        if value is None:
+            continue
+        if isinstance(value, Mapping):
+            attrs[f"{key}{_SHARD_JSON_SUFFIX}"] = json.dumps(value, sort_keys=True)
+            continue
+        converted = _shard_attr_value(value)
+        if isinstance(converted, np.ndarray) and converted.dtype == object:
+            attrs[f"{key}{_SHARD_JSON_SUFFIX}"] = json.dumps(value, sort_keys=True)
+        else:
+            attrs[key] = converted
+    return attrs
+
+
+def _shard_meta(handle: h5py.File) -> dict[str, Any]:
+    """HDF5 attributes -> checkpoint metadata (the inverse of _shard_attrs)."""
+    meta: dict[str, Any] = {}
+    for key in handle.attrs:
+        if key.endswith(_SHARD_JSON_SUFFIX):
+            meta[key[: -len(_SHARD_JSON_SUFFIX)]] = json.loads(str(handle.attrs[key]))
+        else:
+            meta[key] = _shard_meta_value(handle.attrs[key])
+    return meta
+
+
+def _shard_attr_value(value: Any) -> Any:
+    """Checkpoint metadata -> something ``h5py`` can store as an attribute."""
+    if isinstance(value, np.ndarray):
+        return value
     if isinstance(value, np.generic):
         return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
     if isinstance(value, Path):
         return str(value)
-    raise TypeError(f"{type(value).__name__} is not JSON serializable")
+    if isinstance(value, (list, tuple)):
+        return np.asarray(value)
+    return value
 
 
-def _array_sha256(values: np.ndarray) -> str:
-    contiguous = np.ascontiguousarray(values, dtype=np.float64)
-    return hashlib.sha256(contiguous.tobytes()).hexdigest()
+def _shard_meta_value(value: Any) -> Any:
+    """HDF5 attribute -> the JSON-equivalent Python value used before.
 
-
-def _digest_arrays(arrays: Mapping[str, np.ndarray]) -> dict[str, dict[str, float]]:
-    return {key: array_digest(arrays[key]) for key in _ARRAY_KEYS}
+    The metadata is compared entry by entry by :func:`_shard_is_compatible`, so
+    it has to come back exactly as the JSON sidecar delivered it: scalars as
+    Python scalars, arrays as nested lists.
+    """
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return value
 
 
 def _write_shard(
@@ -419,54 +475,50 @@ def _write_shard(
     arrays: Mapping[str, np.ndarray],
     meta: Mapping[str, Any],
 ) -> Path:
-    """Atomically land ``npz`` + JSON sidecar + ``.done`` marker."""
+    """Atomically land the HDF5 shard plus the ``.done`` marker."""
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    npz_path, json_path, done_path = _shard_paths(ckpt_dir, row_range)
+    h5_path, done_path = _shard_paths(ckpt_dir, row_range)
 
-    tmp_npz = npz_path.with_name(npz_path.name + ".tmp")
-    with tmp_npz.open("wb") as handle:
-        np.savez(
+    tmp_h5 = h5_path.with_name(h5_path.name + ".tmp")
+    with h5py.File(tmp_h5, "w") as handle:
+        for key in _ARRAY_KEYS:
+            create_dataset(handle, key, np.asarray(arrays[key], dtype=np.float64))
+        write_file_metadata(
             handle,
-            **{key: np.asarray(arrays[key], dtype=np.float64) for key in _ARRAY_KEYS},
+            generator=_SHARD_GENERATOR,
+            extra=_shard_attrs(meta),
         )
-    tmp_npz.replace(npz_path)
-
-    tmp_json = json_path.with_name(json_path.name + ".tmp")
-    tmp_json.write_text(
-        json.dumps(dict(meta), indent=2, sort_keys=True, default=_json_default),
-        encoding="utf-8",
-    )
-    tmp_json.replace(json_path)
+    tmp_h5.replace(h5_path)
 
     tmp_done = done_path.with_name(done_path.name + ".tmp")
     tmp_done.write_text("ok\n", encoding="utf-8")
     tmp_done.replace(done_path)
-    return npz_path
+    return h5_path
 
 
 def _load_shard(ckpt_dir: Path, row_range: tuple[int, int]) -> dict[str, Any] | None:
     """Load a complete checkpoint slice, or ``None`` when it is absent/broken.
 
     Any failure to read the slice counts as "broken": a checkpoint left behind
-    by a killed worker can be truncated (``EOFError`` from the ``.npz`` reader),
-    not a zip archive at all (``zipfile.BadZipFile``), or carry mismatched
-    shapes, and ``resume=True`` has to discard and recompute it instead of
-    aborting the whole run.  The failure is logged at WARNING level, so a
-    discarded shard is never silent.
+    by a killed worker can be empty, truncated, not an HDF5 file at all
+    (``OSError`` from the ``h5py`` opener) or carry mismatched shapes, and
+    ``resume=True`` has to discard and recompute it instead of aborting the
+    whole run.  The failure is logged at WARNING level, so a discarded shard is
+    never silent.
     """
-    npz_path, json_path, done_path = _shard_paths(ckpt_dir, row_range)
-    if not (npz_path.exists() and json_path.exists() and done_path.exists()):
+    h5_path, done_path = _shard_paths(ckpt_dir, row_range)
+    if not (h5_path.exists() and done_path.exists()):
         return None
     try:
-        with np.load(npz_path) as data:
+        with h5py.File(h5_path, "r") as handle:
             arrays = {
-                key: np.asarray(data[key], dtype=np.float64) for key in _ARRAY_KEYS
+                key: np.asarray(handle[key][:], dtype=np.float64) for key in _ARRAY_KEYS
             }
-        meta = json.loads(json_path.read_text(encoding="utf-8"))
+            meta = _shard_meta(handle)
     except Exception as exc:  # every read failure means the shard is broken
         logger.warning(
             "[LindhardParallel] unreadable checkpoint %s (%s): %s",
-            npz_path,
+            h5_path,
             type(exc).__name__,
             exc,
         )
@@ -476,12 +528,21 @@ def _load_shard(ckpt_dir: Path, row_range: tuple[int, int]) -> dict[str, Any] | 
         if arrays[key].shape[0] != expected_rows:
             logger.warning(
                 "[LindhardParallel] checkpoint %s has %d rows, expected %d",
-                npz_path,
+                h5_path,
                 arrays[key].shape[0],
                 expected_rows,
             )
             return None
     return {"arrays": arrays, "meta": meta}
+
+
+def _array_sha256(values: np.ndarray) -> str:
+    contiguous = np.ascontiguousarray(values, dtype=np.float64)
+    return hashlib.sha256(contiguous.tobytes()).hexdigest()
+
+
+def _digest_arrays(arrays: Mapping[str, np.ndarray]) -> dict[str, dict[str, float]]:
+    return {key: array_digest(arrays[key]) for key in _ARRAY_KEYS}
 
 
 def _shard_is_compatible(meta: Mapping[str, Any], signature: Mapping[str, Any]) -> bool:
@@ -522,8 +583,8 @@ def _shard_is_compatible(meta: Mapping[str, Any], signature: Mapping[str, Any]) 
 def scan_checkpoints(checkpoint_dir: str | Path) -> list[tuple[int, int]]:
     """Row ranges that have a complete checkpoint in ``checkpoint_dir``.
 
-    A slice counts as complete only when its ``.npz``, ``.json`` and ``.done``
-    files are all present; the result is sorted by start row.
+    A slice counts as complete only when its ``.h5`` shard and its ``.done``
+    marker are both present; the result is sorted by start row.
     """
     ckpt_dir = Path(checkpoint_dir)
     if not ckpt_dir.is_dir():
@@ -537,8 +598,8 @@ def scan_checkpoints(checkpoint_dir: str | Path) -> list[tuple[int, int]]:
             start, stop = int(parts[1]), int(parts[2])
         except ValueError:
             continue
-        npz_path, json_path, _ = _shard_paths(ckpt_dir, (start, stop))
-        if npz_path.exists() and json_path.exists():
+        h5_path, done_path = _shard_paths(ckpt_dir, (start, stop))
+        if h5_path.exists() and done_path.exists():
             found.append((start, stop))
     return sorted(found)
 
