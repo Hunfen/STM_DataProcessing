@@ -300,7 +300,7 @@ def main(argv=None):
         lq.setup_style()
     entries = []
     written = []
-    for index, ((h, k), vector) in enumerate(zip(specs, vectors)):
+    for index, ((h, k), vector) in enumerate(zip(specs, vectors, strict=True)):
         label = f"q{index}"
         q_px = lq.rad_px_to_px_offsets(vector, n)
         q_nm_inv = vector / nm_per_px

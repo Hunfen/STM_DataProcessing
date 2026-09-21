@@ -223,8 +223,9 @@ def field_of_view(args):
             raise SystemExit(f"--size-nm-from-log {source}: no such file")
         try:
             text = source.read_text()
-        except OSError as exc:  # noqa: PERF203 - report the log, do not traceback
-            raise SystemExit(f"--size-nm-from-log {source}: cannot read it ({exc})")
+        except OSError as exc:  # report the log, do not traceback
+            raise SystemExit(
+                f"--size-nm-from-log {source}: cannot read it ({exc})") from exc
         matches = parse_fov_log(text)
         if matches:
             chosen = next((item for item in matches if item.corrected), matches[-1])
@@ -402,7 +403,7 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
                                            prefix=tag + "_", peaks_override=members)
 
     peaks = []
-    for index, (record, detected) in enumerate(zip(records, detections)):
+    for index, (record, detected) in enumerate(zip(records, detections, strict=True)):
         name = record["name"]
         stats = record["stats"]
         ungated, gated = stats["phase_ungated"], stats["phase_gated"]
@@ -726,7 +727,7 @@ def build_atlas(outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detecto
         summary = ring_summary(ring)
         triple = ring["triple_product"]
 
-        for row, record in zip(peaks, records):
+        for row, record in zip(peaks, records, strict=True):
             number = row["index"]
             theta = np.asarray(fields[record["name"]][1])
             amp = np.asarray(fields[record["name"]][2])
@@ -750,7 +751,7 @@ def build_atlas(outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detecto
                           f"{tag}_ring_members_qspace.png")
 
         hist_items, map_items = [], []
-        for row, record in zip(peaks, records):
+        for row, record in zip(peaks, records, strict=True):
             theta = np.asarray(fields[record["name"]][1])
             amp = np.asarray(fields[record["name"]][2])
             good = pp.gate_mask(amp, valid, args.gate)
@@ -1127,7 +1128,8 @@ def main(argv=None):
              "with the branch; invariant are the closing sums and the per-peak shape")
 
     for tag in ("ring_1x1", "ring_r3"):
-        for row, record in zip(analysis[tag]["peaks"], analysis[tag]["records"]):
+        for row, record in zip(analysis[tag]["peaks"], analysis[tag]["records"],
+                               strict=True):
             fixed = np.degrees(pm.gauge_phase(
                 np.radians(row["phase_ungated_mean_deg"]), record["q_px"], r0, c0,
                 n)) % 360.0

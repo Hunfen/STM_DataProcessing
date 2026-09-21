@@ -81,10 +81,6 @@ markers = [
 [tool.ruff]
 target-version = "py314"
 line-length = 88
-# skills/ holds self-contained agent skills that are shipped on their own; they
-# are intentionally outside this project's lint scope (69 pre-existing findings
-# on master, none of them in this package).
-extend-exclude = ["skills"]
 
 [tool.ruff.lint]
 select = [

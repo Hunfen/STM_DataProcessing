@@ -405,7 +405,7 @@ class Atlas:
     # -- ring summaries ---------------------------------------------------- #
     def grid_theta_histograms(self, items, label, values, paths, group, name):
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
-        for ax, item in zip(axes.ravel(), items):
+        for ax, item in zip(axes.ravel(), items, strict=True):
             self._hist_panel(ax, item["hist"], item["edges"], "theta (rad)", "density",
                              item["label"])
         fig.tight_layout()
@@ -415,7 +415,7 @@ class Atlas:
     def grid_theta_maps(self, items, label, values, paths, group, name):
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
         image = None
-        for ax, item in zip(axes.ravel(), items):
+        for ax, item in zip(axes.ravel(), items, strict=True):
             image = ax.imshow(np.where(item["good"], item["theta"], np.nan), cmap="hsv",
                               origin="lower", vmin=0.0, vmax=2 * np.pi)
             ax.set_title(item["label"], fontsize=12)
@@ -515,7 +515,7 @@ class Atlas:
         """The six cross-pair ``D(r)`` maps in one 2x3 grid."""
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
         image = None
-        for ax, item in zip(axes.ravel(), items):
+        for ax, item in zip(axes.ravel(), items, strict=True):
             image = ax.imshow(np.where(item["good"], item["field"], np.nan),
                               cmap="seismic", origin="lower", vmin=-np.pi, vmax=np.pi)
             ax.set_title(item["label"], fontsize=12)

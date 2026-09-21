@@ -167,11 +167,13 @@ def parse_q_spec(text):
             try:
                 return float(numerator) / float(denominator)
             except (ValueError, ZeroDivisionError):
-                raise SystemExit(f"--q {text!r}: cannot read the fraction {token!r}")
+                raise SystemExit(
+                    f"--q {text!r}: cannot read the fraction {token!r}") from None
         try:
             return float(token)
         except ValueError:
-            raise SystemExit(f"--q {text!r}: cannot read the number {token!r}")
+            raise SystemExit(
+                f"--q {text!r}: cannot read the number {token!r}") from None
 
     return value(parts[0]), value(parts[1])
 
@@ -217,7 +219,8 @@ def field_of_view_from_log(path):
     try:
         text = source.read_text()
     except OSError as exc:
-        raise SystemExit(f"--size-nm-from-log {source}: cannot read it ({exc})")
+        raise SystemExit(
+            f"--size-nm-from-log {source}: cannot read it ({exc})") from exc
     matches = parse_fov_log(text)
     if not matches:
         raise SystemExit(f"no 'field of view <value> nm' line in {source}")
@@ -385,7 +388,8 @@ def basis_from_report(path):
     try:
         payload = json.loads(source.read_text())
     except (OSError, ValueError) as exc:
-        raise SystemExit(f"--basis-from {source}: cannot read the JSON report ({exc})")
+        raise SystemExit(
+            f"--basis-from {source}: cannot read the JSON report ({exc})") from exc
     if not isinstance(payload, dict):
         raise SystemExit(f"--basis-from {source}: expected a JSON object")
 
@@ -504,7 +508,7 @@ def basis_from_px(text):
         try:
             values = [float(item) for item in block.split(",")]
         except ValueError:
-            raise SystemExit(f"--basis-px {text!r}: cannot read '{block}'")
+            raise SystemExit(f"--basis-px {text!r}: cannot read '{block}'") from None
         if len(values) != 2:
             raise SystemExit(f"--basis-px {text!r}: '{block}' is not a pair")
         vectors.append(values)

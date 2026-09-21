@@ -190,7 +190,7 @@ def pick_directions(ring, pair_angle):
     measured = [members[0], second] + ([third] if third is not None else [])
     slots = [0.0, float(pair_angle)] + ([-120.0] if third is not None else [])
     deviations = []
-    for member, slot in zip(measured, slots):
+    for member, slot in zip(measured, slots, strict=True):
         delta = ((np.degrees(np.arctan2(member[1], member[0])) - angle_a - slot + 180.0)
                  % 360.0) - 180.0
         deviations.append(delta)
@@ -425,7 +425,7 @@ def main(argv=None):
             emit(f"# lock-in directions: {n_directions} "
                  f"({'three' if n_directions == 3 else 'two'}) reference wave vector(s), "
                  f"pairwise spacing exactly {args.pair_angle:g} deg ({closure})")
-            for member, q_vector, name in zip(directions, q_pair, names):
+            for member, q_vector, name in zip(directions, q_pair, names, strict=True):
                 emit(f"# lock-in direction {name}: measured q_px = "
                      f"({member[0]:9.3f}, {member[1]:9.3f}) amplitude {member[2]:.4e} -> "
                      f"reference q_px = ({q_vector[0]:9.3f}, {q_vector[1]:9.3f}), |q| = "

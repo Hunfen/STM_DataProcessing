@@ -112,7 +112,7 @@ def plane_wave(topo_shape, vectors, phases_deg, amplitudes=None):
     yy, xx = np.mgrid[:n, :n]
     amplitudes = [1.0] * len(vectors) if amplitudes is None else list(amplitudes)
     total = np.zeros((n, n), dtype=float)
-    for (qx, qy), phase, amp in zip(vectors, phases_deg, amplitudes):
+    for (qx, qy), phase, amp in zip(vectors, phases_deg, amplitudes, strict=True):
         total = total + float(amp) * np.cos((TWO_PI / n) * (qx * xx + qy * yy)
                                             + np.radians(float(phase)))
     return total
@@ -413,16 +413,16 @@ def test_gauge_layer(n, lambda_nm=3.0, nm_per_px=0.13):
     centre = np.array([n / 2.0, n / 2.0])
     base_fixed = [float(np.degrees(pm.gauge_phase(
         np.radians(value), q, exact["base"]["r0"], exact["base"]["c_rad"], n)) % 360.0)
-        for value, q in zip(exact["base"]["raw"], exact["base"]["qs"])]
+        for value, q in zip(exact["base"]["raw"], exact["base"]["qs"], strict=True)]
     shifted_fixed = [float(np.degrees(pm.gauge_phase(
         np.radians(value), q, exact["base"]["r0"] + centre, exact["base"]["c_rad"], n))
-        % 360.0) for value, q in zip(shifted_raw, exact["base"]["qs"])]
+        % 360.0) for value, q in zip(shifted_raw, exact["base"]["qs"], strict=True)]
     model_check = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(
         np.radians(shifted_raw) - ((TWO_PI / n) * (exact["base"]["qs"]
                                                    @ (exact["base"]["r0"] + centre))
                                    + exact["base"]["c_rad"]))))))
     worst_gauge = float(np.max([abs(pm.ang_diff_deg(a, b))
-                                for a, b in zip(base_fixed, shifted_fixed)]))
+                                for a, b in zip(base_fixed, shifted_fixed, strict=True)]))
     check("the v2 -> v3 constant is absorbed by r0 -> r0 + (N/2, N/2): the "
           "gauge-fixed phases are identical",
           worst_gauge < 1e-9 and model_check < 1e-9,
@@ -481,10 +481,12 @@ def test_gauge_layer(n, lambda_nm=3.0, nm_per_px=0.13):
     base_fixed = [float(np.degrees(pm.gauge_phase(
         np.radians(value), q, invariance["base"]["best"]["r0_px"],
         invariance["base"]["best"]["c_rad"], n)) % 360.0)
-        for value, q in zip(invariance["base"]["raw_r3"], invariance["base"]["qs_r3"])]
+        for value, q in zip(invariance["base"]["raw_r3"],
+                            invariance["base"]["qs_r3"], strict=True)]
     moved_fixed = [float(np.degrees(pm.gauge_phase(
         np.radians(value), q, origin, invariance["base"]["best"]["c_rad"], n)) % 360.0)
-        for value, q in zip(invariance["moved"]["raw_r3"], invariance["moved"]["qs_r3"])]
+        for value, q in zip(invariance["moved"]["raw_r3"],
+                            invariance["moved"]["qs_r3"], strict=True)]
     delta = np.abs(np.asarray(base_fixed) - np.asarray(moved_fixed))
     delta = np.minimum(delta, 360.0 - delta)
     mod120 = np.minimum(delta % 120.0, 120.0 - delta % 120.0)

@@ -764,7 +764,6 @@ def check_nan_handling(env, workdir, basis, n_px, nm_per_px, columns, rows, size
     patch = (90, 130, 60, 100)  # row0, row1, col0, col1
     damaged = image.copy()
     damaged[patch[0]:patch[1], patch[2]:patch[3]] = np.nan
-    plane_fill = image.copy()
     finite = np.isfinite(damaged)
     background = float(np.mean(damaged[finite]))
     plane_filled = np.where(finite, damaged, background)
