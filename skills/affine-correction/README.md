@@ -30,7 +30,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
     INPUT.csv -L 50 --anchor-ring r3 -o OUT --list-rings
 
 # 一键 self-test（6 项）
-.venv/bin/python skills/affine-correction/scripts/selftest.py --workdir tmp_verify/corr_selftest --keep
+.venv/bin/python skills/affine-correction/scripts/selftest.py --workdir var/corr_selftest --keep
 ```
 
 ## 两段式用法（变换导出 + 套用到另一张图）

@@ -34,7 +34,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 
 # 一键 self-test（16 项）
 .venv/bin/python skills/lawler-fujita-correction/scripts/selftest.py \
-    --workdir tmp_verify/lf_selftest --keep
+    --workdir var/lf_selftest --keep
 ```
 
 ## λ 怎么选（重要）
