@@ -42,9 +42,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from matplotlib.colors import LinearSegmentedColormap, SymLogNorm  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import LinearSegmentedColormap, SymLogNorm
 
 BAD_COLOR = "#b0b0b0"
 LADDER_ANGLES_DEG = (0.0, 120.0, 240.0)
@@ -111,7 +111,7 @@ def load_colormap(stm_lib=None):
         from stm_data_processing.stm.preview_plot import gwyddion
 
         return gwyddion.copy(), "package:stm_data_processing.stm.preview_plot.gwyddion"
-    except Exception:  # noqa: BLE001 - any import problem falls back to the anchors
+    except Exception:  # any import problem falls back to the anchors
         return (LinearSegmentedColormap("gwyddion", segmentdata=_GWYDDION_ANCHORS,
                                         N=4096),
                 "builtin:identical anchors of cdict_gwyddion")
@@ -125,14 +125,14 @@ def round_fields(values):
     out = {}
     for field, value in values.items():
         decimals = FIELD_DECIMALS.get(field, DEFAULT_DECIMALS)
-        out[field] = int(round(float(value))) if decimals == 0 else round(float(value), decimals)
+        out[field] = round(float(value)) if decimals == 0 else round(float(value), decimals)
     return out
 
 
 def format_field(field, value):
     decimals = FIELD_DECIMALS.get(field, DEFAULT_DECIMALS)
     if decimals == 0:
-        return f"{field}={int(round(float(value)))}"
+        return f"{field}={round(float(value))}"
     return f"{field}={float(value):.{decimals}f}"
 
 
@@ -345,7 +345,7 @@ class Atlas:
                       fontsize=11)
         ax.set_ylabel(ylabel, fontsize=12)
         ax.set_title(label, fontsize=12)
-        ax.set_xticks(list(LADDER_RAD) + [np.pi])
+        ax.set_xticks([*list(LADDER_RAD), np.pi])
         ax.set_xticklabels(["0", "2pi/3", "4pi/3", "pi"], fontsize=11)
 
     # -- per-reflection figures -------------------------------------------- #

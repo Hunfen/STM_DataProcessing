@@ -275,7 +275,7 @@ def main(argv=None):
           f"exit code {fit.returncode}, correction_report.json "
           f"{'written' if report is not None else 'missing'}", "exit code 0 and report")
     if report is None:
-        print("\n0/{0} checks passed".format(len(RESULTS)))
+        print(f"\n0/{len(RESULTS)} checks passed")
         return 1
 
     required = ("q_a_px", "q_b_px", "q_a_nm_inv", "q_b_nm_inv", "lambda_nm", "gauge",

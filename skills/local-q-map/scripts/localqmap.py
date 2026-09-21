@@ -180,11 +180,11 @@ def format_hk(h, k):
     """Compact English label of an (h, k) pair for the log."""
     def one(token):
         if abs(token - round(token)) < 1e-9:
-            return f"{int(round(token))}"
+            return f"{round(token)}"
         for denominator in (3, 2):
             scaled = token * denominator
             if abs(scaled - round(scaled)) < 1e-9:
-                return f"{int(round(scaled))}/{denominator}"
+                return f"{round(scaled)}/{denominator}"
         return f"{token:g}"
 
     return f"({one(h)}, {one(k)})"
@@ -243,7 +243,7 @@ def hexagonal_unit():
         from stm_data_processing.utils.bragg_peak.lattice_fit import _HEXAGONAL_UNIT
 
         return np.asarray(_HEXAGONAL_UNIT, dtype=float)
-    except Exception:  # noqa: BLE001 - any import problem falls back to the copy
+    except Exception:  # any import problem falls back to the copy
         return np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
 
 
@@ -262,7 +262,7 @@ def rotate_basis(basis, orientation_deg):
         )
 
         return np.asarray(package_rotate(array, float(orientation_deg)), dtype=float)
-    except Exception:  # noqa: BLE001 - any import problem falls back to the copy
+    except Exception:  # any import problem falls back to the copy
         theta = np.radians(float(orientation_deg))
         rot = np.array([[np.cos(theta), -np.sin(theta)],
                         [np.sin(theta), np.cos(theta)]])
@@ -628,7 +628,7 @@ def canvas_ring_orientation(image, size_nm, radius_px, reference_deg,
               "detector": "bragg_peak.detect_bragg_peaks", "message": ""}
     try:
         from stm_data_processing.utils.bragg_peak import detect_bragg_peaks
-    except Exception as exc:  # noqa: BLE001 - an import problem is reported, not raised
+    except Exception as exc:  # an import problem is reported, not raised
         record.update(status="no_detector",
                       message=("the bragg_peak detector is not importable "
                                f"({exc}); the orientation of the report is kept"))
@@ -690,7 +690,7 @@ def rebase_orientation(basis, delta_deg, note):
     updated = dict(basis)
     updated["b1_nm_inv"] = [float(value) for value in vectors[0]]
     updated["b2_nm_inv"] = [float(value) for value in vectors[1]]
-    updated["notes"] = list(basis.get("notes", [])) + [str(note)]
+    updated["notes"] = [*list(basis.get("notes", [])), str(note)]
     return updated
 
 

@@ -398,7 +398,7 @@ def cluster_list(phi, w=None, bins=3600, sigma_deg=3.0, min_frac=0.25,
     else:
         weight = np.array([])
     out = []
-    for i, (centre, height) in enumerate(kept):
+    for i, (_centre, height) in enumerate(kept):
         # the refined centre stays inside the +-window of the seed
         out.append({
             "centre_deg": float(np.degrees(centres[i]) % 360.0),

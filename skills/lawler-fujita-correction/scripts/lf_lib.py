@@ -242,7 +242,7 @@ def displacement_from_phase(theta_a, theta_b, q_a_px, q_b_px, size_nm):
     phases = np.stack([np.asarray(theta_a, dtype=float), np.asarray(theta_b, dtype=float)])
     flat = np.reshape(phases, (2, -1))
     solved = np.linalg.solve(k_matrix, -flat)
-    return np.reshape(solved, (2,) + np.asarray(theta_a).shape)
+    return np.reshape(solved, (2, *np.asarray(theta_a).shape))
 
 
 def warp_by_field(image, u_nm, size_nm, valid=None, pad=10, order=3):

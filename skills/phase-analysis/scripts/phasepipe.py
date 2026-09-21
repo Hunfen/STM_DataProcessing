@@ -60,9 +60,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
-from phasemath import (TWO_PI, circ_mean, linear_median_fwhm, weighted_stats,
-                       wrap_pm_pi)
+from phasemath import TWO_PI, circ_mean, linear_median_fwhm, weighted_stats, wrap_pm_pi
 
 # The demodulation engine of the sibling skill ``local-q-map`` is used as delivered,
 # by path (the two skills are installed side by side under ``skills/``).
@@ -558,7 +556,7 @@ def analyse_ring(topo, valid, ring, lambda_nm, nm_per_px, gate="p50", bins=3600,
                                  smooth_deg=smooth_deg)
         records.append({
             "name": name, "q_px": (float(qx), float(qy)),
-            "integer": (int(round(qx)) + centre, int(round(qy)) + centre),
+            "integer": (round(qx) + centre, round(qy) + centre),
             "subpixel": (float(qx - round(qx)), float(qy - round(qy))),
             "radius_px": float(radius), "fft_amplitude": float(amplitude),
             "snr": float(snr), "stats": stats,

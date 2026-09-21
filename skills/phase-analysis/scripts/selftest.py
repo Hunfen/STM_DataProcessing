@@ -38,8 +38,8 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import phasepipe as pp  # noqa: E402
 import phasemath as pm  # noqa: E402
+import phasepipe as pp  # noqa: E402
 
 TWO_PI = pm.TWO_PI
 SQRT3 = pp.SQRT3
@@ -178,8 +178,8 @@ def test_engine_source_contract():
     analysis = sources["stm_phase_analysis.py"]
     check("the analysis CLI carries --lambda-nm and no --pct",
           '"--lambda-nm"' in analysis and '"--pct"' not in analysis,
-          f"--lambda-nm present: {'\"--lambda-nm\"' in analysis}, --pct present: "
-          f"{'\"--pct\"' in analysis}", "--lambda-nm yes, --pct no")
+          f"--lambda-nm present: {'"--lambda-nm"' in analysis}, --pct present: "
+          f"{'"--pct"' in analysis}", "--lambda-nm yes, --pct no")
 
 
 # --------------------------------------------------------------------------- #
@@ -234,8 +234,8 @@ def test_circular_estimators():
     check("two-component sample: two clusters at the injected centres",
           len(centres) == 2 and abs(centres[0] - 20.0) < 0.5
           and abs(centres[1] - 140.0) < 0.5,
-          f"centres = {['%.3f' % value for value in centres]}, weights = "
-          f"{['%.4f' % value for value in fractions]}", "0.5 deg / 0.01")
+          f"centres = {[f'{value:.3f}' for value in centres]}, weights = "
+          f"{[f'{value:.4f}' for value in fractions]}", "0.5 deg / 0.01")
 
 
 # --------------------------------------------------------------------------- #
@@ -608,13 +608,13 @@ def test_pairwise_contract(n, lambda_nm=3.0, nm_per_px=0.13):
           and all(abs(step - 60.0) < 1e-9 for step in steps)
           and all(abs(step - 180.0) < 1e-9 for step in friedel_steps),
           f"pairs {pairs}, separations "
-          f"{['%.3f' % value for value in steps]} deg; the avoided Friedel pairs "
-          f"(p_i, p_(i+3)) are {['%.3f' % value for value in friedel_steps]} deg apart",
+          f"{[f'{value:.3f}' for value in steps]} deg; the avoided Friedel pairs "
+          f"(p_i, p_(i+3)) are {[f'{value:.3f}' for value in friedel_steps]} deg apart",
           "(0,1),(2,3),(4,5) at 60 deg")
 
     cross = pp.cross_ring_pairs(records_1x1, records_r3)
     brute = []
-    for j, left in enumerate(records_1x1):
+    for _j, left in enumerate(records_1x1):
         angle_left = np.arctan2(left["q_px"][1], left["q_px"][0])
         distances = [abs(float(pm.wrap_pm_pi(
             angle_left - np.arctan2(right["q_px"][1], right["q_px"][0]))))
@@ -633,7 +633,7 @@ def test_pairwise_contract(n, lambda_nm=3.0, nm_per_px=0.13):
           f"{len(cross)} pairs (one per ring_1x1 peak), chosen ring_r3 indices {chosen} "
           f"equal the documented nearest-angle rule {brute} (smallest ring_r3 index on "
           f"an exact tie); angular gaps "
-          f"{['%.3f' % value for value in gaps]} deg (the two rings differ by a 30 deg "
+          f"{[f'{value:.3f}' for value in gaps]} deg (the two rings differ by a 30 deg "
           f"rotation here, so the gaps sit near 30 deg on both sides)", f"{CROSS_PAIRS} pairs")
 
     image = pp.synth_image(n, 0.40 * n, [{"kind": "full", "amp": 1.0, "phase_deg": 47.0}])
@@ -776,8 +776,8 @@ def test_ring_lookup():
     check("peak numbering starts at 12 o'clock and runs clockwise",
           abs(angles[0] - 90.0) < 1e-9 and all(abs(step - 60.0) < 1e-9 for step in steps),
           f"p0 at {angles[0]:.3f} deg, then "
-          f"{['%.1f' % value for value in angles[1:]]} (steps "
-          f"{['%.1f' % value for value in steps]})", "p0 at 90 deg, -60 deg steps")
+          f"{[f'{value:.1f}' for value in angles[1:]]} (steps "
+          f"{[f'{value:.1f}' for value in steps]})", "p0 at 90 deg, -60 deg steps")
 
 
 # --------------------------------------------------------------------------- #
@@ -1205,7 +1205,7 @@ def test_field_of_view_from_log(n, workdir, stm_lib):
     log_path.write_text(
         "# geometry correction through the bragg_peak package (skill version 2.0)\n"
         f"# canvas {n} x {n} px, field of view {size_nm:g} nm ({size_nm / n:.6f} nm/px)\n"
-        f"# corrected canvas: {int(round(n * gain))} x {int(round(n * gain))} px, "
+        f"# corrected canvas: {round(n * gain)} x {round(n * gain)} px, "
         f"field of view {size_nm * gain:.4f} nm ({size_nm / n:.6f} nm/px)\n")
     outdir = base / "out"
     completed = run_script("stm_phase_analysis.py",

@@ -51,8 +51,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import atlas as at  # noqa: E402
-import phasepipe as pp  # noqa: E402
 import phasemath as pm  # noqa: E402
+import phasepipe as pp  # noqa: E402
 
 SKILL_VERSION = "3.0"
 LADDER_DEG = (0.0, 120.0, 240.0)
@@ -239,8 +239,11 @@ def load_package(stm_lib):
     if stm_lib:
         sys.path.insert(0, str(stm_lib))
     try:
-        from stm_data_processing.utils.bragg_peak import compute_fft2, detect_bragg_peaks
-    except Exception as exc:  # noqa: BLE001 - any import failure -> builtin detector
+        from stm_data_processing.utils.bragg_peak import (
+            compute_fft2,
+            detect_bragg_peaks,
+        )
+    except Exception as exc:  # any import failure -> builtin detector
         return None, f"{type(exc).__name__}: {exc}"
     return (compute_fft2, detect_bragg_peaks), "imported"
 
@@ -568,7 +571,7 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
             "amp_diff_median": result["amp_diff_median"],
             "amp_diff_fwhm": result["amp_diff_fwhm"],
             "n_valid": result["n_valid"],
-            "hist_counts": [[int(round(value)) for value in row]
+            "hist_counts": [[round(value) for value in row]
                             for row in result["hist_counts"]],
             "hist_x_edges": [float(value) for value in result["hist_x_edges"]],
             "hist_y_edges": [float(value) for value in result["hist_y_edges"]],

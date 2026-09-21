@@ -62,7 +62,7 @@ RING_RADIUS_FRACTION = 0.195
 
 def ring_radius_px(n_px):
     """Radius of the synthetic ring_1x1 in FFT pixels: even and commensurate."""
-    return 2.0 * float(int(round(RING_RADIUS_FRACTION * float(n_px))))
+    return 2.0 * float(round(RING_RADIUS_FRACTION * float(n_px)))
 AMPLITUDE_REL_TOL = 1e-3          # check 1: amplitude ~ A / 2
 THETA_TOL_DEG = 1e-2              # check 1: theta ~ +phi0
 GAUGE_TOL_DEG = 1e-2              # check 5: theta -> theta + phi0
@@ -988,10 +988,11 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
               f"exit code {completed.returncode}: {completed.stderr.strip()[-300:]}")
         return
     multi_q = ["1,0", "0,1", "1/3,1/3"]
+    q_flags = [item for spec in multi_q for item in ("--q", spec)]
     completed_multi = run_script(
         "stm_local_q_map.py",
-        [str(csv_path), "-o", str(multi), "--basis-from", str(affine_path)]
-        + sum([["--q", spec] for spec in multi_q], []) + ["-L", f"{size_nm:g}"], env)
+        [str(csv_path), "-o", str(multi), "--basis-from", str(affine_path),
+         *q_flags, "-L", f"{size_nm:g}"], env)
     if completed_multi.returncode != 0:
         check("the multi-q pipeline run completes", False,
               f"exit code {completed_multi.returncode}: "
@@ -1068,7 +1069,7 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
                             if name not in basis})
     check("the report carries the basis-source and warning fields",
           not source_absent
-          and set(("cross_talk_pairs", "boundary_warning", "border_band_px"))
+          and {"cross_talk_pairs", "boundary_warning", "border_band_px"}
           <= set(payload["warnings"])
           and payload["rings"]["ring_1x1_members_hk"][0] == [1.0, 0.0],
           f"missing basis keys {source_absent or 'none'}; warnings "
@@ -1100,7 +1101,7 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
     peak = peak_table()[0]
     basis_rows = synthetic_basis(n_px)
     q_line = lq.q_vector(peak["h"], peak["k"], basis_rows[0], basis_rows[1])
-    cut = int(round(0.75 * n_px))
+    cut = round(0.75 * n_px)
     phase_map = np.radians(np.where(columns < cut, 12.0, 83.0))
     amplitude_map = np.where(columns < cut, 0.20, 1.60)
     bimodal = amplitude_map * np.cos(q_line[0] * columns + q_line[1] * rows
@@ -1286,7 +1287,7 @@ def main(argv=None):
     total_checks = 0
     failed_checks = 0
     passed_sections = 0
-    for index, item in enumerate(SECTIONS, start=1):
+    for _index, item in enumerate(SECTIONS, start=1):
         ok = all(result for _, result, _ in item["checks"])
         passed_sections += int(ok)
         total_checks += len(item["checks"])
