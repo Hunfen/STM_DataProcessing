@@ -3,7 +3,7 @@
 Nanonis Data File Loader
 ========================
 
-.. image:: https://img.shields.io/badge/Python-3.7%2B-blue
+.. image:: https://img.shields.io/badge/Python-3.14%2B-blue
    :target: https://www.python.org/downloads/
    :alt: Python Version
 

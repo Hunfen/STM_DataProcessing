@@ -2,7 +2,7 @@
 
 STM / DFT / Wannier90 数据处理工具包：从 **Nanonis 扫描隧道显微镜实验数据**到 **Wannier90 紧束缚模型**的理论计算，覆盖准粒子干涉（QPI）、Lindhard 响应函数虚部、能带展开、BTK 超导谱等凝聚态物理常用分析流程。
 
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.14%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://opensource.org/licenses/MIT)
 
 ## 功能特性
@@ -19,6 +19,8 @@ STM / DFT / Wannier90 数据处理工具包：从 **Nanonis 扫描隧道显微�
 - **统一 IO**：计算结果 HDF5 存取，`calculate()` 返回结构与 `load_*_from_h5()` 完全对齐
 
 ## 安装
+
+需要 **CPython ≥ 3.14**（本仓库在 3.14.7 上开发与验证；`.python-version` 锁定 3.14）。
 
 ```bash
 # 使用 uv（推荐）

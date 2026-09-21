@@ -3,7 +3,7 @@ name = "stm-data-processing"
 version = "0.3.0"
 description = "STM / DFT / Wannier90 data processing toolkit"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = {text = "MIT"}
 authors = [
     {name = "hunfen", email = "hunfen@anywhere.com"}
@@ -13,7 +13,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Physics",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
@@ -78,7 +79,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 88
 # skills/ holds self-contained agent skills that are shipped on their own; they
 # are intentionally outside this project's lint scope (69 pre-existing findings
