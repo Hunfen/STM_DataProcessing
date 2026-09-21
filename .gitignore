@@ -95,7 +95,13 @@ var/
 /raw_data/
 /measurements/
 
-# Bulk arrays and containers.
+# Bulk arrays and containers.  Also UNANCHORED, so these deliberately match
+# binaries placed under tests/ as well (e.g. tests/data/standard.npy): a binary
+# test fixture therefore needs `git add -f`, or a non-ignored format (CSV/text)
+# instead.  This strictness is intentional - no negation rules here, so nothing
+# can slip a measurement array past the guard.  Note the root-anchored tree
+# rules above (/sample/, /data/, ...) are anchored precisely so they do NOT
+# over-match a future `tests/data/` directory.
 *.npy
 *.npz
 *.h5

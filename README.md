@@ -204,13 +204,15 @@ for peak in result.peaks[:3]:                    # 亚像素 q 与不确定度�
 
 ```
 STM_DataProcessing/
+├── .github/workflows/ci.yml   # CI：lint（含测量数据守卫）/ 核心导入 / 数据无关回归子集
 ├── src/stm_data_processing/   # 包本体（轻量核心，见下）
 ├── tests/regression/          # 回归自检：9 个 check_*.py + pytest 入口
 ├── scripts/                   # 运维/服务器脚本（run_lindhard_re_chi_parallel.py、server/）
 ├── docs/                      # 接口文档、设计规格、使用指南
 ├── app/                       # Tauri 桌面应用（latticeSIM）
 ├── skills/                    # 自包含的 Agent 技能
-└── pyproject.toml             # 依赖分层与 pytest 配置
+├── pyproject.toml             # 依赖分层与 pytest 配置
+└── uv.lock                    # 锁定依赖解析结果
 ```
 
 `src/stm_data_processing/` 内部：
@@ -268,6 +270,17 @@ pip install -e ".[dev,ppt]"
 ```
 
 PPT 自动报告与绘图助手（`utils/plot_funcs.py`、`utils/AutoPPt_winnew_modified.py`）需要 `ppt` extra（`opencv-python`）；核心计算路径不需要它。
+
+### 本地数据与 CI 的分工
+
+9 个回归脚本里有 5 个（`check_3ds_real_data.py`、`check_bragg_peak_detection.py`、`check_lindhard_re_chi.py`、`check_nanonis_3ds.py`、`check_nanonis_sxm.py`）要读本机 `/Users/hunfen/Documents/...` 下的真实测量数据（论文 Nanonis 文件、Wannier 模型）；这些数据**永不入库**（见 `.gitignore` 的测量数据段与 CI 守卫）。它们带 `localdata` 标记：
+
+```bash
+.venv/bin/python -m pytest -q                     # 本机一把梭：全部 9 个脚本（唯一的完整门）
+.venv/bin/python -m pytest -q -m "not localdata"  # CI 口径：只跑与本地数据无关的 4 个，摘要打印 deselect 数量
+```
+
+CI（`.github/workflows/ci.yml`）的 `full-test` 作业跑的就是 `pytest -q -m "not localdata"`；另两个作业是 `lint`（ruff，含"禁止提交测量数据"的守卫）与 `core-import`（不带 extras 装包并导入核心子模块）。标记规则是机械的：脚本里出现 `/Users/` 绝对路径即判为 `localdata`，因此新加的数据相关脚本会自动被 CI 排除，而不是让 CI 变红，也不会靠"内部 SKIP 侥幸变绿"。
 
 ## 许可证
 
