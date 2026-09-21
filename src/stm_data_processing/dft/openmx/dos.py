@@ -117,9 +117,7 @@ def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
         return pd.read_csv(path, sep=r"\s+", comment="#", names=names)
 
     def _store_pdos(atom: int, kind: str, key: str, df: pd.DataFrame) -> None:
-        entry = dos["pdos"].setdefault(
-            atom, {"s": {}, "p": {}, "d": {}, "total": None}
-        )
+        entry = dos["pdos"].setdefault(atom, {"s": {}, "p": {}, "d": {}, "total": None})
         if kind == "total":
             entry["total"] = df
         else:
@@ -167,9 +165,7 @@ def load_dos_tree(dos_dir: str | Path = "DOS") -> dict:
         for f in sorted(p for p in atom_dir.iterdir() if p.is_file()):
             classified = _classify_orbital(f.name)
             if classified is None:
-                logger.warning(
-                    "Unrecognized PDOS file in %s: %s", atom_dir, f.name
-                )
+                logger.warning("Unrecognized PDOS file in %s: %s", atom_dir, f.name)
                 continue
             kind, key = classified
             _store_pdos(atom, kind, key, _load_df(f))

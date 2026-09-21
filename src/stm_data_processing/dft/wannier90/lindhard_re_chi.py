@@ -302,9 +302,7 @@ def _stage(name: str, **fields: Any) -> Iterator[dict[str, Any]]:
         raise
     elapsed = time.perf_counter() - started
     rendered = "".join(f" {key}={value}" for key, value in fields.items())
-    logger.info(
-        "[RealLindhardCalculator] stage=%s%s s=%.3f", name, rendered, elapsed
-    )
+    logger.info("[RealLindhardCalculator] stage=%s%s s=%.3f", name, rendered, elapsed)
 
 
 def _log_failures(func):
@@ -394,11 +392,16 @@ class RealLindhardCalculator:
             raise ValueError(f"nk must be positive, got {nk}")
         if eta <= 0:
             raise ValueError(f"eta must be positive, got {eta}")
-        for name, value in (("band_block", band_block), ("block_entries", block_entries)):
+        for name, value in (
+            ("band_block", band_block),
+            ("block_entries", block_entries),
+        ):
             if value is None:
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
-                raise ValueError(f"{name} must be a positive integer or None, got {value!r}")
+                raise ValueError(
+                    f"{name} must be a positive integer or None, got {value!r}"
+                )
             if int(value) <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
 
@@ -668,8 +671,7 @@ class RealLindhardCalculator:
             orbital_text = f"n={len(orbitals)} list={[int(o) for o in orbitals]}"
         else:
             orbital_text = (
-                f"n={len(orbitals)} first={int(orbitals[0])} "
-                f"last={int(orbitals[-1])}"
+                f"n={len(orbitals)} first={int(orbitals[0])} last={int(orbitals[-1])}"
             )
         logger.info(
             "[RealLindhardCalculator] config nk=%d nw=%d orbitals=%s eta=%.6e "
@@ -740,9 +742,7 @@ class RealLindhardCalculator:
 
         with _stage("occupations"):
             occupations = fermi(evals, mu=chemical_potential, T=temperature)
-            derivative = self._fermi_derivative(
-                evals, chemical_potential, temperature
-            )
+            derivative = self._fermi_derivative(evals, chemical_potential, temperature)
         total = np.zeros((rows_total, nk2), dtype=float)
         intraband = np.zeros_like(total)
         interband = np.zeros_like(total)
@@ -792,21 +792,19 @@ class RealLindhardCalculator:
                                 # (m, n) and flipping both signs, so this
                                 # transposed layout carries the same sum.
                                 delta = eps_m[..., m0:m1, None] - eps_n[..., None, :]
-                                f_difference = (
-                                    f_m[..., m0:m1, None] - f_n[..., None, :]
-                                )
-                                ratio = f_difference * delta / (
-                                    delta * delta + self.eta**2
+                                f_difference = f_m[..., m0:m1, None] - f_n[..., None, :]
+                                ratio = (
+                                    f_difference * delta / (delta * delta + self.eta**2)
                                 )
                                 # Doc 8.2: replace the 0/0 intraband ratio by
                                 # df/dE before applying the overall minus sign.
-                                diag_delta = np.take_along_axis(
-                                    delta, picks, axis=3
-                                )[..., 0]
+                                diag_delta = np.take_along_axis(delta, picks, axis=3)[
+                                    ..., 0
+                                ]
                                 replaced = np.abs(diag_delta) <= degeneracy_tolerance
-                                diag_ratio = np.take_along_axis(
-                                    ratio, picks, axis=3
-                                )[..., 0]
+                                diag_ratio = np.take_along_axis(ratio, picks, axis=3)[
+                                    ..., 0
+                                ]
                                 if np.any(replaced):
                                     diag_ratio = np.where(
                                         replaced, d_n[..., m0:m1], diag_ratio

@@ -129,6 +129,7 @@ class BraggDetectionResult:
     fft2: np.ndarray | None = None
     meta: dict = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class CorrectionResult:
     """Output of :func:`...bragg_peak.correct_bragg_peaks`.

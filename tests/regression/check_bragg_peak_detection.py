@@ -346,9 +346,7 @@ def run_orientation_sweep(
     )
 
 
-def run_anchor_check(
-    n: int = 256, size_nm: float = 30.0, a_nm: float = 0.5
-) -> None:
+def run_anchor_check(n: int = 256, size_nm: float = 30.0, a_nm: float = 0.5) -> None:
     """R1.8: the basis anchor must move with the label rotation.
 
     Reproduces the reviewed failure on an adversarial ring whose three members
@@ -383,7 +381,9 @@ def run_anchor_check(
             (anchored, angles_sorted[labels.index((1, 0))]),
             (pinned, angles_sorted[0]),
         ):
-            fit = gls_fit(q_sorted, covs_sorted, labels, hexagon_basis(radius, anchor_angle))
+            fit = gls_fit(
+                q_sorted, covs_sorted, labels, hexagon_basis(radius, anchor_angle)
+            )
             collection.append(float("inf") if fit is None else float(fit[2]))
     check(
         "R1.8.1 old pairing (pinned anchor + fixed label order) is inconsistent",
@@ -617,8 +617,11 @@ def write_evidence(case, image, result, metrics, a_fit, first, weak, runtime) ->
 def first_ring_gaps(result) -> float:
     """Largest |gap - 60 deg| between neighbouring labelled first-ring peaks."""
     # Independent members only: a +q/-q pair shares one angle modulo 180 deg.
-    ring = [p for p in result.peaks
-            if p.index_hk is not None and p.independent and shell_index(p) == 1]
+    ring = [
+        p
+        for p in result.peaks
+        if p.index_hk is not None and p.independent and shell_index(p) == 1
+    ]
     if len(ring) < 3:
         return float("nan")
     angles = sorted(np.degrees(np.arctan2(p.q_px[1], p.q_px[0])) % 180.0 for p in ring)
@@ -641,9 +644,11 @@ def run_correction_square(n=256, size_nm=30.0, a_nm=3.0) -> None:
     image, _ = synthetic_image(n, size_nm, a_nm, seed=11, symmetry="square")
     result = detect_bragg_peaks(image, size_nm, lattice=spec)
     labelled = sum(peak.index_hk is not None for peak in result.peaks)
-    check("R4.1.1 square spec fits and labels peaks",
-          result.lattice is not None and result.lattice.fit_ok and labelled >= 6,
-          f"basis_source = {result.meta.get('basis_source')}, labelled = {labelled}")
+    check(
+        "R4.1.1 square spec fits and labels peaks",
+        result.lattice is not None and result.lattice.fit_ok and labelled >= 6,
+        f"basis_source = {result.meta.get('basis_source')}, labelled = {labelled}",
+    )
     ideal = 2.0 * np.pi / a_nm
     correction = correct_bragg_peaks(image, size_nm, lattice=spec)
     redo = detect_bragg_peaks(correction.image, correction.size_nm, lattice=spec)
@@ -679,14 +684,20 @@ def run_correction_direction_guard(n=512, size_nm=30.0, a_nm=A_NM) -> None:
         f"raw gaps {first_ring_gaps(raw):.3f} -> {first_ring_gaps(redo):.3f} deg; "
         f"M = {np.array2string(correction.affine_q, precision=4)}",
     )
-    check("R4.2.2 corrected first-ring gaps 60 +- 0.3 deg",
-          np.isfinite(first_ring_gaps(redo)) and first_ring_gaps(redo) <= 0.3,
-          f"max |gap - 60| = {first_ring_gaps(redo):.3f} deg")
+    check(
+        "R4.2.2 corrected first-ring gaps 60 +- 0.3 deg",
+        np.isfinite(first_ring_gaps(redo)) and first_ring_gaps(redo) <= 0.3,
+        f"max |gap - 60| = {first_ring_gaps(redo):.3f} deg",
+    )
     # Deliberately reversed convention: resample with the forward stretch M
     # instead of its inverse; it must fail the same corrected-|b1| check.
     reversed_image = affine_transform(
-        image, _AXIS_SWAP @ correction.affine_q @ _AXIS_SWAP, correction.offset,
-        output_shape=(correction.n_out, correction.n_out), order=1, mode="constant",
+        image,
+        _AXIS_SWAP @ correction.affine_q @ _AXIS_SWAP,
+        correction.offset,
+        output_shape=(correction.n_out, correction.n_out),
+        order=1,
+        mode="constant",
         cval=np.nan,
     )
     wrong = detect_bragg_peaks(reversed_image, correction.size_nm)
@@ -709,37 +720,51 @@ def run_correction_identity_fallback(n=256, size_nm=30.0, a_nm=A_NM) -> None:
     detection = detect_bragg_peaks(image, size_nm)
     correction = correct_bragg_peaks(image, size_nm)
     meta = correction.meta
-    check("R4.4.1 identity fallback reported",
-          meta["method"] == "identity_fallback" and meta["fallback"] is True
-          and meta["n_labelled"] == 0 and detection.lattice is None,
-          f"method = {meta['method']}, fallback = {meta['fallback']}, "
-          f"n_labelled = {meta['n_labelled']}, fitted lattice = "
-          f"{detection.lattice is not None}")
+    check(
+        "R4.4.1 identity fallback reported",
+        meta["method"] == "identity_fallback"
+        and meta["fallback"] is True
+        and meta["n_labelled"] == 0
+        and detection.lattice is None,
+        f"method = {meta['method']}, fallback = {meta['fallback']}, "
+        f"n_labelled = {meta['n_labelled']}, fitted lattice = "
+        f"{detection.lattice is not None}",
+    )
     same_shape = correction.image.shape == image.shape
-    deviation = (-1.0 if not same_shape
-                 else float(np.max(np.abs(correction.image - image))))
-    added_nan = int(np.count_nonzero(~np.isfinite(correction.image) & np.isfinite(image)))
-    check("R4.4.2 input returned bit-identical (no added non-finite pixel)",
-          same_shape and added_nan == 0
-          and bool(np.array_equal(correction.image, image, equal_nan=True)),
-          f"shape {correction.image.shape} vs {image.shape}, "
-          f"max |out - in| = {deviation:g}, added non-finite = {added_nan}")
+    deviation = (
+        -1.0 if not same_shape else float(np.max(np.abs(correction.image - image)))
+    )
+    added_nan = int(
+        np.count_nonzero(~np.isfinite(correction.image) & np.isfinite(image))
+    )
+    check(
+        "R4.4.2 input returned bit-identical (no added non-finite pixel)",
+        same_shape
+        and added_nan == 0
+        and bool(np.array_equal(correction.image, image, equal_nan=True)),
+        f"shape {correction.image.shape} vs {image.shape}, "
+        f"max |out - in| = {deviation:g}, added non-finite = {added_nan}",
+    )
     finite_input = float(np.isfinite(image).mean())
-    check("R4.4.3 input geometry preserved",
-          correction.n_out == correction.n_px == n
-          and correction.size_nm == size_nm
-          and bool(np.array_equal(correction.offset, np.zeros(2)))
-          and abs(correction.valid_fraction - finite_input) <= 1e-12,
-          f"n_out = {correction.n_out}, n_px = {correction.n_px}, "
-          f"size_nm = {correction.size_nm:g} (input {size_nm:g}), "
-          f"offset = {np.array2string(correction.offset, precision=1)}, "
-          f"valid_fraction = {correction.valid_fraction:.6f} "
-          f"(input finite {finite_input:.6f})")
-    check("R4.4.4 identity matrices reported",
-          bool(np.allclose(correction.affine_q, np.eye(2)))
-          and bool(np.allclose(correction.affine_image, np.eye(2))),
-          f"affine_q = {np.array2string(correction.affine_q, precision=1)}, "
-          f"affine_image = {np.array2string(correction.affine_image, precision=1)}")
+    check(
+        "R4.4.3 input geometry preserved",
+        correction.n_out == correction.n_px == n
+        and correction.size_nm == size_nm
+        and bool(np.array_equal(correction.offset, np.zeros(2)))
+        and abs(correction.valid_fraction - finite_input) <= 1e-12,
+        f"n_out = {correction.n_out}, n_px = {correction.n_px}, "
+        f"size_nm = {correction.size_nm:g} (input {size_nm:g}), "
+        f"offset = {np.array2string(correction.offset, precision=1)}, "
+        f"valid_fraction = {correction.valid_fraction:.6f} "
+        f"(input finite {finite_input:.6f})",
+    )
+    check(
+        "R4.4.4 identity matrices reported",
+        bool(np.allclose(correction.affine_q, np.eye(2)))
+        and bool(np.allclose(correction.affine_image, np.eye(2))),
+        f"affine_q = {np.array2string(correction.affine_q, precision=1)}, "
+        f"affine_image = {np.array2string(correction.affine_image, precision=1)}",
+    )
 
 
 def run_correction_case(case) -> None:
@@ -786,25 +811,45 @@ def write_correction_evidence(case, correction, redo, b1, gap) -> None:
     figure, axes = plt.subplots(1, 2, figsize=(14, 7))
     axes[0].imshow(correction.image, cmap="gray", origin="upper")
     axes[0].set_title(f"{name} corrected topograph, {correction.n_out} px")
-    axes[1].imshow(np.log10(np.maximum(np.abs(correction.fft2), floor)),
-                   cmap="inferno", origin="upper")
-    axes[1].add_patch(plt.Circle((centre, centre), B1_IDEAL_NM_INV / redo.dq_nm_inv,
-                                 color="#33d1ff", fill=False, linewidth=1.6,
-                                 label="ideal |b1| = 29.49 nm^-1"))
-    axes[1].plot([centre + p.q_px[0] for p in labelled],
-                 [centre + p.q_px[1] for p in labelled], "o", markersize=7,
-                 markerfacecolor="none", markeredgecolor="#ff9f40",
-                 markeredgewidth=1.5, label="labelled peaks (corrected)")
-    axes[1].set_title(f"corrected |FFT|: |b1| = {b1:.3f} nm^-1, "
-                      f"max gap err = {gap:.2f} deg")
+    axes[1].imshow(
+        np.log10(np.maximum(np.abs(correction.fft2), floor)),
+        cmap="inferno",
+        origin="upper",
+    )
+    axes[1].add_patch(
+        plt.Circle(
+            (centre, centre),
+            B1_IDEAL_NM_INV / redo.dq_nm_inv,
+            color="#33d1ff",
+            fill=False,
+            linewidth=1.6,
+            label="ideal |b1| = 29.49 nm^-1",
+        )
+    )
+    axes[1].plot(
+        [centre + p.q_px[0] for p in labelled],
+        [centre + p.q_px[1] for p in labelled],
+        "o",
+        markersize=7,
+        markerfacecolor="none",
+        markeredgecolor="#ff9f40",
+        markeredgewidth=1.5,
+        label="labelled peaks (corrected)",
+    )
+    axes[1].set_title(
+        f"corrected |FFT|: |b1| = {b1:.3f} nm^-1, max gap err = {gap:.2f} deg"
+    )
     axes[1].legend(loc="upper right", fontsize=9)
     CORRECTION_DIR.mkdir(parents=True, exist_ok=True)
     target = CORRECTION_DIR / f"correct_{name}.png"
     figure.savefig(target, dpi=110, bbox_inches="tight")
     plt.close(figure)
     size = target.stat().st_size if target.is_file() else 0
-    check(f"R4.3.5 {name} correction evidence PNG written", size > 0,
-          f"{target.relative_to(ROOT)} ({size} B)")
+    check(
+        f"R4.3.5 {name} correction evidence PNG written",
+        size > 0,
+        f"{target.relative_to(ROOT)} ({size} B)",
+    )
 
 
 def main() -> int:

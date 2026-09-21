@@ -1002,7 +1002,9 @@ if __name__ == "__main__":
                     divider = 10
                 if "d100" in str(stspath):
                     divider = 100
-                setpointV_sts = raw_data_sts.signals["Bias calc (V)"][0] * 1000 / divider
+                setpointV_sts = (
+                    raw_data_sts.signals["Bias calc (V)"][0] * 1000 / divider
+                )
                 time_sts = str(datetime.fromtimestamp(get_creation_time(stspath)))
                 time_sts = time_sts.split(".")[0]
                 parts = Path(stspath).parts
@@ -1013,9 +1015,9 @@ if __name__ == "__main__":
                     raw_data_topo = nap.read.Scan(topopath)
                     setpointI_topo = (
                         float(
-                            raw_data_topo.header["z-controller"]["Setpoint"][0].split(" ")[
-                                0
-                            ]
+                            raw_data_topo.header["z-controller"]["Setpoint"][0].split(
+                                " "
+                            )[0]
                         )
                         * 1e12
                     )
@@ -1154,10 +1156,14 @@ if __name__ == "__main__":
                 # 获取linecut的文字信息
                 raw_data_lc = nap.read.Grid(lcpath)
                 try:
-                    setpointI_lc = raw_data_lc.signals["Current [AVG] (A)"][0][0][0] * 1e12
+                    setpointI_lc = (
+                        raw_data_lc.signals["Current [AVG] (A)"][0][0][0] * 1e12
+                    )
                 except Exception:
                     try:
-                        setpointI_lc = raw_data_lc.signals["Current (A)"][0][0][0] * 1e12
+                        setpointI_lc = (
+                            raw_data_lc.signals["Current (A)"][0][0][0] * 1e12
+                        )
                     except Exception:
                         setpointI_lc = 404
                 divider = 1
@@ -1180,9 +1186,9 @@ if __name__ == "__main__":
                     raw_data_topo = nap.read.Scan(topopath)
                     setpointI_topo = (
                         float(
-                            raw_data_topo.header["z-controller"]["Setpoint"][0].split(" ")[
-                                0
-                            ]
+                            raw_data_topo.header["z-controller"]["Setpoint"][0].split(
+                                " "
+                            )[0]
                         )
                         * 1e12
                     )
@@ -1469,7 +1475,9 @@ if __name__ == "__main__":
                             )
                             paragraph.font.size = Pt(11)
                         picture = slide.shapes.add_picture(
-                            str(Storagepath / "temp_inmap.tif"), left=Cm(14.5), top=Cm(1.8)
+                            str(Storagepath / "temp_inmap.tif"),
+                            left=Cm(14.5),
+                            top=Cm(1.8),
                         )
                         picture.rotation = angle_ppt
                         # 插入文本框
@@ -1477,7 +1485,9 @@ if __name__ == "__main__":
                         top3 = Cm(6.7)
                         width3 = Inches(4)
                         height3 = Inches(1)
-                        text_box = slide.shapes.add_textbox(left3, top3, width3, height3)
+                        text_box = slide.shapes.add_textbox(
+                            left3, top3, width3, height3
+                        )
                         text_frame = text_box.text_frame
                         paragraph = text_frame.add_paragraph()
                         paragraph.text = "topo in map"
@@ -1545,7 +1555,9 @@ if __name__ == "__main__":
                             top = Cm(2.2)
                             width = Inches(4)
                             height = Inches(1)
-                            text_box = slide.shapes.add_textbox(left, top, width, height)
+                            text_box = slide.shapes.add_textbox(
+                                left, top, width, height
+                            )
                             # 在文字框中添加文字
                             text_frame = text_box.text_frame
                             text_frame.text = (
@@ -1584,7 +1596,9 @@ if __name__ == "__main__":
                             )
                             picture.rotation = angle_ppt
                 if mapI_switch == "on":
-                    (str(Storagepath / "folder_mapI")).mkdir(parents=True, exist_ok=True)
+                    (str(Storagepath / "folder_mapI")).mkdir(
+                        parents=True, exist_ok=True
+                    )
                     for n in range(len(bias)):
                         ShowMapI(mappath, n)
                     # 创建一个动画,将多张图片合成为一个动画
@@ -1627,7 +1641,9 @@ if __name__ == "__main__":
                             top = Cm(2.2)
                             width = Inches(4)
                             height = Inches(1)
-                            text_box = slide.shapes.add_textbox(left, top, width, height)
+                            text_box = slide.shapes.add_textbox(
+                                left, top, width, height
+                            )
                             # 在文字框中添加文字
                             text_frame = text_box.text_frame
                             text_frame.text = (

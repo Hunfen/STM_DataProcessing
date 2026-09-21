@@ -29,9 +29,7 @@ from stm_data_processing.utils.plot_funcs import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-AUTOPPT_PATH = (
-    PROJECT_ROOT / "src/stm_data_processing/utils/AutoPPt_winnew_modified.py"
-)
+AUTOPPT_PATH = PROJECT_ROOT / "src/stm_data_processing/utils/AutoPPt_winnew_modified.py"
 PLOT_FUNCS_PATH = PROJECT_ROOT / "src/stm_data_processing/utils/plot_funcs.py"
 
 SEG_BIAS_HEADER = (
@@ -49,11 +47,15 @@ def _buggy_subtract_mean_plane(matrix):
         for j in range(ydim):
             coord_matrix[i * xdim + j] = [i, j, 1]
             z_vector[i * xdim + j] = matrix[i, j]
-    plane_vector = np.linalg.inv(coord_matrix.T @ coord_matrix) @ coord_matrix.T @ z_vector
+    plane_vector = (
+        np.linalg.inv(coord_matrix.T @ coord_matrix) @ coord_matrix.T @ z_vector
+    )
     plane_matrix = np.zeros((xdim, ydim))
     for i in range(xdim):
         for j in range(ydim):
-            plane_matrix[i, j] = i * plane_vector[0] + j * plane_vector[1] + plane_vector[2]
+            plane_matrix[i, j] = (
+                i * plane_vector[0] + j * plane_vector[1] + plane_vector[2]
+            )
     return matrix - plane_matrix
 
 
@@ -71,7 +73,9 @@ def test_subtract_mean_plane_non_square():
     residual = subtractMeanPlane(plane)
     assert residual.shape == (xdim, ydim)
     max_res = np.max(np.abs(residual))
-    assert max_res < 1e-8, f"plane not removed on non-square image, max residual {max_res}"
+    assert max_res < 1e-8, (
+        f"plane not removed on non-square image, max residual {max_res}"
+    )
     curved = plane + 0.01 * (x - 4.5) * (y - 9.5)
     fixed_max = np.max(np.abs(subtractMeanPlane(curved)))
     try:
@@ -81,6 +85,7 @@ def test_subtract_mean_plane_non_square():
     assert buggy_max > fixed_max * 1.5, (
         f"pre-fix stride must distort the fit: buggy {buggy_max} vs fixed {fixed_max}"
     )
+
 
 def _pre_fix_subtract_mean_plane(matrix):
     """Reference copy of the pre-fix all-finite lstsq implementation."""
@@ -147,7 +152,6 @@ def test_topo_colormap_marks_bad_pixels():
     arr = np.array([[1.0, np.nan], [5.0, 3.0]])
     assert finite_range(arr) == (1.0, 5.0)
     assert finite_range(np.full((2, 2), np.nan)) == (None, None)
-
 
 
 class FakeGrid:
@@ -254,12 +258,18 @@ def test_m8_uses_raw_data_topo_bias():
             isinstance(t, ast.Name) and t.id == "setpointV_topo" for t in node.targets
         ):
             assigns.append(node)
-    assert len(assigns) == 2, f"expected 2 setpointV_topo assignments, found {len(assigns)}"
+    assert len(assigns) == 2, (
+        f"expected 2 setpointV_topo assignments, found {len(assigns)}"
+    )
     for node in assigns:
         expr = ast.unparse(node.value)
         names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
-        assert "raw_data_topo" in names, f"setpointV_topo must use raw_data_topo: {expr}"
-        assert "raw_data" not in names, f"setpointV_topo must not use leftover raw_data: {expr}"
+        assert "raw_data_topo" in names, (
+            f"setpointV_topo must use raw_data_topo: {expr}"
+        )
+        assert "raw_data" not in names, (
+            f"setpointV_topo must not use leftover raw_data: {expr}"
+        )
         assert _collect_raw_data_topo_bias_subscripts(node.value), (
             f"no raw_data_topo.header['bias'] subscript in: {expr}"
         )
@@ -270,14 +280,20 @@ def test_m9_and_m14_use_shared_helpers():
     build_bias_labels."""
     tree = ast.parse(AUTOPPT_PATH.read_text(encoding="utf-8"))
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-    assert "subtractMeanPlane" not in funcs, "AutoPPt must reuse plot_funcs.subtractMeanPlane"
+    assert "subtractMeanPlane" not in funcs, (
+        "AutoPPt must reuse plot_funcs.subtractMeanPlane"
+    )
     for fname in ("ShowMap", "QPI", "ShowMapI"):
         body_names = {n.id for n in ast.walk(funcs[fname]) if isinstance(n, ast.Name)}
         assert "build_bias_labels" in body_names, f"{fname} must use build_bias_labels"
     plot_tree = ast.parse(PLOT_FUNCS_PATH.read_text(encoding="utf-8"))
-    plot_funcs = {n.name: n for n in ast.walk(plot_tree) if isinstance(n, ast.FunctionDef)}
+    plot_funcs = {
+        n.name: n for n in ast.walk(plot_tree) if isinstance(n, ast.FunctionDef)
+    }
     for fname in ("plot_map_bias", "plot_qpi_bias", "plot_map_current_bias"):
-        body_names = {n.id for n in ast.walk(plot_funcs[fname]) if isinstance(n, ast.Name)}
+        body_names = {
+            n.id for n in ast.walk(plot_funcs[fname]) if isinstance(n, ast.Name)
+        }
         assert "build_bias_labels" in body_names, f"{fname} must use build_bias_labels"
 
 

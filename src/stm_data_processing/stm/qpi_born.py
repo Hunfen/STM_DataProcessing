@@ -42,7 +42,6 @@ class BornQPI:
         nk: int = 256,
         eta: float = 0.005,
     ) -> None:
-
         self._validate_hamiltonian(hamiltonian)
         self.ham: MLWFHamiltonian = hamiltonian
         self.num_wann: int | None = hamiltonian.num_wann

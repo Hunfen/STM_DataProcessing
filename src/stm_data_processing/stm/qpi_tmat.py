@@ -210,9 +210,7 @@ class TmatQPI:
 
         if V is not None:
             if not np.isscalar(V):
-                raise ValueError(
-                    f"V must be a scalar impurity strength, got {V!r}"
-                )
+                raise ValueError(f"V must be a scalar impurity strength, got {V!r}")
             self.V0 = complex(V)
             self.V = self.V0 * np.eye(self.num_wann, dtype=np.complex128)
 
@@ -223,7 +221,9 @@ class TmatQPI:
             len(energy_array),
         )
 
-        compute_func = self._compute_tmat_cuda if BACKEND == "gpu" else self._compute_tmat
+        compute_func = (
+            self._compute_tmat_cuda if BACKEND == "gpu" else self._compute_tmat
+        )
 
         qpi_layers: np.ndarray = np.empty((len(energy_array), nk, nk), dtype=np.float64)
         for ie, omega in enumerate(energy_array):
@@ -270,4 +270,3 @@ class TmatQPI:
 
         logger.info("T-matrix QPI calculation completed.")
         return result
-

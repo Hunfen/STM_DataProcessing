@@ -35,11 +35,23 @@ logger = logging.getLogger(__name__)
 # there, so a "noise scale" at that level is not a measurement).
 _DEGENERATE_SCALE_FRACTION = 1e-12
 _DEGENERATE_FLOOR_FACTOR = 1e3
-_KEYS = frozenset((
-    "lattice", "min_snr", "dc_mask_frac", "q_max_px", "max_candidates", "max_peaks",
-    "footprint", "patch_half", "sigma_model_floor_px", "window", "subtract_plane",
-    "nan_policy", "return_fft2",
-))
+_KEYS = frozenset(
+    (
+        "lattice",
+        "min_snr",
+        "dc_mask_frac",
+        "q_max_px",
+        "max_candidates",
+        "max_peaks",
+        "footprint",
+        "patch_half",
+        "sigma_model_floor_px",
+        "window",
+        "subtract_plane",
+        "nan_policy",
+        "return_fft2",
+    )
+)
 
 
 def _empty_result(spectrum, size_nm, options, return_fft2, reason, noise_sigma=0.0):
@@ -143,15 +155,25 @@ def _run_pipeline(spectrum, size_nm, options, *, return_fft2):
         ]
     )
     meta = {
-        "footprint_px": int(footprint), "n_candidates_before_cap": int(n_candidates),
-        "n_half_plane": len(reps), "dc_radius_px": float(dc_radius_px),
-        "q_max_px": float(q_max_px), "nan_filled": int(options.get("_nan_filled", 0)),
+        "footprint_px": int(footprint),
+        "n_candidates_before_cap": int(n_candidates),
+        "n_half_plane": len(reps),
+        "dc_radius_px": float(dc_radius_px),
+        "q_max_px": float(q_max_px),
+        "nan_filled": int(options.get("_nan_filled", 0)),
         "noise_sigma": float(noise_sigma),
-        "max_candidates": max_candidates if max_candidates is None else int(max_candidates),
+        "max_candidates": max_candidates
+        if max_candidates is None
+        else int(max_candidates),
     }
     if not reps:
         empty = _empty_result(
-            spectrum, size_nm, options, return_fft2, "no candidate above min_snr", noise_sigma
+            spectrum,
+            size_nm,
+            options,
+            return_fft2,
+            "no candidate above min_snr",
+            noise_sigma,
         )
         empty.meta.update(meta)
         return empty
@@ -229,7 +251,9 @@ def _image_stats(image: np.ndarray) -> tuple[int, float]:
     finite = np.isfinite(array)
     if not np.any(finite):
         return int(array.size), 0.0
-    return int(array.size - np.count_nonzero(finite)), float(np.max(np.abs(array[finite])))
+    return int(array.size - np.count_nonzero(finite)), float(
+        np.max(np.abs(array[finite]))
+    )
 
 
 def detect_bragg_peaks(
@@ -253,14 +277,24 @@ def detect_bragg_peaks(
     """Detect, localize and lattice-fit the Bragg peaks of an STM topograph."""
     nan_filled, image_scale = _image_stats(image)
     fft2 = compute_fft2(
-        image, size_nm, window=window, subtract_plane=subtract_plane, nan_policy=nan_policy
+        image,
+        size_nm,
+        window=window,
+        subtract_plane=subtract_plane,
+        nan_policy=nan_policy,
     )
     options = {
-        "lattice": lattice, "min_snr": min_snr, "dc_mask_frac": dc_mask_frac,
-        "q_max_px": q_max_px, "max_candidates": max_candidates, "max_peaks": max_peaks,
-        "footprint": footprint, "patch_half": patch_half,
+        "lattice": lattice,
+        "min_snr": min_snr,
+        "dc_mask_frac": dc_mask_frac,
+        "q_max_px": q_max_px,
+        "max_candidates": max_candidates,
+        "max_peaks": max_peaks,
+        "footprint": footprint,
+        "patch_half": patch_half,
         "sigma_model_floor_px": sigma_model_floor_px,
-        "_nan_filled": nan_filled, "_image_scale": image_scale,
+        "_nan_filled": nan_filled,
+        "_image_scale": image_scale,
     }
     return _run_pipeline(fft2, float(size_nm), options, return_fft2=return_fft2)
 
@@ -278,7 +312,10 @@ class BraggPeakDetector:
         """Detect peaks in a real-space image (see :func:`detect_bragg_peaks`)."""
         options = dict(self.options)
         return detect_bragg_peaks(
-            image, size_nm, return_fft2=bool(options.pop("return_fft2", False)), **options
+            image,
+            size_nm,
+            return_fft2=bool(options.pop("return_fft2", False)),
+            **options,
         )
 
     def detect_from_fft2(
@@ -287,7 +324,9 @@ class BraggPeakDetector:
         """Detect peaks in an already fftshifted complex spectrum (used as-is)."""
         spectrum = np.asarray(fft2)
         if spectrum.ndim != 2 or spectrum.shape[0] != spectrum.shape[1]:
-            raise ValueError(f"fft2 must be a square 2-D array, got shape {spectrum.shape}")
+            raise ValueError(
+                f"fft2 must be a square 2-D array, got shape {spectrum.shape}"
+            )
         if not np.isfinite(size_nm) or size_nm <= 0:
             raise ValueError(f"size_nm must be a positive number, got {size_nm!r}")
         options = dict(self.options)

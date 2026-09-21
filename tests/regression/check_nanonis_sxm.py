@@ -108,15 +108,11 @@ def _check_png_content(png_path: Path, expected_finite: float) -> None:
     assert coloured_frac > 0.05, (
         f"rendered image is blank: non-white fraction {coloured_frac:.3f}"
     )
-    assert data_std > 0.1, (
-        f"rendered image is flat: pixel std {data_std:.4f}"
-    )
+    assert data_std > 0.1, f"rendered image is flat: pixel std {data_std:.4f}"
 
     # NaN pixels are rendered as neutral gray #808080; classify them only
     # approximately (antialiasing may produce near-gray pixels elsewhere).
-    neutral = (
-        (np.abs(r - g) < 0.08) & (np.abs(g - b) < 0.08) & (np.abs(r - b) < 0.08)
-    )
+    neutral = (np.abs(r - g) < 0.08) & (np.abs(g - b) < 0.08) & (np.abs(r - b) < 0.08)
     near_bad = neutral & (r > 0.42) & (r < 0.58)  # NaN gray #808080
     finite_pixels = coloured & (~near_bad)
     finite_frac = float(finite_pixels.mean())
@@ -245,9 +241,7 @@ def check_file(f_path: str) -> None:
         f"finite {finite_ratio * 100:.1f}% ({full_rows}/{n_rows} rows)"
     )
     fig, ax = plt.subplots(figsize=(6.5, 6))
-    im = ax.imshow(
-        z_plane, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax
-    )
+    im = ax.imshow(z_plane, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
     ax.set_title(title, fontsize=8)
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")

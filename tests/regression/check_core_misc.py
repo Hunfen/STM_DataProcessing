@@ -41,9 +41,7 @@ class MockMLWFHamiltonian:
         """Return a batch of random Hermitian H(k) matrices."""
         n = len(k_points)
         nw = self.num_wann
-        h = self._rng.normal(size=(n, nw, nw)) + 1j * self._rng.normal(
-            size=(n, nw, nw)
-        )
+        h = self._rng.normal(size=(n, nw, nw)) + 1j * self._rng.normal(size=(n, nw, nw))
         return (h + np.conj(np.swapaxes(h, 1, 2))) / 2
 
 

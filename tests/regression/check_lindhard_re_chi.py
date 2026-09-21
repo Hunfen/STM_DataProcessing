@@ -571,9 +571,9 @@ def check_q_to_zero_dfde(nk: int) -> None:
 
     # Without the substitution the intraband 0/0 ratio evaluates to 0 and the
     # interband weights vanish by orthonormality, so q=0 would collapse to 0.
-    naive = textbook_sum(
-        evals, evecs, 0, 0, _ETA, _EF, _TEMPERATURE, regularize=False
-    )[0]
+    naive = textbook_sum(evals, evecs, 0, 0, _ETA, _EF, _TEMPERATURE, regularize=False)[
+        0
+    ]
 
     print(
         f"  [f] nk={nk}: chi0_doc(q=0) = {center_value:.6e}, DOS term = "
@@ -581,8 +581,12 @@ def check_q_to_zero_dfde(nk: int) -> None:
         f"unregularized q=0 value = {abs(naive):.3e}"
     )
     np.testing.assert_allclose(center_intra, expected_dos, rtol=1e-9)
-    assert abs(center_inter) < 1e-12, f"interband at q=0 should vanish: {center_inter:.3e}"
-    assert abs(naive) < 1e-14, f"the unregularized 0/0 ratio should vanish: {abs(naive):.3e}"
+    assert abs(center_inter) < 1e-12, (
+        f"interband at q=0 should vanish: {center_inter:.3e}"
+    )
+    assert abs(naive) < 1e-14, (
+        f"the unregularized 0/0 ratio should vanish: {abs(naive):.3e}"
+    )
     assert center_value > 1e-3, "df/dE substitution did not fire at q=0"
 
     # Documented caveat: at T = 0 the Fermi derivative is zero (a step function
@@ -788,7 +792,9 @@ def check_h5_and_q_range(nk: int) -> None:
 
         # --- periodic extension beyond the primitive BZ ---
         extended_n = extended["data"].shape[0]
-        assert extended_n > nk, f"q_range extension did not enlarge the grid: {extended_n}"
+        assert extended_n > nk, (
+            f"q_range extension did not enlarge the grid: {extended_n}"
+        )
         q_values = extended["q1_grid"][:, 0]
         assert q_values[0] >= -0.75 and q_values[-1] < 0.75
         np.testing.assert_allclose(np.diff(q_values), 1.0 / nk, atol=1e-12)
@@ -870,7 +876,9 @@ def check_h5_load_grid_parity(nk: int) -> None:
             f"odd nq={nk}: expected a half-cell offset {0.5 / nk:.3e} for the "
             f"retired linspace grid, got {max_offset:.3e}"
         )
-        parity_note = f"odd nq: retired linspace grid off by half a cell ({max_offset:.3f})"
+        parity_note = (
+            f"odd nq: retired linspace grid off by half a cell ({max_offset:.3f})"
+        )
     print(
         f"  [l] nk={nk} ({parity_note}): save->load grids and data bit-identical; "
         f"q=0 at index {center}"
@@ -951,13 +959,10 @@ def check_legacy_h5_file(nk: int) -> None:
         f"extension did not contain the primitive mesh verbatim: "
         f"{len(tile_rows)} x {len(tile_cols)} vs {nk} x {nk}"
     )
-    np.testing.assert_array_equal(
-        extended["data"][np.ix_(tile_rows, tile_cols)], data
-    )
+    np.testing.assert_array_equal(extended["data"][np.ix_(tile_rows, tile_cols)], data)
     print(
         f"  [l] legacy h5 nk={nk} (no stored grid): loaded grid == "
-        "fftshift(fftfreq); q=0 at index %d; q_range extension consistent"
-        % center
+        "fftshift(fftfreq); q=0 at index %d; q_range extension consistent" % center
     )
 
 
@@ -1028,10 +1033,14 @@ def check_vectorized_tolerance() -> None:
             f"nk={nk} {'overlap' if matrix_elements else 'scalar'}"
             f"{' orb=[0]' if orbital_select else ''}"
         )
-        print(f"    {label}: max |vectorized - direct| = {max_err:.3e} (scale {scale:.3e})")
+        print(
+            f"    {label}: max |vectorized - direct| = {max_err:.3e} (scale {scale:.3e})"
+        )
         if max_err / scale > worst[0]:
             worst = (max_err / scale, label)
-        assert max_err < 1e-10 * scale, f"{label}: {max_err:.3e} exceeds 1e-10*{scale:.3e}"
+        assert max_err < 1e-10 * scale, (
+            f"{label}: {max_err:.3e} exceeds 1e-10*{scale:.3e}"
+        )
     print(
         f"  [m] vectorized vs direct sum: worst relative deviation "
         f"{worst[0]:.3e} at {worst[1]} (tolerance 1e-10, see docstring)"
@@ -1163,7 +1172,9 @@ def check_structure() -> None:
         assert forbidden not in lowered, f"merged module still contains '{forbidden}'"
     assert "BACKEND" not in source, "merged module still consults the package backend"
     for forbidden in ("eps_n - eps_m", "eps_m - eps_n", "1j * self.eta"):
-        assert forbidden not in source, f"old denominator form still present: '{forbidden}'"
+        assert forbidden not in source, (
+            f"old denominator form still present: '{forbidden}'"
+        )
     for required in (
         "save_susceptibility_to_h5",
         "extend_qpi",
@@ -1185,9 +1196,7 @@ def check_structure() -> None:
     assert not retired_file.exists(), f"{retired_file.name} still exists"
     assert not retired_check.exists(), f"{retired_check.name} still exists"
     try:
-        importlib.import_module(
-            f"stm_data_processing.dft.wannier90.{_RETIRED_MODULE}"
-        )
+        importlib.import_module(f"stm_data_processing.dft.wannier90.{_RETIRED_MODULE}")
     except ImportError:
         pass
     else:
@@ -1476,9 +1485,19 @@ def check_slice_assembly(nk: int) -> None:
     half = [(0, nk // 2)]
     rejected = 0
     for slices, blocks, kwargs, message in (
-        ([(0, nk // 2), (0, nk)], _dummy_blocks([(0, nk // 2), (0, nk)], nk), {}, "overlapping rows"),
+        (
+            [(0, nk // 2), (0, nk)],
+            _dummy_blocks([(0, nk // 2), (0, nk)], nk),
+            {},
+            "overlapping rows",
+        ),
         (half, _dummy_blocks(half, nk), {}, "missing rows"),
-        (half, _dummy_blocks(half, nk), {"mirror": True}, "rows the mirror cannot complete"),
+        (
+            half,
+            _dummy_blocks(half, nk),
+            {"mirror": True},
+            "rows the mirror cannot complete",
+        ),
         (
             [(0, nk)],
             [
@@ -1531,7 +1550,9 @@ def check_mirror_assembly(nk: int) -> None:
         symmetry = max(
             float(
                 np.max(
-                    np.abs(mirrored[key] - mirrored[key][np.ix_(permutation, permutation)])
+                    np.abs(
+                        mirrored[key] - mirrored[key][np.ix_(permutation, permutation)]
+                    )
                 )
             )
             for key in ("data", "intraband", "interband")
@@ -1539,7 +1560,9 @@ def check_mirror_assembly(nk: int) -> None:
         assert symmetry <= 1e-12, (
             f"nk={nk} mirror ({label}): reflection residual {symmetry:.3e} exceeds 1e-12"
         )
-        reversal = float(np.max(np.abs(mirrored["data"] - mirrored["data"][::-1, ::-1])))
+        reversal = float(
+            np.max(np.abs(mirrored["data"] - mirrored["data"][::-1, ::-1]))
+        )
         assemblies[label] = {
             "mirrored": mirrored,
             "slices": slices,
@@ -1552,7 +1575,8 @@ def check_mirror_assembly(nk: int) -> None:
 
     for key in ("data", "intraband", "interband", "q1_grid", "q2_grid"):
         assert np.array_equal(
-            assemblies["1 slice"]["mirrored"][key], assemblies["3 slices"]["mirrored"][key]
+            assemblies["1 slice"]["mirrored"][key],
+            assemblies["3 slices"]["mirrored"][key],
         ), f"nk={nk}: the mirror changed when the canonical half was split"
 
     assert inspect.signature(assemble_slices).parameters["mirror"].default is False
@@ -1596,7 +1620,12 @@ def check_parallel_execution() -> None:
         ckpt = root / "ckpt"
         h5 = root / "parallel.h5"
 
-        def run_cli(*extra: str, output: Path = h5, checkpoint: Path = ckpt, model: Path = model_dir):
+        def run_cli(
+            *extra: str,
+            output: Path = h5,
+            checkpoint: Path = ckpt,
+            model: Path = model_dir,
+        ):
             command = [
                 sys.executable,
                 str(_CLI_PATH),
@@ -1658,7 +1687,9 @@ def check_parallel_execution() -> None:
         completed = run_cli("--resume")
         assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
         dispatched = [
-            line for line in completed.stderr.splitlines() if "dispatched worker=" in line
+            line
+            for line in completed.stderr.splitlines()
+            if "dispatched worker=" in line
         ]
         reused = [
             line for line in completed.stderr.splitlines() if "already complete" in line
@@ -1671,7 +1702,9 @@ def check_parallel_execution() -> None:
             f"resume did not reuse the intact slice: {reused}"
         )
         assert h5.read_bytes() == reference_bytes, "resume changed the h5 product"
-        assert np.array_equal(load_susceptibility_from_h5(str(h5))["data"], reference["data"])
+        assert np.array_equal(
+            load_susceptibility_from_h5(str(h5))["data"], reference["data"]
+        )
 
         np.savez(
             ckpt / "rows_0_3.npz",
@@ -1682,16 +1715,24 @@ def check_parallel_execution() -> None:
         completed = run_cli("--resume")
         assert completed.returncode == 0, f"resume failed:\n{completed.stderr[-3000:]}"
         dispatched = [
-            line for line in completed.stderr.splitlines() if "dispatched worker=" in line
+            line
+            for line in completed.stderr.splitlines()
+            if "dispatched worker=" in line
         ]
         assert len(dispatched) == 1 and "rows=[0, 3)" in dispatched[0], (
             f"resume with a corrupted shard dispatched {len(dispatched)} slice(s): {dispatched}"
         )
-        assert h5.read_bytes() == reference_bytes, "the corrupted shard was not repaired"
+        assert h5.read_bytes() == reference_bytes, (
+            "the corrupted shard was not repaired"
+        )
 
         fail_h5 = root / "failed.h5"
-        completed = run_cli(output=fail_h5, checkpoint=root / "ckpt_fail", model=root / "missing")
-        assert completed.returncode != 0, "a failing worker did not make the parent fail"
+        completed = run_cli(
+            output=fail_h5, checkpoint=root / "ckpt_fail", model=root / "missing"
+        )
+        assert completed.returncode != 0, (
+            "a failing worker did not make the parent fail"
+        )
         assert not fail_h5.exists(), "the failed run still wrote the final h5"
         assert "exited with code" in completed.stderr, (
             "the parent did not report the failing worker exit code"
@@ -1719,7 +1760,11 @@ def check_parallel_execution() -> None:
             text=True,
         )
         assert dry.returncode == 0, f"--dry-run failed:\n{dry.stderr[-2000:]}"
-        assert "DRY-RUN" in dry.stdout and "segments=" in dry.stdout and "mirror=True" in dry.stdout
+        assert (
+            "DRY-RUN" in dry.stdout
+            and "segments=" in dry.stdout
+            and "mirror=True" in dry.stdout
+        )
         pinned = [
             line
             for line in dry.stderr.splitlines()
@@ -1732,7 +1777,9 @@ def check_parallel_execution() -> None:
     source = _CLI_PATH.read_text(encoding="utf-8")
     for name in _BLAS_THREAD_VARS:
         assert f'"{name}"' in source, f"the CLI does not mention {name}"
-    assert "os.environ.setdefault" in source, "the CLI does not setdefault the BLAS threads"
+    assert "os.environ.setdefault" in source, (
+        "the CLI does not setdefault the BLAS threads"
+    )
     assert source.index("setdefault") < min(
         source.index("import argparse"), source.index("from stm_data_processing")
     ), "the CLI must pin the BLAS threads before the first NumPy import"
@@ -1778,7 +1825,12 @@ def check_logging_contract(nk: int) -> None:
 
     assert any("config nk=" in message for message in messages), "no configuration echo"
     config = next(message for message in messages if "config nk=" in message)
-    for field in ("q_index_range=full", "band_block=", "block_entries=", "degeneracy_tolerance=1.000e-12"):
+    for field in (
+        "q_index_range=full",
+        "band_block=",
+        "block_entries=",
+        "degeneracy_tolerance=1.000e-12",
+    ):
         assert field in config, f"the configuration echo is missing {field!r}: {config}"
 
     assert any("threads OMP_NUM_THREADS=" in message for message in messages), (
@@ -1801,19 +1853,25 @@ def check_logging_contract(nk: int) -> None:
         assert stage_times[stage] >= 0.0
 
     progress = [
-        record for record in records if getattr(record, "lindhard_progress", None) is not None
+        record
+        for record in records
+        if getattr(record, "lindhard_progress", None) is not None
     ]
     assert progress, "no throttled progress record (progress_interval_s was tiny)"
     for record in progress:
         message = record.getMessage()
         for field in ("rows=", "rate=", "px/s=", "elapsed=", "eta=", "rss_peak="):
-            assert field in message, f"the progress record is missing {field!r}: {message}"
+            assert field in message, (
+                f"the progress record is missing {field!r}: {message}"
+            )
         rows_done, rows_total, pixels = record.lindhard_progress
         assert 0 < rows_done <= rows_total and pixels == rows_done * nk
 
     assert any("summary rows=" in message for message in messages), "no closing summary"
     summary = next(message for message in messages if "summary rows=" in message)
-    assert "max|data-(intra+inter)|=" in summary, f"the summary lacks the residual: {summary}"
+    assert "max|data-(intra+inter)|=" in summary, (
+        f"the summary lacks the residual: {summary}"
+    )
     for name in ("data", "intraband", "interband"):
         digest = [message for message in messages if f"digest {name} sum=" in message]
         assert digest, f"no digest record for {name}"
@@ -1920,9 +1978,13 @@ def check_real_model_parallel(nk: int = 32) -> None:
             f"{completed.stderr[-2000:]}"
         )
         reported = [
-            line for line in completed.stdout.splitlines() if line.startswith("SINGLE_WALL")
+            line
+            for line in completed.stdout.splitlines()
+            if line.startswith("SINGLE_WALL")
         ]
-        assert reported, f"the single-process run printed no wall clock:\n{completed.stdout}"
+        assert reported, (
+            f"the single-process run printed no wall clock:\n{completed.stdout}"
+        )
         wall_single = json.loads(reported[-1].split(" ", 1)[1])["wall_s"]
 
         parallel_h5 = root / "parallel.h5"
@@ -1970,7 +2032,8 @@ def check_real_model_parallel(nk: int = 32) -> None:
 
         with np.load(single_npz) as stored:
             arrays = {
-                key: np.asarray(stored[key]) for key in ("data", "intraband", "interband")
+                key: np.asarray(stored[key])
+                for key in ("data", "intraband", "interband")
             }
         residual = float(
             np.max(np.abs(arrays["data"] - (arrays["intraband"] + arrays["interband"])))
@@ -1991,7 +2054,9 @@ def check_real_model_parallel(nk: int = 32) -> None:
 
         plotted = "plot script absent"
         if _PLOT_SCRIPT.exists():
-            spec = importlib.util.spec_from_file_location("handover_plot_cwf53", _PLOT_SCRIPT)
+            spec = importlib.util.spec_from_file_location(
+                "handover_plot_cwf53", _PLOT_SCRIPT
+            )
             plot_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(plot_module)
             png = root / f"li_nk{nk}_parallel.png"
@@ -2144,8 +2209,12 @@ def check_bad_shard_recovery() -> None:
             code = run_parallel(str(model_dir), "mock", nk, resume=True, **options)
             assert code == 0, f"resume with an empty slice returned {code} instead of 0"
             messages = collector.messages()
-            warnings = [message for message in messages if "unreadable checkpoint" in message]
-            dispatched = [message for message in messages if "dispatched worker=" in message]
+            warnings = [
+                message for message in messages if "unreadable checkpoint" in message
+            ]
+            dispatched = [
+                message for message in messages if "dispatched worker=" in message
+            ]
             reused = [message for message in messages if "already complete" in message]
             assert warnings, "the empty slice was discarded without a WARNING"
             assert any("rows_0_3.npz" in message for message in warnings)
@@ -2171,7 +2240,10 @@ def check_bad_shard_recovery() -> None:
             )
             report = _cli_report(completed)
             assert report["unreadable"], "the truncated slice was not reported"
-            assert len(report["dispatched"]) == 1 and "rows=[3, 6)" in report["dispatched"][0]
+            assert (
+                len(report["dispatched"]) == 1
+                and "rows=[3, 6)" in report["dispatched"][0]
+            )
             assert len(report["reused"]) == 1 and "rows=[0, 3)" in report["reused"][0]
             assert h5.read_bytes() == control, "the truncated slice changed the product"
             observed.append((len(valid) // 2, report["unreadable"][-1]))
@@ -2230,11 +2302,14 @@ def check_log_file_parameter() -> None:
         assert code == 0, f"the API run with log_file returned {code}"
         assert api_log.exists(), "run_parallel(log_file=...) wrote no file"
         api_text = api_log.read_text(encoding="utf-8")
-        assert api_log.stat().st_size > 0 and api_text.strip(), "the API log file is empty"
+        assert api_log.stat().st_size > 0 and api_text.strip(), (
+            "the API log file is empty"
+        )
         for expected in ("plan nk=", "summary rows=", "worker digests verified"):
             assert expected in api_text, f"the API log file lacks {expected!r}"
         assert api_text.count("plan nk=") == 1, (
-            "the parent log line was duplicated: " f"{api_text.count('plan nk=')} plan lines"
+            "the parent log line was duplicated: "
+            f"{api_text.count('plan nk=')} plan lines"
         )
         api_bytes = api_log.stat().st_size
         assert np.array_equal(
@@ -2251,11 +2326,13 @@ def check_log_file_parameter() -> None:
             checkpoint=root / "ckpt_cli",
             extra=("--log-file", str(cli_log)),
         )
-        assert completed.returncode == 0, f"the CLI run failed:\n{completed.stderr[-2000:]}"
-        cli_text = cli_log.read_text(encoding="utf-8")
-        assert cli_text.count("plan nk=") == 1 and cli_text.count("summary rows=") == 1, (
-            "the CLI log has duplicated parent records (handler added twice)"
+        assert completed.returncode == 0, (
+            f"the CLI run failed:\n{completed.stderr[-2000:]}"
         )
+        cli_text = cli_log.read_text(encoding="utf-8")
+        assert (
+            cli_text.count("plan nk=") == 1 and cli_text.count("summary rows=") == 1
+        ), "the CLI log has duplicated parent records (handler added twice)"
         cli_bytes = cli_log.stat().st_size
 
     source = inspect.getsource(run_parallel)
@@ -2280,7 +2357,9 @@ def check_log_file_parameter() -> None:
         for action in parser._actions
         if action.dest != "help" and f"args.{action.dest}" not in cli_source
     ]
-    assert not cli_ignored, f"the CLI parser produces unused destination(s) {cli_ignored}"
+    assert not cli_ignored, (
+        f"the CLI parser produces unused destination(s) {cli_ignored}"
+    )
     options = len([action for action in parser._actions if action.option_strings])
 
     print(
@@ -2424,7 +2503,9 @@ def check_estimate_upper_bound(nk_list: tuple[int, ...] = (8, 16, 32)) -> None:
                 f"the nk={nk} {label} peak run failed:\n{completed.stderr[-1500:]}"
             )
             reported = [
-                line for line in completed.stdout.splitlines() if line.startswith("PEAK ")
+                line
+                for line in completed.stdout.splitlines()
+                if line.startswith("PEAK ")
             ]
             assert reported, f"the nk={nk} {label} run printed no peak"
             measured = json.loads(reported[-1].split(" ", 1)[1])
@@ -2434,7 +2515,9 @@ def check_estimate_upper_bound(nk_list: tuple[int, ...] = (8, 16, 32)) -> None:
                 f"nk={nk} {label}: estimate {estimate / 1024**2:.1f} MB is below the "
                 f"measured peak {measured['rss_peak'] / 1024**2:.1f} MB"
             )
-            table.append((nk, label, estimate, measured["rss_peak"], measured["wall_s"]))
+            table.append(
+                (nk, label, estimate, measured["rss_peak"], measured["wall_s"])
+            )
 
     assert num_wann != 75 or nrpts != 0  # the estimate really uses the model numbers
     production_nk, production_workers = 256, 8
@@ -2548,7 +2631,9 @@ def check_foreign_shard_rejection() -> None:
         options = {"output": h5, "checkpoint": ckpt, "workers": 2}
 
         completed = _run_parallel_cli(model_a, "mock", nk, **options)
-        assert completed.returncode == 0, f"the model A run failed:\n{completed.stderr[-1500:]}"
+        assert completed.returncode == 0, (
+            f"the model A run failed:\n{completed.stderr[-1500:]}"
+        )
         assert np.array_equal(
             load_susceptibility_from_h5(str(h5))["data"], reference_a["data"]
         )
@@ -2556,10 +2641,12 @@ def check_foreign_shard_rejection() -> None:
 
         # (1) same orbital count, different bvecs -> incompatible signature
         completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
-        assert completed.returncode == 0, f"the model C resume failed:\n{completed.stderr[-1500:]}"
+        assert completed.returncode == 0, (
+            f"the model C resume failed:\n{completed.stderr[-1500:]}"
+        )
         report = _cli_report(completed)
         assert len(report["dispatched"]) == 2 and not report["reused"], (
-            "the shards of model A were reused for model C: " f"{report}"
+            f"the shards of model A were reused for model C: {report}"
         )
         assert len(report["incompatible"]) == 2, (
             f"the incompatible shards were not reported: {report['incompatible']}"
@@ -2567,10 +2654,12 @@ def check_foreign_shard_rejection() -> None:
 
         # (2) resuming the same model again reuses both slices (no false alarm)
         completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
-        assert completed.returncode == 0, f"the second model C resume failed:\n{completed.stderr[-1500:]}"
+        assert completed.returncode == 0, (
+            f"the second model C resume failed:\n{completed.stderr[-1500:]}"
+        )
         report = _cli_report(completed)
         assert not report["dispatched"] and len(report["reused"]) == 2, (
-            "the bvecs comparison produces a false incompatibility: " f"{report}"
+            f"the bvecs comparison produces a false incompatibility: {report}"
         )
         bytes_c = h5.read_bytes()
 
@@ -2580,18 +2669,24 @@ def check_foreign_shard_rejection() -> None:
         meta["num_wann"] = 999
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
         completed = _run_parallel_cli(model_c, "mock", nk, resume=True, **options)
-        assert completed.returncode == 0, f"the tampered-shard resume failed:\n{completed.stderr[-1500:]}"
-        report = _cli_report(completed)
-        assert len(report["dispatched"]) == 1 and "rows=[3, 6)" in report["dispatched"][0], (
-            f"the tampered shard was not recomputed alone: {report}"
+        assert completed.returncode == 0, (
+            f"the tampered-shard resume failed:\n{completed.stderr[-1500:]}"
         )
+        report = _cli_report(completed)
+        assert (
+            len(report["dispatched"]) == 1 and "rows=[3, 6)" in report["dispatched"][0]
+        ), f"the tampered shard was not recomputed alone: {report}"
         assert len(report["reused"]) == 1 and "rows=[0, 3)" in report["reused"][0]
         assert len(report["incompatible"]) == 1
-        assert h5.read_bytes() == bytes_c, "recomputing an identical slice changed the h5"
+        assert h5.read_bytes() == bytes_c, (
+            "recomputing an identical slice changed the h5"
+        )
 
         # (4) another orbital count: every shard is rejected and replaced
         completed = _run_parallel_cli(model_b, "mock", nk, resume=True, **options)
-        assert completed.returncode == 0, f"the model B resume failed:\n{completed.stderr[-1500:]}"
+        assert completed.returncode == 0, (
+            f"the model B resume failed:\n{completed.stderr[-1500:]}"
+        )
         report = _cli_report(completed)
         assert len(report["dispatched"]) == 2 and not report["reused"], (
             f"the shards of model C were reused for model B: {report}"
@@ -2600,7 +2695,10 @@ def check_foreign_shard_rejection() -> None:
         assert np.array_equal(final, reference_b["data"]), (
             "the final product does not carry model B's numbers"
         )
-        assert not np.array_equal(final, reference_a["data"]) and h5.read_bytes() != bytes_a
+        assert (
+            not np.array_equal(final, reference_a["data"])
+            and h5.read_bytes() != bytes_a
+        )
 
     print(
         f"  [z] mock models nk={nk}, workers=2 spawn, shared checkpoint dir: a model "
@@ -2622,44 +2720,95 @@ def main() -> None:
             lambda: check_direct_sum(8, matrix_elements=False),
         ),
         ("(a) direct-sum consistency (overlap, odd nk=5)", lambda: check_direct_sum(5)),
-        ("(a) direct-sum consistency (projected orbital, nk=6)", lambda: check_direct_sum(6, orbital_select=[0])),
-        ("(b) sign convention (doc >= 0, textbook <= 0)", lambda: check_sign_convention(6)),
+        (
+            "(a) direct-sum consistency (projected orbital, nk=6)",
+            lambda: check_direct_sum(6, orbital_select=[0]),
+        ),
+        (
+            "(b) sign convention (doc >= 0, textbook <= 0)",
+            lambda: check_sign_convention(6),
+        ),
         ("(c) chi0(q) = chi0(-q) (nk=8)", lambda: check_evenness(8)),
         ("(d) q-grid alignment (even nk=4)", lambda: check_qgrid_alignment(4)),
         ("(d) q-grid alignment (even nk=8)", lambda: check_qgrid_alignment(8)),
         ("(d) q-grid alignment (odd nk=5)", lambda: check_qgrid_alignment(5)),
         ("(e) 1D chain sign (nk=16)", lambda: check_chain_sign(16)),
         ("(f) q -> 0 df/dE DOS term (nk=8)", lambda: check_q_to_zero_dfde(8)),
-        ("(g) finite-eta intraband suppression (nk=16)", lambda: check_eta_suppression(16)),
-        ("(h) orbital projection + validation (nk=8)", lambda: check_orbital_projection(8)),
+        (
+            "(g) finite-eta intraband suppression (nk=16)",
+            lambda: check_eta_suppression(16),
+        ),
+        (
+            "(h) orbital projection + validation (nk=8)",
+            lambda: check_orbital_projection(8),
+        ),
         ("(i) output contract (nk=8)", lambda: check_output_contract(8)),
-        ("(j) h5 save + q_range crop/extension (nk=8)", lambda: check_h5_and_q_range(8)),
+        (
+            "(j) h5 save + q_range crop/extension (nk=8)",
+            lambda: check_h5_and_q_range(8),
+        ),
         ("(k) source structure and removals", check_structure),
-        ("(l) h5 save->load grid parity (odd nk=5)", lambda: check_h5_load_grid_parity(5)),
-        ("(l) h5 save->load grid parity (even nk=8)", lambda: check_h5_load_grid_parity(8)),
-        ("(l) Im module_type and h5 round trip (nk=5)", lambda: check_im_module_type(5)),
-        ("(l) legacy h5 without stored grid (odd nk=5)", lambda: check_legacy_h5_file(5)),
-        ("(l) legacy h5 without stored grid (even nk=8)", lambda: check_legacy_h5_file(8)),
+        (
+            "(l) h5 save->load grid parity (odd nk=5)",
+            lambda: check_h5_load_grid_parity(5),
+        ),
+        (
+            "(l) h5 save->load grid parity (even nk=8)",
+            lambda: check_h5_load_grid_parity(8),
+        ),
+        (
+            "(l) Im module_type and h5 round trip (nk=5)",
+            lambda: check_im_module_type(5),
+        ),
+        (
+            "(l) legacy h5 without stored grid (odd nk=5)",
+            lambda: check_legacy_h5_file(5),
+        ),
+        (
+            "(l) legacy h5 without stored grid (even nk=8)",
+            lambda: check_legacy_h5_file(8),
+        ),
         ("(m) vectorized vs direct-sum tolerance", check_vectorized_tolerance),
         ("(n) shifted view blocks equal np.roll", check_shifted_view_blocks),
-        ("(n) blocked eigen stage bitwise equal (nk=32)", lambda: check_blocked_eigen_equivalence(32)),
-        ("(o) wide-model nk=32 smoke (blocked zgemm)", lambda: check_wide_model_smoke(32)),
+        (
+            "(n) blocked eigen stage bitwise equal (nk=32)",
+            lambda: check_blocked_eigen_equivalence(32),
+        ),
+        (
+            "(o) wide-model nk=32 smoke (blocked zgemm)",
+            lambda: check_wide_model_smoke(32),
+        ),
         ("(p) q row slices bitwise equal (odd nk=5)", lambda: check_row_slices(5)),
         ("(p) q row slices bitwise equal (nk=8)", lambda: check_row_slices(8)),
         ("(p) q row slices bitwise equal (nk=16)", lambda: check_row_slices(16)),
-        ("(q) slice assembly bitwise equal (odd nk=5)", lambda: check_slice_assembly(5)),
+        (
+            "(q) slice assembly bitwise equal (odd nk=5)",
+            lambda: check_slice_assembly(5),
+        ),
         ("(q) slice assembly bitwise equal (nk=8)", lambda: check_slice_assembly(8)),
         ("(r) mirror assembly (nk=4)", lambda: check_mirror_assembly(4)),
         ("(r) mirror assembly (odd nk=5)", lambda: check_mirror_assembly(5)),
         ("(r) mirror assembly (nk=6)", lambda: check_mirror_assembly(6)),
         ("(r) mirror assembly (nk=8)", lambda: check_mirror_assembly(8)),
         ("(r) mirror assembly (nk=16)", lambda: check_mirror_assembly(16)),
-        ("(s) parallel workers/checkpoints/resume (mock model)", check_parallel_execution),
-        ("(t) logging contract + structural re-checks", lambda: check_logging_contract(8)),
-        ("(u) real-model nk=32 parallel performance + end-to-end", check_real_model_parallel),
+        (
+            "(s) parallel workers/checkpoints/resume (mock model)",
+            check_parallel_execution,
+        ),
+        (
+            "(t) logging contract + structural re-checks",
+            lambda: check_logging_contract(8),
+        ),
+        (
+            "(u) real-model nk=32 parallel performance + end-to-end",
+            check_real_model_parallel,
+        ),
         ("(v) truncated/empty checkpoint self-heals (R1)", check_bad_shard_recovery),
         ("(w) run_parallel(log_file=...) really logs (R2)", check_log_file_parameter),
-        ("(x) q_index_range validation (R3)", lambda: check_q_index_range_validation(8)),
+        (
+            "(x) q_index_range validation (R3)",
+            lambda: check_q_index_range_validation(8),
+        ),
         ("(y) worker RSS estimate is an upper bound (R4)", check_estimate_upper_bound),
         ("(z) foreign-model checkpoint rejection (R5)", check_foreign_shard_rejection),
     ]

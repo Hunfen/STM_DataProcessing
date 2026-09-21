@@ -78,12 +78,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--model-dir", required=True, help="folder with <seedname>_hr.dat")
+    parser.add_argument(
+        "--model-dir", required=True, help="folder with <seedname>_hr.dat"
+    )
     parser.add_argument("--seedname", required=True, help="Wannier90 seedname")
-    parser.add_argument("--nk", type=int, default=256, help="k/q mesh size per direction")
+    parser.add_argument(
+        "--nk", type=int, default=256, help="k/q mesh size per direction"
+    )
     parser.add_argument("--eta", type=float, default=5e-3, help="broadening in eV")
-    parser.add_argument("--temperature", type=float, default=4.2, help="temperature in K")
-    parser.add_argument("--mu", type=float, default=0.0, help="chemical potential in eV")
+    parser.add_argument(
+        "--temperature", type=float, default=4.2, help="temperature in K"
+    )
+    parser.add_argument(
+        "--mu", type=float, default=0.0, help="chemical potential in eV"
+    )
     parser.add_argument(
         "--orbitals",
         default="all",
@@ -115,11 +123,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(mirror=False)
     parser.add_argument("--output", default=None, help="output HDF5 path")
-    parser.add_argument("--checkpoint-dir", default=None, help="slice checkpoint folder")
+    parser.add_argument(
+        "--checkpoint-dir", default=None, help="slice checkpoint folder"
+    )
     parser.add_argument(
         "--resume", action="store_true", help="dispatch only the missing slices"
     )
-    parser.add_argument("--band-block", type=int, default=None, help="band-m block width")
+    parser.add_argument(
+        "--band-block", type=int, default=None, help="band-m block width"
+    )
     parser.add_argument(
         "--block-entries", type=int, default=None, help="working-array entry budget"
     )
@@ -135,7 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("spawn", "fork", "forkserver"),
         help="multiprocessing start method (spawn by default: no fork with BLAS threads)",
     )
-    parser.add_argument("--log-file", default=None, help="also write the parent log here")
+    parser.add_argument(
+        "--log-file", default=None, help="also write the parent log here"
+    )
     parser.add_argument(
         "--max-mem-gb",
         type=float,

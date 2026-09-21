@@ -58,7 +58,10 @@ def _triple_around(
         partners.append(
             max(
                 candidates,
-                key=lambda index: (float(snr[index]), -angle_distance(angle[index], target)),
+                key=lambda index: (
+                    float(snr[index]),
+                    -angle_distance(angle[index], target),
+                ),
             )
         )
     if partners[0] == partners[1]:
@@ -110,7 +113,8 @@ def ring_clusters(
         ring
         for index, ring in enumerate(rings)
         if not any(
-            abs(ring["radius"] - other["radius"]) <= _RING_DUPLICATE_TOL * other["radius"]
+            abs(ring["radius"] - other["radius"])
+            <= _RING_DUPLICATE_TOL * other["radius"]
             for other in rings[:index]
         )
     ]
@@ -176,10 +180,16 @@ def infer_reference(
             }
         )
     if not evaluated:
-        return [], {"basis_source": "no_rings", "ring_ladder": [], "reference_radius_px": None}
+        return [], {
+            "basis_source": "no_rings",
+            "ring_ladder": [],
+            "reference_radius_px": None,
+        }
     supported = [item for item in evaluated if item["ladder"] >= _LADDER_MIN_RINGS]
     if supported:
-        chosen = max(supported, key=lambda item: (item["ring"]["radius"], item["ring"]["snr"]))
+        chosen = max(
+            supported, key=lambda item: (item["ring"]["radius"], item["ring"]["snr"])
+        )
         reason = "harmonic_ladder"
     else:
         chosen = max(evaluated, key=lambda item: (item["ladder"], item["ring"]["snr"]))
@@ -207,7 +217,9 @@ def reference_model(
     if spec is not None:
         model, basis_source = spec_model(spec, q_obs, snr, 1.0 / dq_nm_inv)
         labels = (
-            match_labels(q_obs, model, h_max, q_max) if model is not None else [None] * len(q_obs)
+            match_labels(q_obs, model, h_max, q_max)
+            if model is not None
+            else [None] * len(q_obs)
         )
         ladder = _ladder_rings(labels, rings)
         reference_radius_px = float(np.hypot(*model[0])) if model is not None else None
@@ -239,7 +251,9 @@ def reference_model(
         # labelled peak is a fit member.  Restricting the fit to hexagonal ladder
         # rings would drop a square or rectangular lattice (no 60 degree triple)
         # and a hexagonal one whose basis sits further than 2 % from the data.
-        members = [int(index) for index, label in enumerate(labels) if label is not None]
+        members = [
+            int(index) for index, label in enumerate(labels) if label is not None
+        ]
     else:
         members = [int(member) for ring in ladder for member in ring["triple"]]
     return {

@@ -136,7 +136,9 @@ def match_labels(
     best = distance[np.arange(q_obs.shape[0]), nearest]
     tolerance = np.maximum(tol_min, tol_frac * np.hypot(q_obs[:, 0], q_obs[:, 1]))
     return [
-        (int(hk[nearest[i], 0]), int(hk[nearest[i], 1])) if best[i] <= tolerance[i] else None
+        (int(hk[nearest[i], 0]), int(hk[nearest[i], 1]))
+        if best[i] <= tolerance[i]
+        else None
         for i in range(q_obs.shape[0])
     ]
 
@@ -160,7 +162,10 @@ def gls_fit(
     for index, hk in enumerate(labels):
         q_ideal = np.asarray(hk, dtype=float) @ basis
         weight = _whitener(covs[index])
-        design = [[q_ideal[0], 0.0, q_ideal[1], 0.0], [0.0, q_ideal[0], 0.0, q_ideal[1]]]
+        design = [
+            [q_ideal[0], 0.0, q_ideal[1], 0.0],
+            [0.0, q_ideal[0], 0.0, q_ideal[1]],
+        ]
         rows.append(weight @ np.asarray(design))
         rhs.append(weight @ np.asarray(q_obs[index], dtype=float))
     design = np.vstack(rows)
@@ -199,7 +204,8 @@ def rotation_sigma_deg(matrix: np.ndarray, cov_m: np.ndarray) -> float:
         plus[index] += step
         minus[index] -= step
         jac[index] = (
-            rotation_angle_deg(plus.reshape(2, 2)) - rotation_angle_deg(minus.reshape(2, 2))
+            rotation_angle_deg(plus.reshape(2, 2))
+            - rotation_angle_deg(minus.reshape(2, 2))
         ) / (2.0 * step)
     variance = float(jac @ np.asarray(cov_m, dtype=float) @ jac)
     if not np.isfinite(variance) or variance < 0.0:
@@ -229,7 +235,9 @@ def fit_lattice(
             f"only {len(used)} labelled ring member(s); at least 3 are required"
         )
         return None, labels, meta
-    fit = gls_fit(q_obs[used], [covs[i] for i in used], [labels[i] for i in used], model)
+    fit = gls_fit(
+        q_obs[used], [covs[i] for i in used], [labels[i] for i in used], model
+    )
     if fit is None:
         meta["lattice_error"] = "the weighted lattice fit is rank deficient"
         return None, labels, meta
@@ -239,7 +247,9 @@ def fit_lattice(
         meta["lattice_error"] = "the fitted reciprocal basis is singular"
         return None, labels, meta
     predicted = np.array([np.asarray(labels[i], dtype=float) @ b_fit for i in used])
-    residual = np.hypot(q_obs[used, 0] - predicted[:, 0], q_obs[used, 1] - predicted[:, 1])
+    residual = np.hypot(
+        q_obs[used, 0] - predicted[:, 0], q_obs[used, 1] - predicted[:, 1]
+    )
     rms_residual_px = float(np.sqrt(np.mean(residual**2)))
     meta.update(chi2_reduced=float(chi2_reduced), rms_residual_px=rms_residual_px)
     lattice = LatticeFit(
@@ -277,7 +287,8 @@ def spec_model(
     """
     if spec.bvecs_nm_inv is not None or spec.symmetry != "oblique":
         basis = rotate_basis(
-            ideal_basis(spec.a_nm, spec.symmetry, spec.bvecs_nm_inv), spec.orientation_deg
+            ideal_basis(spec.a_nm, spec.symmetry, spec.bvecs_nm_inv),
+            spec.orientation_deg,
         )
         return basis * float(pixel_scale), "spec"
     seeded = two_point_basis(q_obs, snr)

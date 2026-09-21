@@ -111,9 +111,7 @@ def rebuild_bias_axis(params: object, points: int) -> np.ndarray:
 
 def pick_didv(channels: list[str]) -> int:
     """Return the index of the forward 'DSP 7280 Y (%)' channel."""
-    assert DI_DV_CHANNEL in channels, (
-        f"{DI_DV_CHANNEL!r} missing from {channels}"
-    )
+    assert DI_DV_CHANNEL in channels, f"{DI_DV_CHANNEL!r} missing from {channels}"
     return channels.index(DI_DV_CHANNEL)
 
 
@@ -216,9 +214,7 @@ def check_2d_grid(path: str) -> None:
     # Individual per-slice maps.
     for i, (bias_val, spec_map) in enumerate(zip(bias, maps, strict=True)):
         fig, ax = plt.subplots(figsize=(7, 5.5))
-        im = ax.imshow(
-            spec_map, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax
-        )
+        im = ax.imshow(spec_map, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
         ax.set_title(
             f"{Path(path).name}\ndI/dV ({DI_DV_CHANNEL}) at bias "
             f"{bias_val * 1e3:.1f} mV (slice {i + 1}/{points})",
@@ -241,9 +237,7 @@ def check_2d_grid(path: str) -> None:
     fig, axes = plt.subplots(2, 4, figsize=(16, 8))
     for i, (bias_val, spec_map) in enumerate(zip(bias, maps, strict=True)):
         ax = axes[i // 4, i % 4]
-        im = ax.imshow(
-            spec_map, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax
-        )
+        im = ax.imshow(spec_map, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
         ax.set_title(f"bias {bias_val * 1e3:.1f} mV", fontsize=10)
         ax.set_xlabel("x (px)", fontsize=8)
         ax.set_ylabel("y (px)", fontsize=8)

@@ -183,9 +183,9 @@ def check_multiline_synthetic_dat(tmpdir: Path) -> None:
     assert ml.shape == (2, 2), ml.shape
     assert np.allclose(ml.iloc[0].tolist(), [0.01, 1e-9])
     assert np.allclose(ml.iloc[1].tolist(), [0.005, 2e-9])
-    assert not any(
-        "MultiLine Settings:" in key for key in bs
-    ), "raw colon-bearing MultiLine key was not popped"
+    assert not any("MultiLine Settings:" in key for key in bs), (
+        "raw colon-bearing MultiLine key was not popped"
+    )
     print(f"  .dat MultiLine Settings converted to DataFrame {ml.shape}")
 
 
@@ -205,9 +205,9 @@ def check_multiline_real_3ds() -> None:
         )
     # row0 must match the raw string '2E-3,0E+0,5E-3,50E-3,2'
     assert np.allclose(ml.iloc[0].tolist(), [2e-3, 0.0, 5e-3, 50e-3, 2.0])
-    assert not any(
-        "MultiLine Settings :" in key for key in bs
-    ), "raw colon-bearing MultiLine key was not popped"
+    assert not any("MultiLine Settings :" in key for key in bs), (
+        "raw colon-bearing MultiLine key was not popped"
+    )
     print(
         f"  real 3ds MultiLine Settings converted to DataFrame {ml.shape}; "
         f"columns: {list(ml.columns)}"
@@ -229,10 +229,7 @@ def check_channels_order_independent() -> None:
     for name in ch_first:
         assert name == name.strip('"').strip(), f"dirty channel name {name!r}"
     assert len(ch_first) > 0, "no channels returned"
-    print(
-        f"  channels order-independent and quote-free "
-        f"({len(ch_first)} channels)"
-    )
+    print(f"  channels order-independent and quote-free ({len(ch_first)} channels)")
 
 
 def check_missing_block_fields(tmpdir: Path) -> None:
@@ -301,9 +298,9 @@ def check_trailing_extra_bytes(tmpdir: Path) -> None:
     assert params.iloc[0, 0] == 0.0
     assert np.allclose(grid[0], [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     assert np.allclose(grid[1], [[8.0, 9.0, 10.0], [11.0, 12.0, 13.0]])
-    assert any(
-        "exceeds expected" in record.getMessage() for record in records
-    ), "no warning logged about trailing bytes"
+    assert any("exceeds expected" in record.getMessage() for record in records), (
+        "no warning logged about trailing bytes"
+    )
     print(f"  warning logged ({len(records)} record(s)); trailing bytes ignored")
 
 

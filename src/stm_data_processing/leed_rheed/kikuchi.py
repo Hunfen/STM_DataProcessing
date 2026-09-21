@@ -134,11 +134,7 @@ def kikuchi_lines(b1, b2, b3, k_in, inner_potential_eV=0.0, index_max=None):
     flat_h = h3.ravel()
     flat_k = k3.ravel()
     flat_l = l3.ravel()
-    g = (
-        np.outer(flat_h, b1)
-        + np.outer(flat_k, b2)
-        + np.outer(flat_l, b3)
-    )
+    g = np.outer(flat_h, b1) + np.outer(flat_k, b2) + np.outer(flat_l, b3)
     g_norm = np.linalg.norm(g, axis=1)
     g_proj = g - np.dot(g, khat)[:, None] * khat[None, :]
     proj_norm = np.linalg.norm(g_proj, axis=1)

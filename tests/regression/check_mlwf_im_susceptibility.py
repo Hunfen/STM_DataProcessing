@@ -100,8 +100,8 @@ def make_calculator() -> SusceptibilityCalculator_wang2012:
     )
     # Redirect FFTW wisdom files out of the source tree.
     wisdom_dir = Path(tempfile.mkdtemp(prefix="fftw_wisdom_"))
-    calc._get_fftw_wisdom_path = (
-        lambda nk, nw, direction: str(wisdom_dir / f"w_{direction}.json")
+    calc._get_fftw_wisdom_path = lambda nk, nw, direction: str(
+        wisdom_dir / f"w_{direction}.json"
     )
     return calc
 
@@ -194,9 +194,7 @@ def cuda_pipeline_replica(
             spectra_occ = spectra_occ[neg_idx[:, None], neg_idx[None, :], :, :]
 
         spectra_unocc = spectral(eps_unocc[i])
-        spectra_unocc = np.ascontiguousarray(
-            spectra_unocc.reshape(nk, nk, nw, nw)
-        )
+        spectra_unocc = np.ascontiguousarray(spectra_unocc.reshape(nk, nk, nw, nw))
         spectra_unocc = np.einsum("ac,ijcb->ijab", mfin, spectra_unocc)
 
         b_occ = np.fft.fftn(spectra_occ, axes=(0, 1))
@@ -205,9 +203,7 @@ def cuda_pipeline_replica(
         b_unocc_shifted = np.fft.fftshift(b_unocc, axes=(0, 1))
 
         b_prod = np.einsum("ijab,ijba->ij", b_occ_shifted, b_unocc_shifted)
-        conv_q = np.fft.ifftn(
-            np.fft.ifftshift(b_prod, axes=(0, 1)), axes=(0, 1)
-        ).real
+        conv_q = np.fft.ifftn(np.fft.ifftshift(b_prod, axes=(0, 1)), axes=(0, 1)).real
         chi_q_accum += conv_q
 
     chi_q_accum = np.fft.fftshift(chi_q_accum)
@@ -224,9 +220,7 @@ def check_cpu_vs_physics_reference() -> None:
     n_eps = int(np.round(np.abs(_OMEGA_LIMIT) / _RESOLUTION)) + 1
     d_eps = np.abs(_OMEGA_LIMIT) / (n_eps - 1)
     chi_cpu = calc._compute_imag_chi(_OMEGA_LIMIT, _RESOLUTION)
-    chi_ref = physics_reference(
-        calc, _OMEGA_LIMIT, _RESOLUTION, weight=np.pi * d_eps
-    )
+    chi_ref = physics_reference(calc, _OMEGA_LIMIT, _RESOLUTION, weight=np.pi * d_eps)
     scale = max(1.0, float(np.max(np.abs(chi_ref))))
     max_err = float(np.max(np.abs(chi_cpu - chi_ref)))
     print(
@@ -271,9 +265,7 @@ def check_cuda_pipeline_replica() -> None:
 
     # Sensitivity: a replica of the legacy pipeline must NOT match, otherwise
     # this check would not detect an M8/M9/M10 regression in the CUDA path.
-    chi_legacy = cuda_pipeline_replica(
-        calc, _OMEGA_LIMIT, _RESOLUTION, legacy=True
-    )
+    chi_legacy = cuda_pipeline_replica(calc, _OMEGA_LIMIT, _RESOLUTION, legacy=True)
     diff_legacy = float(np.max(np.abs(chi_legacy - chi_cpu)))
     print(
         f"  [e] legacy-pipeline replica differs by {diff_legacy:.3e} "
@@ -381,7 +373,9 @@ def check_weight() -> None:
         f"  [b] n_eps={n_eps}, d_eps={d_eps:.6f} vs |resolution|={_RESOLUTION:.6f}; "
         f"relative deviation if resolution were used = {rel_dev * 100:.2f}%"
     )
-    print(f"  [b] old-weight reference == CPU result * |res|/d_eps: max err {max_err:.3e}")
+    print(
+        f"  [b] old-weight reference == CPU result * |res|/d_eps: max err {max_err:.3e}"
+    )
     assert abs(rel_dev) > 0.01, "expected a >1% weight deviation for this parameter set"
     assert max_err < 1e-8 * scale, f"weight scaling mismatch: {max_err:.3e}"
 
@@ -423,12 +417,21 @@ def check_neps_one() -> None:
 def main() -> None:
     """Run every check and summarize."""
     checks = [
-        ("(a) CPU vs exact zero-T Lindhard reference (M8/M9/M10)", check_cpu_vs_physics_reference),
+        (
+            "(a) CPU vs exact zero-T Lindhard reference (M8/M9/M10)",
+            check_cpu_vs_physics_reference,
+        ),
         ("(b) integration weight d_eps = |omega|/(n_eps-1) (M7)", check_weight),
         ("(c) pyFFTW backward plan == ifftn (H3)", check_h3_fftw_backward),
         ("(d) n_eps=1 explicit ValueError", check_neps_one),
-        ("(e) CUDA pipeline NumPy replica == CPU path (M8/M9/M10)", check_cuda_pipeline_replica),
-        ("(f) real _compute_imag_chi_cuda (numpy cupy shim) == CPU path", check_cuda_method_with_numpy_shim),
+        (
+            "(e) CUDA pipeline NumPy replica == CPU path (M8/M9/M10)",
+            check_cuda_pipeline_replica,
+        ),
+        (
+            "(f) real _compute_imag_chi_cuda (numpy cupy shim) == CPU path",
+            check_cuda_method_with_numpy_shim,
+        ),
     ]
     failed = []
     for name, fn in checks:

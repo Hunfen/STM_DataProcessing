@@ -183,6 +183,7 @@ class NanonisFileLoader:
         data_info = raw_header.get("DATA_INFO", "")
         n_channels = sum(1 for line in data_info.split("\n") if line.strip()) - 1
         return max(n_channels, 0) * 2 * pixels[0] * pixels[1]
+
     # def _reform_sxm_header(self) -> dict:
     #     """Reformats the raw header data from a .sxm file into a structured dictionary.
 
@@ -1046,8 +1047,7 @@ class NanonisFileLoader:
                 )
                 df.columns = df.iloc[0]
                 return [
-                    str(name).strip('"').strip()
-                    for name in df[1:]["Name"].tolist()
+                    str(name).strip('"').strip() for name in df[1:]["Name"].tolist()
                 ]
             except (KeyError, IndexError, ValueError):
                 return []

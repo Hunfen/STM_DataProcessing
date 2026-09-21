@@ -88,7 +88,9 @@ _AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
 
 def _labeled_peaks(result) -> list:
     """Independent peaks that carry an (h, k) label, strongest first."""
-    peaks = [peak for peak in result.peaks if peak.index_hk is not None and peak.independent]
+    peaks = [
+        peak for peak in result.peaks if peak.index_hk is not None and peak.independent
+    ]
     return sorted(peaks, key=lambda peak: -float(peak.snr))
 
 
@@ -179,7 +181,9 @@ def _image_transform(stretch, n: int, pad: int):
     ``pad`` pixels and the offset aligns the two centres.
     """
     matrix = _AXIS_SWAP @ np.linalg.inv(stretch) @ _AXIS_SWAP
-    corners = np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    corners = (
+        np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    )
     extent = np.abs(np.linalg.inv(matrix) @ corners.T).max(axis=1)
     n_out = 2 * (int(np.ceil(float(extent.max()))) + int(pad)) + 1
     offset = (n - 1) / 2.0 - matrix @ np.array([(n_out - 1) / 2.0, (n_out - 1) / 2.0])
@@ -243,7 +247,9 @@ def correct_bragg_peaks(
     n = int(arr.shape[0])
     dq_nm_inv, _ = q_axis_limits(n, size_nm)
     detection = (
-        result if result is not None else detect_bragg_peaks(arr, size_nm, lattice=lattice)
+        result
+        if result is not None
+        else detect_bragg_peaks(arr, size_nm, lattice=lattice)
     )
     ideal_spec = lattice if lattice is not None else _DEFAULT_LATTICE
     orientation_deg = ideal_spec.orientation_deg
@@ -262,7 +268,8 @@ def correct_bragg_peaks(
     peaks = _labeled_peaks(detection)
     q_obs = np.array([peak.q_px for peak in peaks], dtype=float)
     q_ideal = np.array(
-        [np.asarray(peak.index_hk, dtype=float) @ basis_px for peak in peaks], dtype=float
+        [np.asarray(peak.index_hk, dtype=float) @ basis_px for peak in peaks],
+        dtype=float,
     )
     sigma_obs = np.array([peak.sigma_q_px for peak in peaks], dtype=float)
 
@@ -295,25 +302,34 @@ def correct_bragg_peaks(
             prefilter=int(order) > 1,
         )
         size_out = float(size_nm) * n_out / n
-    valid_fraction = float(np.count_nonzero(np.isfinite(corrected))) / float(corrected.size)
+    valid_fraction = float(np.count_nonzero(np.isfinite(corrected))) / float(
+        corrected.size
+    )
 
     target_radius_px = float(np.hypot(*basis_px[0]))
     radii = np.array([float(np.hypot(*peak.q_px)) for peak in peaks])
-    first_ring = radii[radii <= 1.02 * float(radii.min())] if radii.size else np.zeros(0)
-    measured_radius_px = float(np.mean(first_ring)) if first_ring.size else float("nan")
-    residual_ratio = measured_radius_px / target_radius_px if first_ring.size else float("nan")
-    residuals = (
-        np.hypot(*(q_obs - q_ideal @ affine_q).T) if len(peaks) else np.zeros(0)
+    first_ring = (
+        radii[radii <= 1.02 * float(radii.min())] if radii.size else np.zeros(0)
     )
+    measured_radius_px = float(np.mean(first_ring)) if first_ring.size else float("nan")
+    residual_ratio = (
+        measured_radius_px / target_radius_px if first_ring.size else float("nan")
+    )
+    residuals = np.hypot(*(q_obs - q_ideal @ affine_q).T) if len(peaks) else np.zeros(0)
     meta = {
-        "method": method, "fallback": bool(fallback), "n_labelled": len(peaks),
-        "order": int(order), "pad": int(pad),
+        "method": method,
+        "fallback": bool(fallback),
+        "n_labelled": len(peaks),
+        "order": int(order),
+        "pad": int(pad),
         "nan_fraction": float(1.0 - valid_fraction),
         "rms_residual_px": (
             float(np.sqrt(np.mean(residuals**2))) if residuals.size else float("nan")
         ),
         "eigenvalues": tuple(float(v) for v in np.linalg.eigvalsh(affine_q)),
-        "dq_nm_inv": float(dq_nm_inv), "input_size_nm": float(size_nm), "input_n_px": n,
+        "dq_nm_inv": float(dq_nm_inv),
+        "input_size_nm": float(size_nm),
+        "input_n_px": n,
         "target_radius_nm_inv": target_radius_px * dq_nm_inv,
         "measured_radius_nm_inv": (
             measured_radius_px * dq_nm_inv if first_ring.size else float("nan")
@@ -339,6 +355,8 @@ def correct_bragg_peaks(
         measured_radius_px=measured_radius_px,
         residual_ratio=residual_ratio,
         valid_fraction=valid_fraction,
-        fft2=compute_fft2(corrected, size_out, nan_policy="plane") if return_fft2 else None,
+        fft2=compute_fft2(corrected, size_out, nan_policy="plane")
+        if return_fft2
+        else None,
         meta=meta,
     )

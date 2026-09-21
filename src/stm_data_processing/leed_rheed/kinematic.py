@@ -257,9 +257,7 @@ def rheed_pattern(a1, a2, energy_eV, grazing_angle_deg, h_max=None, k_max=None):
     b1, b2 = surface_reciprocal(a1, a2)
     wavenumber = float(electron_wavenumber(energy_eV))
     alpha = np.deg2rad(grazing_angle_deg)
-    k_in = np.array(
-        [wavenumber * np.cos(alpha), 0.0, -wavenumber * np.sin(alpha)]
-    )
+    k_in = np.array([wavenumber * np.cos(alpha), 0.0, -wavenumber * np.sin(alpha)])
     streaks = []
     for rod in solve_laue(b1, b2, k_in, h_max=h_max, k_max=k_max):
         for k_out in rod["k_out"]:

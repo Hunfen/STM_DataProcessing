@@ -71,13 +71,18 @@ def _integer_record(magnitude, row, col, snr, quality):
     """Integer-maximum record with the quantization sigma."""
     n = magnitude.shape[0]
     return {
-        "row": row, "col": col,
-        "qx_px": float(col - n // 2), "qy_px": float(row - n // 2),
+        "row": row,
+        "col": col,
+        "qx_px": float(col - n // 2),
+        "qy_px": float(row - n // 2),
         "sigma_px": np.array([_QUANTIZED_SIGMA_PX, _QUANTIZED_SIGMA_PX]),
         "cov_px": np.eye(2) / 12.0,
-        "amplitude": float(magnitude[row, col]), "snr": float(snr),
-        "chi2_reduced": float("nan"), "n_pixels": 1,
-        "method": "max_pixel", "quality": quality,
+        "amplitude": float(magnitude[row, col]),
+        "snr": float(snr),
+        "chi2_reduced": float("nan"),
+        "n_pixels": 1,
+        "method": "max_pixel",
+        "quality": quality,
     }
 
 
@@ -128,13 +133,38 @@ def localize_peak(
     yy, xx = np.mgrid[0 : patch.shape[0], 0 : patch.shape[1]]
     xy = (xx.ravel().astype(float), yy.ravel().astype(float))
     p0 = [
-        amplitude_guess, x0_seed, y0_seed, sx_seed, sy_seed,
-        0.0, float(patch.min()), 0.0, 0.0,
+        amplitude_guess,
+        x0_seed,
+        y0_seed,
+        sx_seed,
+        sy_seed,
+        0.0,
+        float(patch.min()),
+        0.0,
+        0.0,
     ]
-    lo = [0.0, x0_seed - bounds_half, y0_seed - bounds_half, 0.4, 0.4,
-          -0.9, -np.inf, -np.inf, -np.inf]
-    hi = [np.inf, x0_seed + bounds_half, y0_seed + bounds_half, half + 0.5,
-          half + 0.5, 0.9, np.inf, np.inf, np.inf]
+    lo = [
+        0.0,
+        x0_seed - bounds_half,
+        y0_seed - bounds_half,
+        0.4,
+        0.4,
+        -0.9,
+        -np.inf,
+        -np.inf,
+        -np.inf,
+    ]
+    hi = [
+        np.inf,
+        x0_seed + bounds_half,
+        y0_seed + bounds_half,
+        half + 0.5,
+        half + 0.5,
+        0.9,
+        np.inf,
+        np.inf,
+        np.inf,
+    ]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -194,7 +224,9 @@ def _model_sigma_px(lattice, index_hk, dq_nm_inv) -> tuple[float, float]:
     h, k = index_hk
     jac = np.array([[h, 0.0, k, 0.0], [0.0, h, 0.0, k]])
     covariance = jac @ lattice.cov_bvecs_nm_inv @ jac.T
-    return tuple(float(v) for v in np.sqrt(np.clip(np.diag(covariance), 0, None)) / dq_nm_inv)
+    return tuple(
+        float(v) for v in np.sqrt(np.clip(np.diag(covariance), 0, None)) / dq_nm_inv
+    )
 
 
 def merge_duplicates(reps, min_distance_px: float = 1.0):
@@ -230,7 +262,9 @@ def _make_peak(record, label, model_px, model_sigma_px, dq_nm_inv, mirrored):
         "amplitude": float(record["amplitude"]),
         "snr": float(record["snr"]),
         "index_hk": label,
-        "q_model_px": None if model_px is None else (float(model_px[0]), float(model_px[1])),
+        "q_model_px": None
+        if model_px is None
+        else (float(model_px[0]), float(model_px[1])),
         "sigma_q_model_px": model_sigma_px,
         "residual_px": None
         if model_px is None
@@ -257,13 +291,17 @@ def finalize_peaks(reps, labels, lattice, meta, dq_nm_inv, max_peaks):
         selected = [
             int(i) for i in np.argsort([-p["snr"] for p in reps], kind="stable")[:limit]
         ]
-    order = sorted(selected, key=lambda i: -reps[i]["snr"])[: max_peaks or len(selected)]
+    order = sorted(selected, key=lambda i: -reps[i]["snr"])[
+        : max_peaks or len(selected)
+    ]
 
     b_px = None if lattice is None else lattice.bvecs_nm_inv / dq_nm_inv
     pairs = []
     for index in order:
         label = labels[index] if index < len(labels) else None
-        model_px = None if (label is None or b_px is None) else np.asarray(label, float) @ b_px
+        model_px = (
+            None if (label is None or b_px is None) else np.asarray(label, float) @ b_px
+        )
         sigma_model = (
             None
             if (label is None or lattice is None)
@@ -275,7 +313,12 @@ def finalize_peaks(reps, labels, lattice, meta, dq_nm_inv, max_peaks):
             (
                 _make_peak(reps[index], label, model_px, sigma_model, dq_nm_inv, False),
                 _make_peak(
-                    reps[index], mirror_label, mirror_model, sigma_model, dq_nm_inv, True
+                    reps[index],
+                    mirror_label,
+                    mirror_model,
+                    sigma_model,
+                    dq_nm_inv,
+                    True,
                 ),
             )
         )
@@ -283,7 +326,10 @@ def finalize_peaks(reps, labels, lattice, meta, dq_nm_inv, max_peaks):
     perm = sorted(range(len(records)), key=lambda i: (-records[i]["snr"], i))
     position = {old: new for new, old in enumerate(perm)}
     partner = {
-        old: position[old + 1 if old % 2 == 0 else old - 1] for old in range(len(records))
+        old: position[old + 1 if old % 2 == 0 else old - 1]
+        for old in range(len(records))
     }
-    built = tuple(BraggPeak(**records[old], conjugate_index=partner[old]) for old in perm)
+    built = tuple(
+        BraggPeak(**records[old], conjugate_index=partner[old]) for old in perm
+    )
     return built, fallback, len(order)

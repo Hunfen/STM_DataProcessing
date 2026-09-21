@@ -19,7 +19,12 @@ from typing import NamedTuple
 import numpy as np
 from scipy.ndimage import maximum_filter
 
-__all__ = ["Candidate", "detect_candidates", "radial_background", "robust_rayleigh_scale"]
+__all__ = [
+    "Candidate",
+    "detect_candidates",
+    "radial_background",
+    "robust_rayleigh_scale",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +105,9 @@ def _half_width(values: np.ndarray, centre: int) -> float:
             distance += 1
             current = float(values[index])
             if current <= half:
-                widths.append(distance - 1.0 + (previous - half) / max(previous - current, 1e-30))
+                widths.append(
+                    distance - 1.0 + (previous - half) / max(previous - current, 1e-30)
+                )
                 break
             previous = current
         else:
@@ -119,8 +126,12 @@ def _adaptive_footprint(magnitude: np.ndarray, seeds: list[tuple[int, int]]) -> 
         if window.size < 9:
             continue
         iy, ix = np.unravel_index(np.argmax(window), window.shape)
-        widths.append(max(_half_width(window[iy, :], ix), _half_width(window[:, ix], iy)))
-    return 3 if not widths else int(np.clip(round(1.5 * float(np.median(widths))), 3, 11))
+        widths.append(
+            max(_half_width(window[iy, :], ix), _half_width(window[:, ix], iy))
+        )
+    return (
+        3 if not widths else int(np.clip(round(1.5 * float(np.median(widths))), 3, 11))
+    )
 
 
 def detect_candidates(
@@ -159,7 +170,8 @@ def detect_candidates(
     rows, cols = rows[half_plane], cols[half_plane]
     order = np.argsort(-snr_map[rows, cols], kind="stable")
     candidates = [
-        Candidate(int(rows[i]), int(cols[i]), float(snr_map[rows[i], cols[i]])) for i in order
+        Candidate(int(rows[i]), int(cols[i]), float(snr_map[rows[i], cols[i]]))
+        for i in order
     ]
     if max_candidates is not None:
         candidates = candidates[: int(max_candidates)]

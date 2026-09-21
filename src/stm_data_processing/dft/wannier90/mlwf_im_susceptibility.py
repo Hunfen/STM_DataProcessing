@@ -198,7 +198,7 @@ class SusceptibilityCalculator_wang2012:
         from the LU-solve route (same eta); it avoids one batched LU solve
         per energy point.
         """
-        d = self.eta / (np.pi * ((omega - eigvals) ** 2 + self.eta ** 2))
+        d = self.eta / (np.pi * ((omega - eigvals) ** 2 + self.eta**2))
         v = eigvecs * np.sqrt(d)[..., None, :]
         return np.matmul(v, np.conj(v).swapaxes(-1, -2))
 
@@ -272,9 +272,7 @@ class SusceptibilityCalculator_wang2012:
             f"of {total_device_mem / 1024**3:.1f} GB device memory"
         )
 
-        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
-            omega_limit, resolution
-        )
+        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(omega_limit, resolution)
 
         n_spectra_total = 2 * n_eps
 
@@ -306,9 +304,7 @@ class SusceptibilityCalculator_wang2012:
 
             # Apply the initial-state orbital projection (bug M6 fix),
             # mirroring the CPU path: einsum("ac,ijcb->ijab", minit, A).
-            spectra_occ_2d = self.xp.einsum(
-                "ac,ijcb->ijab", minit_gpu, spectra_occ_2d
-            )
+            spectra_occ_2d = self.xp.einsum("ac,ijcb->ijab", minit_gpu, spectra_occ_2d)
             # Bug M9 fix: reverse the occupied spectrum in k (k -> -k,
             # periodic) so the FFT below evaluates the Lindhard correlation
             # sum_k Tr[B(k) C(k+q)] instead of the convolution
@@ -402,9 +398,7 @@ class SusceptibilityCalculator_wang2012:
         nw = self.num_wann
         nk = self.nk
 
-        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(
-            omega_limit, resolution
-        )
+        n_eps, eps_occ, eps_unocc, d_eps = self._energy_grid(omega_limit, resolution)
 
         # Periodic index reversal i -> (-i) mod nk, used to turn the FFT
         # convolution into the Lindhard correlation (bug M9 fix).

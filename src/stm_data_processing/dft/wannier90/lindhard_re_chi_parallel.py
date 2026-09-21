@@ -425,7 +425,10 @@ def _write_shard(
 
     tmp_npz = npz_path.with_name(npz_path.name + ".tmp")
     with tmp_npz.open("wb") as handle:
-        np.savez(handle, **{key: np.asarray(arrays[key], dtype=np.float64) for key in _ARRAY_KEYS})
+        np.savez(
+            handle,
+            **{key: np.asarray(arrays[key], dtype=np.float64) for key in _ARRAY_KEYS},
+        )
     tmp_npz.replace(npz_path)
 
     tmp_json = json_path.with_name(json_path.name + ".tmp")
@@ -456,7 +459,9 @@ def _load_shard(ckpt_dir: Path, row_range: tuple[int, int]) -> dict[str, Any] | 
         return None
     try:
         with np.load(npz_path) as data:
-            arrays = {key: np.asarray(data[key], dtype=np.float64) for key in _ARRAY_KEYS}
+            arrays = {
+                key: np.asarray(data[key], dtype=np.float64) for key in _ARRAY_KEYS
+            }
         meta = json.loads(json_path.read_text(encoding="utf-8"))
     except Exception as exc:  # every read failure means the shard is broken
         logger.warning(
@@ -648,12 +653,16 @@ def _worker(
             "band_block": calc_kwargs.get("band_block"),
             "block_entries": calc_kwargs.get("block_entries"),
         }
-        calculator = RealLindhardCalculator(hamiltonian, nk=nk, eta=eta, **engine_kwargs)
+        calculator = RealLindhardCalculator(
+            hamiltonian, nk=nk, eta=eta, **engine_kwargs
+        )
         result = calculator.calculate(
             chemical_potential=float(calc_kwargs.get("chemical_potential", 0.0)),
             temperature=float(calc_kwargs.get("temperature", 4.2)),
             orbital_select=calc_kwargs.get("orbital_select"),
-            include_matrix_elements=bool(calc_kwargs.get("include_matrix_elements", True)),
+            include_matrix_elements=bool(
+                calc_kwargs.get("include_matrix_elements", True)
+            ),
             degeneracy_tolerance=float(calc_kwargs.get("degeneracy_tolerance", 1e-12)),
             q_index_range=(start, stop),
             progress_interval_s=float(calc_kwargs.get("progress_interval_s", 0.0)),
@@ -671,8 +680,12 @@ def _worker(
             "orbital_select": result["metadata"]["orbital_select"].tolist(),
             "chemical_potential": float(calc_kwargs.get("chemical_potential", 0.0)),
             "temperature": float(calc_kwargs.get("temperature", 4.2)),
-            "include_matrix_elements": bool(calc_kwargs.get("include_matrix_elements", True)),
-            "degeneracy_tolerance": float(calc_kwargs.get("degeneracy_tolerance", 1e-12)),
+            "include_matrix_elements": bool(
+                calc_kwargs.get("include_matrix_elements", True)
+            ),
+            "degeneracy_tolerance": float(
+                calc_kwargs.get("degeneracy_tolerance", 1e-12)
+            ),
             "mirror": bool(calc_kwargs.get("mirror", False)),
             "bvecs": None if bvecs is None else np.asarray(bvecs, dtype=float).tolist(),
             "sha256": {key: _array_sha256(arrays[key]) for key in _ARRAY_KEYS},
@@ -790,9 +803,7 @@ def assemble_slices(
     if nk < 1:
         raise ValueError(f"nk must be positive, got {nk}")
     if len(slices) != len(blocks):
-        raise ValueError(
-            f"got {len(slices)} slices but {len(blocks)} blocks"
-        )
+        raise ValueError(f"got {len(slices)} slices but {len(blocks)} blocks")
 
     _, covered = _validate_row_slices(slices, nk)
     if mirror:
@@ -1234,14 +1245,18 @@ def run_parallel(
         "temperature": float(temperature),
         "include_matrix_elements": bool(include_matrix_elements),
         "degeneracy_tolerance": float(degeneracy_tolerance),
-        "orbital_select": None if orbital_select is None else [int(o) for o in orbital_select],
+        "orbital_select": None
+        if orbital_select is None
+        else [int(o) for o in orbital_select],
         # Model identity: a shard computed for another model must never be
         # reused, and the worker metadata already carries both numbers.
         "num_wann": model_num_wann,
         "bvecs": model_bvecs,
     }
 
-    estimate_n_orb = estimate_num_wann if orbital_select is None else len(orbital_select)
+    estimate_n_orb = (
+        estimate_num_wann if orbital_select is None else len(orbital_select)
+    )
     per_worker = estimate_worker_rss_bytes(
         nk, estimate_num_wann, estimate_n_orb, estimate_nrpts
     )
@@ -1293,7 +1308,9 @@ def run_parallel(
         for row_range in slices:
             if resume:
                 stored = _load_shard(ckpt_dir, row_range)
-                if stored is not None and _shard_is_compatible(stored["meta"], signature):
+                if stored is not None and _shard_is_compatible(
+                    stored["meta"], signature
+                ):
                     logger.info(
                         "[LindhardParallel] resume: rows=[%d, %d) already complete",
                         row_range[0],
@@ -1335,7 +1352,9 @@ def run_parallel(
             "block_entries": block_entries,
             "chemical_potential": float(chemical_potential),
             "temperature": float(temperature),
-            "orbital_select": None if orbital_select is None else [int(o) for o in orbital_select],
+            "orbital_select": None
+            if orbital_select is None
+            else [int(o) for o in orbital_select],
             "include_matrix_elements": bool(include_matrix_elements),
             "degeneracy_tolerance": float(degeneracy_tolerance),
             "mirror": bool(mirror),
@@ -1459,7 +1478,10 @@ def run_parallel(
                         _tail(log_path),
                     )
                     error_report = reports.get(index)
-                    if error_report is not None and error_report.get("status") == "error":
+                    if (
+                        error_report is not None
+                        and error_report.get("status") == "error"
+                    ):
                         logger.error(
                             "[LindhardParallel] worker=%d traceback:\n%s",
                             index,
@@ -1529,7 +1551,10 @@ def run_parallel(
                     if stored is None:
                         continue
                     for key in _ARRAY_KEYS:
-                        if _array_sha256(stored["arrays"][key]) != report["sha256"][key]:
+                        if (
+                            _array_sha256(stored["arrays"][key])
+                            != report["sha256"][key]
+                        ):
                             logger.error(
                                 "[LindhardParallel] worker=%d digest mismatch for "
                                 "'%s' rows=[%d, %d): the checkpoint no longer "
@@ -1545,7 +1570,11 @@ def run_parallel(
                 # fully resumed run (no worker dispatched) still writes the
                 # complete attribute set.
                 stored_bvecs = metas[0].get("bvecs")
-                bvecs = None if stored_bvecs is None else np.asarray(stored_bvecs, dtype=float)
+                bvecs = (
+                    None
+                    if stored_bvecs is None
+                    else np.asarray(stored_bvecs, dtype=float)
+                )
                 num_wann = int(metas[0]["num_wann"])
 
                 # The primitive-BZ map is assembled first: it is what the worker
@@ -1598,7 +1627,9 @@ def run_parallel(
                         write_result_h5(
                             primitive,
                             output_path,
-                            bvecs=None if bvecs is None else np.asarray(bvecs, dtype=float),
+                            bvecs=None
+                            if bvecs is None
+                            else np.asarray(bvecs, dtype=float),
                             eta=float(eta),
                             nq=nk,
                             chemical_potential=float(chemical_potential),
@@ -1621,9 +1652,7 @@ def run_parallel(
                         Path(output_path).stat().st_size / 1024**2,
                     )
 
-                digest = _digest_arrays(
-                    {key: result[key] for key in _ARRAY_KEYS}
-                )
+                digest = _digest_arrays({key: result[key] for key in _ARRAY_KEYS})
                 logger.info(
                     "[LindhardParallel] summary rows=%d pixels=%d workers=%d "
                     "mirror=%s total_s=%.3f rss_peak=%s "
@@ -1637,7 +1666,8 @@ def run_parallel(
                     float(
                         np.max(
                             np.abs(
-                                result["data"] - (result["intraband"] + result["interband"])
+                                result["data"]
+                                - (result["intraband"] + result["interband"])
                             )
                         )
                     ),
@@ -1739,7 +1769,9 @@ def _terminate_all(processes: Mapping[int, Any]) -> None:
 
 def _remove_tree(path: Path) -> None:
     try:
-        for child in sorted(path.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        for child in sorted(
+            path.rglob("*"), key=lambda item: len(item.parts), reverse=True
+        ):
             if child.is_dir():
                 child.rmdir()
             else:

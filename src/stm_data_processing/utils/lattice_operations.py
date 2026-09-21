@@ -152,9 +152,7 @@ class LatticeOperations:
                 # [-0.5, 0.5). The tolerance only guards numerical noise slightly
                 # below -0.5, so points near the upper edge [0.5-tol, 0.5) are no
                 # longer silently dropped (mirroring the -0.5 side).
-                if not (
-                    -0.5 - tol <= u_f < 0.5 and -0.5 - tol <= v_f < 0.5
-                ):
+                if not (-0.5 - tol <= u_f < 0.5 and -0.5 - tol <= v_f < 0.5):
                     continue
 
                 g_fold = np.array([u_f, v_f], dtype=float) @ b

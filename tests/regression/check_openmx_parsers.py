@@ -181,17 +181,16 @@ def check_band_spin1() -> None:
     mu_au = -0.246697
     data = parse_dft_band_data(fname_band=str(FIXTURE_ROOT / "bands" / "spin1.Band"))
     assert data["nspin"] == 1
-    assert data["bands"].shape == (2, 2), f"expected (nk=2, nband=2), got {data['bands'].shape}"
+    assert data["bands"].shape == (2, 2), (
+        f"expected (nk=2, nband=2), got {data['bands'].shape}"
+    )
     assert data["kpts_frac"].shape == (2, 3)
     assert data["kpts_cart"].shape == (2, 3)
     assert np.isclose(data["bands"][0, 0], (-0.5 - mu_au) * h2ev)
     assert np.isclose(data["fermi_energy"], mu_au * h2ev)
     assert len(data["dist"]) == 2
     assert len(data["tick_pos"]) == len(data["tick_label"]) == 2
-    print(
-        "  [M17-spin1] bands (2, 2), kpts_frac (2, 3), nspin=1 "
-        "(backward-compatible)"
-    )
+    print("  [M17-spin1] bands (2, 2), kpts_frac (2, 3), nspin=1 (backward-compatible)")
 
 
 def check_band_spin2() -> None:
@@ -221,9 +220,7 @@ def check_band_spin2() -> None:
 def check_ang_positions() -> None:
     """(M18) Unit Ang coordinates are converted via positions_ang @ inv(avecs)."""
     mx = OpenMX()
-    result = mx.read_atomic_positions(
-        str(FIXTURE_ROOT / "atoms" / "ang_positions.dat")
-    )
+    result = mx.read_atomic_positions(str(FIXTURE_ROOT / "atoms" / "ang_positions.dat"))
     avecs = np.array([[3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 6.0]])
     ang = np.array([[0.5, 1.0, 1.5]])
     expected_frac = ang @ np.linalg.inv(avecs)
