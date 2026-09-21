@@ -8,6 +8,8 @@ import numpy as np
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.utils.miscellaneous import frac_to_real_2d
 
+from .h5_convention import create_dataset, write_file_metadata
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,31 +132,25 @@ class EK2DIO:
         seedname = mlwf_hamiltonian.seedname
 
         with h5py.File(filename, "w") as f:
-            f.create_dataset(
-                "energies", data=energies, compression="gzip", compression_opts=4
-            )
-            f.create_dataset(
-                "k1_grid", data=k1_grid, compression="gzip", compression_opts=4
-            )
-            f.create_dataset(
-                "k2_grid", data=k2_grid, compression="gzip", compression_opts=4
-            )
+            create_dataset(f, "energies", energies, units="eV")
+            create_dataset(f, "k1_grid", k1_grid, units="reciprocal lattice units")
+            create_dataset(f, "k2_grid", k2_grid, units="reciprocal lattice units")
 
             if bvecs is not None:
-                f.create_dataset("bvecs", data=bvecs)
+                create_dataset(f, "bvecs", bvecs, units="1/angstrom")
 
-            f.attrs["num_wann"] = num_wann
-            f.attrs["nk"] = nk
-            f.attrs["total_points"] = total_points
-            f.attrs["units_energy"] = "eV"
-            f.attrs["units_k_frac"] = "reciprocal lattice units"
-            f.attrs["creation_date"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            f.attrs["generator"] = "EK2DCalculator"
-
-            if folder is not None:
-                f.attrs["folder"] = str(Path(folder).resolve())
-            if seedname is not None:
-                f.attrs["seedname"] = seedname
+            write_file_metadata(
+                f,
+                generator="EK2DCalculator",
+                units={"energy": "eV", "k_frac": "reciprocal lattice units"},
+                extra={
+                    "num_wann": num_wann,
+                    "nk": nk,
+                    "total_points": total_points,
+                    "folder": None if folder is None else str(Path(folder).resolve()),
+                    "seedname": seedname,
+                },
+            )
 
         elapsed_time = time.time() - start_time
         logger.info("Band structure data saved to %s", filename)

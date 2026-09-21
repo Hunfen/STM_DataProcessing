@@ -58,6 +58,10 @@ from stm_data_processing.dft.wannier90.lindhard_re_chi import (
     peak_rss_bytes,
 )
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
+from stm_data_processing.io.h5_convention import (
+    CREATION_DATE_ATTR,
+    read_creation_date,
+)
 from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
 from stm_data_processing.io.w90hr_loader import Wannier90HRLoader
 from stm_data_processing.utils.miscellaneous import extend_qpi, frac_to_real_2d
@@ -940,6 +944,13 @@ def write_result_h5(
         "chemical_potential": chemical_potential,
         "temperature": temperature,
     }
+    # The product is assembled under a temporary name, so the creation date of
+    # the file being replaced has to be carried over explicitly: an atomic
+    # rewrite that changes no data must stay byte-identical (the resume/repair
+    # checks rely on it), and a fresh timestamp would break that.
+    previous_creation_date = read_creation_date(target)
+    if previous_creation_date is not None:
+        extra[CREATION_DATE_ATTR] = previous_creation_date
     if orbital_select is not None:
         extra["orbital_select"] = np.asarray(orbital_select, dtype=int)
     if projection is not None:

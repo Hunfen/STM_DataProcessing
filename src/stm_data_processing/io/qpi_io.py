@@ -5,6 +5,12 @@ import h5py
 import numpy as np
 
 from ..utils.miscellaneous import extend_qpi, frac_to_real_2d
+from .h5_convention import (
+    COMPRESSION,
+    COMPRESSION_OPTS,
+    create_dataset,
+    write_file_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +27,8 @@ def save_qpi_to_h5(
     V: np.ndarray | None = None,
     mask: np.ndarray | None = None,
     bands: str | list[int] | None = None,
-    compression: str = "gzip",
-    compression_opts: int = 6,
+    compression: str = COMPRESSION,
+    compression_opts: int = COMPRESSION_OPTS,
     **metadata_kwargs,
 ) -> None:
     """Save QPI results to an HDF5 file.
@@ -53,26 +59,33 @@ def save_qpi_to_h5(
     bands : str, list of int, or None, optional
         Band indices. Saved as an attribute if not None.
     compression : str, optional
-        Compression algorithm. Default is 'gzip'.
+        Compression algorithm. Default is the package convention (``gzip``).
     compression_opts : int, optional
-        Compression level (0~9). Default is 6.
+        Compression level (0~9). Default is the package convention (4).
     **metadata_kwargs
         Additional metadata to save as attributes.
     """
     with h5py.File(output_path, "w") as f:
         logger.info("Saving QPI results to: %s", output_path)
 
-        f.create_dataset(
+        create_dataset(
+            f,
             "qpi_layers",
-            data=qpi_layers,
+            qpi_layers,
             compression=compression,
             compression_opts=compression_opts,
         )
 
-        f.attrs["module_type"] = module_type
-        f.attrs["eta"] = eta
-        f.attrs["normalize"] = normalize
-        f.attrs["nq"] = nq
+        write_file_metadata(
+            f,
+            extra={
+                "module_type": module_type,
+                "eta": eta,
+                "normalize": normalize,
+                "nq": nq,
+            },
+        )
+
         f.attrs["energy_range"] = (
             energy_range if np.isscalar(energy_range) else np.array(energy_range)
         )
@@ -84,13 +97,13 @@ def save_qpi_to_h5(
                 else np.array(bands, dtype=int)
             )
         if bvecs is not None:
-            f.create_dataset("bvecs", data=bvecs)
+            create_dataset(f, "bvecs", bvecs, units="1/angstrom")
             logger.info("  Saved 'bvecs'.")
         if V is not None:
-            f.create_dataset("V", data=V)
+            create_dataset(f, "V", V, units="eV")
             logger.info("  Saved 'V'.")
         if mask is not None:
-            f.create_dataset("mask", data=mask)
+            create_dataset(f, "mask", mask)
             logger.info("  Saved 'mask'.")
 
         for key, value in metadata_kwargs.items():

@@ -28,6 +28,14 @@ import numpy as np
 
 from stm_data_processing.utils.miscellaneous import extend_qpi, frac_to_real_2d
 
+from .h5_convention import (
+    COMPRESSION,
+    COMPRESSION_OPTS,
+    create_dataset,
+    read_creation_date,
+    write_file_metadata,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,8 +48,8 @@ def save_susceptibility_to_h5(
     omega_limit: float | None = None,
     resolution: float | None = None,
     nq: int = 256,
-    compression: str = "gzip",
-    compression_opts: int = 6,
+    compression: str = COMPRESSION,
+    compression_opts: int = COMPRESSION_OPTS,
     **metadata_kwargs,
 ) -> None:
     """Save susceptibility results to an HDF5 file.
@@ -70,33 +78,50 @@ def save_susceptibility_to_h5(
     nq : int, optional
         Number of q-points in each dimension. Default is 256.
     compression : str, optional
-        Compression algorithm. Default is 'gzip'.
+        Compression algorithm. Default is the package convention (``gzip``).
     compression_opts : int, optional
-        Compression level (0~9). Default is 6.
+        Compression level (0~9). Default is the package convention (4).
     **metadata_kwargs
         Additional metadata to save as attributes.
     """
+    # Read the creation date of a product we are about to overwrite: an atomic
+    # rewrite that changes no data must keep the file byte-identical (the
+    # parallel driver's resume/repair path relies on it), so the original date
+    # is carried over instead of being re-stamped.  A caller may also inject it
+    # through ``**metadata_kwargs`` (``write_result_h5`` does, because it
+    # assembles under a temporary name); it has to reach
+    # :func:`write_file_metadata` rather than the metadata loop below, because
+    # writing the same attribute twice changes HDF5's attribute layout and with
+    # it the file bytes.
+    provided_creation_date = metadata_kwargs.pop("creation_date", None)
+    previous_creation_date = provided_creation_date or read_creation_date(output_path)
+
     with h5py.File(output_path, "w") as f:
         logger.info(f"Saving susceptibility results to: {output_path}")
 
-        f.create_dataset(
+        create_dataset(
+            f,
             "susceptibility",
-            data=susceptibility,
+            susceptibility,
+            units="1/eV",
             compression=compression,
             compression_opts=compression_opts,
         )
 
-        f.attrs["module_type"] = module_type
-        f.attrs["eta"] = eta
-        f.attrs["nq"] = nq
-
-        if omega_limit is not None:
-            f.attrs["omega_limit"] = omega_limit
-        if resolution is not None:
-            f.attrs["resolution"] = resolution
+        write_file_metadata(
+            f,
+            creation_date=previous_creation_date,
+            extra={
+                "module_type": module_type,
+                "eta": eta,
+                "nq": nq,
+                "omega_limit": omega_limit,
+                "resolution": resolution,
+            },
+        )
 
         if bvecs is not None:
-            f.create_dataset("bvecs", data=bvecs)
+            create_dataset(f, "bvecs", bvecs, units="1/angstrom")
             logger.info("  Saved 'bvecs'.")
 
         for key, value in metadata_kwargs.items():
