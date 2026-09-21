@@ -185,10 +185,10 @@ _MODULE_PATH = Path(merged_module.__file__).resolve()
 _PARALLEL_MODULE_PATH = Path(parallel_module.__file__).resolve()
 _WANNIER90_DIR = _MODULE_PATH.parent
 _PACKAGE_DIR = _WANNIER90_DIR.parents[1]
-_SCRIPTS_DIR = Path(__file__).resolve().parent
-_CLI_PATH = _SCRIPTS_DIR.parent / "run_lindhard_re_chi_parallel.py"
+_REGRESSION_DIR = Path(__file__).resolve().parent
+_CLI_PATH = _REGRESSION_DIR.parents[1] / "scripts" / "run_lindhard_re_chi_parallel.py"
 _PLOT_SCRIPT = (
-    _SCRIPTS_DIR.parents[1] / "tmp_verify/dl/serverpkg/scripts/plot_lindhard_rechi_cwf53.py"
+    _REGRESSION_DIR.parents[1] / "tmp_verify/dl/serverpkg/scripts/plot_lindhard_rechi_cwf53.py"
 )
 
 # Real Wannier models used by the wide-model smoke check.  The 75-orbital
@@ -203,8 +203,8 @@ _LESSORB_MODEL_DIR = Path(
 
 # The retired module/class names and the unused GPU-array library are
 # assembled at runtime on purpose: the merge's structural verification greps
-# package/ and scripts/ for those identifiers and must report zero hits, so
-# this checker cannot spell them out literally.
+# the package and tests/regression for those identifiers and must report
+# zero hits, so this checker cannot spell them out literally.
 _RETIRED_MODULE = "bare" + "_lindhard"
 _RETIRED_CLASS = "Bare" + "LindhardCalculator"
 _GPU_LIB = "cu" + "py"
@@ -1181,7 +1181,7 @@ def check_structure() -> None:
     assert signature.parameters["output_path"].default is None
 
     retired_file = _WANNIER90_DIR / (_RETIRED_MODULE + ".py")
-    retired_check = _SCRIPTS_DIR / ("check_" + _RETIRED_MODULE + ".py")
+    retired_check = _REGRESSION_DIR / ("check_" + _RETIRED_MODULE + ".py")
     assert not retired_file.exists(), f"{retired_file.name} still exists"
     assert not retired_check.exists(), f"{retired_check.name} still exists"
     try:
@@ -1194,7 +1194,7 @@ def check_structure() -> None:
         raise AssertionError("the retired module is still importable")
 
     offenders = []
-    for directory in (_PACKAGE_DIR, _SCRIPTS_DIR):
+    for directory in (_PACKAGE_DIR, _REGRESSION_DIR):
         for path in directory.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
@@ -1624,7 +1624,7 @@ def check_parallel_execution() -> None:
             ]
             return subprocess.run(
                 command,
-                cwd=str(_SCRIPTS_DIR.parents[1]),
+                cwd=str(_REGRESSION_DIR.parents[1]),
                 env=_pinned_env(),
                 capture_output=True,
                 text=True,
@@ -1713,7 +1713,7 @@ def check_parallel_execution() -> None:
                 "--mirror",
                 "--dry-run",
             ],
-            cwd=str(_SCRIPTS_DIR.parents[1]),
+            cwd=str(_REGRESSION_DIR.parents[1]),
             env=_pinned_env(),
             capture_output=True,
             text=True,
@@ -1910,7 +1910,7 @@ def check_real_model_parallel(nk: int = 32) -> None:
         )
         completed = subprocess.run(
             [sys.executable, "-c", code],
-            cwd=str(_SCRIPTS_DIR.parents[1]),
+            cwd=str(_REGRESSION_DIR.parents[1]),
             env=_pinned_env(),
             capture_output=True,
             text=True,
@@ -1956,7 +1956,7 @@ def check_real_model_parallel(nk: int = 32) -> None:
                 "--progress-interval",
                 "5",
             ],
-            cwd=str(_SCRIPTS_DIR.parents[1]),
+            cwd=str(_REGRESSION_DIR.parents[1]),
             env=_pinned_env(),
             capture_output=True,
             text=True,
@@ -2061,7 +2061,7 @@ def _run_parallel_cli(
     command += list(extra)
     return subprocess.run(
         command,
-        cwd=str(_SCRIPTS_DIR.parents[1]),
+        cwd=str(_REGRESSION_DIR.parents[1]),
         env=_pinned_env(),
         capture_output=True,
         text=True,
@@ -2415,7 +2415,7 @@ def check_estimate_upper_bound(nk_list: tuple[int, ...] = (8, 16, 32)) -> None:
             )
             completed = subprocess.run(
                 [sys.executable, "-c", code],
-                cwd=str(_SCRIPTS_DIR.parents[1]),
+                cwd=str(_REGRESSION_DIR.parents[1]),
                 env=_pinned_env(),
                 capture_output=True,
                 text=True,

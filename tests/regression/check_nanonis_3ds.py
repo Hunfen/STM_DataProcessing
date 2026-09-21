@@ -17,7 +17,7 @@ cases, that:
 
 Run from the repository root:
 
-    .venv/bin/python scripts/regression/check_nanonis_3ds.py
+    .venv/bin/python tests/regression/check_nanonis_3ds.py
 
 Exits with a non-zero status when any check fails. The real data files are
 only ever opened for reading.

@@ -20,7 +20,7 @@ as a distinguishable dark colour and the finite fraction is reported.
 
 Run from the repository root:
 
-    .venv/bin/python scripts/regression/check_3ds_real_data.py
+    .venv/bin/python tests/regression/check_3ds_real_data.py
 
 Exits with a non-zero status when any check fails. Real data is read-only.
 """

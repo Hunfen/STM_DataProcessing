@@ -5,7 +5,7 @@
 - 代码（模块化包）：`src/stm_data_processing/utils/bragg_peak/`（10 个模块，合计 1991 行）
 - 兼容入口：`src/stm_data_processing/utils/bragg_peak_detection.py`（29 行 shim，旧 import 不变）
 - 设计规格：[`design/bragg_peak_detection.md`](design/bragg_peak_detection.md)（含**矫正能力路线图 L1–L4**，§9）
-- 回归自检：`scripts/regression/check_bragg_peak_detection.py`（R1 合成真值 + R2 标准数据物理断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op，54/54 检查，约 100 s）
+- 回归自检：`tests/regression/check_bragg_peak_detection.py`（R1 合成真值 + R2 标准数据物理断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op，54/54 检查，约 100 s）
 - Skill（随仓库分发）：`skills/affine-correction/`（几何矫正）+ `skills/phase-analysis/`（双环相位分析），内部调用本包
 
 ---
@@ -210,13 +210,13 @@ print(correction.size_nm)               # 矫正后视场：换算 q_nm_inv 必�
 
 ```bash
 # 模块回归（R1 合成真值 + R2 标准数据断言 + R3 证据图 + R4 矫正/方向守卫/identity 真 no-op；54/54，约 100 s，预算 ≤150 s）
-.venv/bin/python scripts/regression/check_bragg_peak_detection.py
+.venv/bin/python tests/regression/check_bragg_peak_detection.py
 
 # 全部回归（9 套，必须全 exit 0）
-for f in scripts/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
+for f in tests/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
 
 # 代码规范（项目口径）
-.venv/bin/python -m ruff check src/stm_data_processing/utils/ scripts/regression/check_bragg_peak_detection.py
+.venv/bin/python -m ruff check src/stm_data_processing/utils/ tests/regression/check_bragg_peak_detection.py
 ```
 
 > 标准数据文件缺失时 R2/R3 打印 SKIP 并仍 exit 0，保证其他机器回归全绿。证据图与验证报告（`verification_report.md`、`review.md`）在 `tmp_verify/bragg_rewrite/`（已 gitignore，仅本地）。

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install "ruff>=0.15.1"
+      - name: Lint
+        run: ruff check .
+
+  core-import:
+    name: core import (no extras)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the package without extras
+        run: python -m pip install .
+      - name: Core package and submodules must import without extras
+        run: |
+          python -c "import stm_data_processing, stm_data_processing.stm.qpi_jdos, stm_data_processing.dft.wannier90.mlwf_hamiltonian, stm_data_processing.utils.lattice; print('core import OK')"
+
+  full-test:
+    name: full regression (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev and ppt extras
+        run: python -m pip install ".[dev,ppt]"
+      - name: Run the regression gate
+        run: pytest -q

@@ -20,7 +20,7 @@
 > 本报告 **19 个 Medium 级 bug（M1–M19）已全部处理完毕**（M15 经真实数据验证确认无需改变行为，仅做健壮性加固）。改动经 AgentTeams `stm-medium-bugfix`（3 名 `deepseek-v4-flash` 编码成员 + 1 名 `deepseek-v4-pro` 评审成员）执行：6 轮评审 + 2 轮 repair 复审全部 PASS，集成验收通过。
 >
 > - 涉及 12 个源文件：`nanonis_loader.py`、`bare_lindhard.py`、`mlwf_susceptibility.py`、`dos.py`、`band.py`、`parser.py`、`AutoPPt_winnew_modified.py`、`plot_funcs.py`、`qpi_tmat.py`、`monitor.py`、`config.py`、`lattice_loader.py`。
-> - 新增 8 个回归脚本（`scripts/regression/`），全部 exit 0：`check_nanonis_3ds.py`(8)、`check_nanonis_sxm.py`(6)、`check_3ds_real_data.py`(2)、`check_bare_lindhard.py`(6)、`check_mlwf_susceptibility.py`(4)、`check_openmx_parsers.py`(7)、`check_ppt_helpers.py`(8)、`check_core_misc.py`(7)。
+> - 新增 8 个回归脚本（`tests/regression/`），全部 exit 0：`check_nanonis_3ds.py`(8)、`check_nanonis_sxm.py`(6)、`check_3ds_real_data.py`(2)、`check_bare_lindhard.py`(6)、`check_mlwf_susceptibility.py`(4)、`check_openmx_parsers.py`(7)、`check_ppt_helpers.py`(8)、`check_core_misc.py`(7)。
 > - 集成验收：`ruff check src` 仍为 22 条既有 cosmetic 基线（全部在 `extract_k_type.py`）无新增；39 个模块导入冒烟 38 通过，唯一失败项为既有 L20（`AutoPPt_winnew_modified` 模块级 `input()`）。
 
 #### 评审抓出的两个回归（已闭环）
@@ -74,7 +74,7 @@
 
 > 本报告 **25 个 Low 级 bug（L1–L25）已全部处理完毕**，并顺带清零 `extract_k_type.py` 的 22 条 ruff cosmetic 基线（`ruff check src` 全树 **0 错误**）。改动经 AgentTeams `stm-low-risk-cleanup`（4 名 `deepseek-v4-flash` 编码成员 + 2 名 `deepseek-v4-pro` 评审成员 + 1 名集成成员）执行：10 个实现任务 + 10 轮独立评审**全部 PASS**（0 轮 needs_revision/reject），集成验收通过。
 >
-> - 涉及 18 个文件：`qpi_born.py`、`qpi_io.py`、`w90hr_loader.py`、`btk.py`、`miscellaneous.py`、`vortex_num.py`、`mlwf_susceptibility.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`lattice_operations.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`、`parser.py`、`dos.py`、`unfolding.py`、`extract_k_type.py`、`scripts/regression/check_nanonis_sxm.py`。
+> - 涉及 18 个文件：`qpi_born.py`、`qpi_io.py`、`w90hr_loader.py`、`btk.py`、`miscellaneous.py`、`vortex_num.py`、`mlwf_susceptibility.py`、`mlwf_ek2d.py`、`bare_lindhard.py`、`lattice_operations.py`、`AutoPPt_winnew_modified.py`、`nanonis_ppt_generator.py`、`diff_gcube.py`、`parser.py`、`dos.py`、`unfolding.py`、`extract_k_type.py`、`tests/regression/check_nanonis_sxm.py`。
 > - 剩余风险项同步处理：② `bare_lindhard` 奇数 nk 半格偏差已修复（q 网格改 `fftshift(fftfreq(nk))`，偶 nk 不变、奇 nk 修正）；④ M15 marker 回退路径补真实数据回归（6 个真实 `.sxm` 剥离标记副本，回退与 marker 路径逐元素一致）；⑤ `check_nanonis_sxm` 像素自检判据加固（`std > 阈值` 等鲁棒判据，去掉 afmhot 无中性灰假设）。
 > - 集成验收：8 套回归脚本全部 exit 0；`ruff check src` "All checks passed!"（22 条基线清零）；39/39 模块导入冒烟通过（含 qpi_tmat、pyfftw 回退、L20 `__main__` 守卫无阻塞）。
 > - **TmatQPI GPU 分支按用户要求本轮明确不做**（`qpi_tmat.py` 未改动，接口保留）。

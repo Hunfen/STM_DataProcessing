@@ -28,14 +28,14 @@ Installation
 
    # Install in development mode
    git clone https://github.com/Hunfen/STM_DataProcessing.git
-   cd STM
+   cd STM_DataProcessing
    pip install -e .
 
 Usage
 -----
 .. code-block:: python
 
-   from STM.nanonis_loader import NanonisFileLoader
+   from stm_data_processing.io.nanonis_loader import NanonisFileLoader
 
    # Load any supported file
    loader = NanonisFileLoader("data.sxm")
@@ -99,7 +99,7 @@ Module Structure
 ----------------
 ::
 
-   STM/
+   src/stm_data_processing/io/
    ├── nanonis_loader.py   # Core loader class (this module)
    └── ...                 # Other utilities (e.g., plotting) not part of core loader
 

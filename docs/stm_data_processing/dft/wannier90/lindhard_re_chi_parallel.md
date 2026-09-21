@@ -14,7 +14,7 @@
 | `src/stm_data_processing/dft/wannier90/lindhard_re_chi_parallel.py` | 并行 runner。`plan_row_slices` / `run_parallel` / `assemble_slices` / `assemble_from_checkpoints` / `scan_checkpoints` / `write_result_h5` / `configure_logging` / `estimate_worker_rss_bytes` / `available_memory_bytes` / `read_model_shape` / `model_identity` |
 | `scripts/run_lindhard_re_chi_parallel.py` | 通用命令行入口（**导入 NumPy 之前**把四个 BLAS 线程变量钉为 1） |
 | `scripts/server/run_lindhard_rechi_cwf53.py` | cwf53（C6LiC6，53 Wannier）服务器驱动薄封装，`--proj full|li` |
-| `scripts/regression/check_lindhard_re_chi.py` | 回归（a）–（u），含分片/拼图/镜像/并行/日志合约 |
+| `tests/regression/check_lindhard_re_chi.py` | 回归（a）–（u），含分片/拼图/镜像/并行/日志合约 |
 | `scripts/server/handover-addendum.md` | 服务器交付包的交接书增补（部署与运行纪律） |
 
 ## 2. 为什么是 q 行分片
@@ -216,7 +216,7 @@ nk=32 时效率偏低来自**不可分片的固定开销**：每个 worker 都�
 ## 12. 回归与验证证据
 
 ```bash
-.venv/bin/python scripts/regression/check_lindhard_re_chi.py    # (a)–(u)，全绿即通过
+.venv/bin/python tests/regression/check_lindhard_re_chi.py    # (a)–(u)，全绿即通过
 .venv/bin/ruff check src/stm_data_processing/dft/wannier90/lindhard_re_chi.py \
                     src/stm_data_processing/dft/wannier90/lindhard_re_chi_parallel.py \
                     scripts/run_lindhard_re_chi_parallel.py \

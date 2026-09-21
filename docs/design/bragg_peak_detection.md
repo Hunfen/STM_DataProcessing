@@ -26,7 +26,7 @@
 | `__init__.py` | 公开 API re-export | 29 |
 | **合计** | | **1991（≤2100）** |
 
-依赖方向无环：`models ← {preprocess, fft, detect, localize, lattice_fit}`；`rings → lattice_fit`；`lattice_fit, rings, detect, fft, localize → pipeline`；`pipeline → correct`。包内模块名用 `lattice_fit.py`（**不是** `lattice.py`——后者是 `utils/lattice.py` 的 3D 晶体学 `LATTICE` 类，与 Bragg 包无关，改名即为此避撞）。回归脚本 `scripts/regression/check_bragg_peak_detection.py` 842 行（≤900）。预算为第二轮修订值（新增矫正模块；包上限 2000→2100、回归脚本 800→900，均以留出健康余量）。
+依赖方向无环：`models ← {preprocess, fft, detect, localize, lattice_fit}`；`rings → lattice_fit`；`lattice_fit, rings, detect, fft, localize → pipeline`；`pipeline → correct`。包内模块名用 `lattice_fit.py`（**不是** `lattice.py`——后者是 `utils/lattice.py` 的 3D 晶体学 `LATTICE` 类，与 Bragg 包无关，改名即为此避撞）。回归脚本 `tests/regression/check_bragg_peak_detection.py` 842 行（≤900）。预算为第二轮修订值（新增矫正模块；包上限 2000→2100、回归脚本 800→900，均以留出健康余量）。
 
 ## 3. 全局约定（实现必须照抄）
 
@@ -90,7 +90,7 @@ z(r) = (|F(r)| − level(r)) / sigma(r)
 
 `CorrectionResult` 关键字段：`image`（矫正后图，NaN 填充）、`size_nm`（矫正后视场）、`n_out`/`n_px`、`affine_q`（拟合的对称拉伸 M）、`affine_image`（交给 `affine_transform` 的矩阵）、`offset`、`target_radius_px`/`measured_radius_px`/`residual_ratio`、`valid_fraction`、`fft2`、`meta`（`method`、`fallback`、`n_labelled`、M 的特征值、残差等）。
 
-## 6. 验收与回归（`scripts/regression/check_bragg_peak_detection.py`，54/54，exit 0）
+## 6. 验收与回归（`tests/regression/check_bragg_peak_detection.py`，54/54，exit 0）
 
 - **R1 合成真值**：六方 a=0.246 nm、n=512、L=30 nm、固定种子多壳层——一环召回 6/6、SNR≥30 峰 rms₂D ≤ 0.1 px、|b₁| 误差 ≤ 0.5%（实测 0.002 %）。**R1.7（R-6 加固后）**：12 个轴对齐取向 × 3 个噪声种子 = 36 例，每例都必须拟合出晶格并正确标号（实测 36/36、12/12 取向全绿，最差 |b₁| 0.014 %、成员残差 0.014 px）；把 round-1 旧 `ring_model` 猴补丁装回则 **10/12 取向失败、最差 |b₁| 误差 100 %**（环被错误标号）——该测试自此具备独立判别力。**R1.8**：跨 ±q 边界的对抗环——旧"钉死锚 + 固定标签序"配对 χ²=3.2e7 无标号，新旋转搜索 χ²=2.6e-24 三成员全标号 0.000 px 残差。
 - **R2 标准数据验收**（数据只读、md5 前后一致、文件缺失时优雅 SKIP）：两套标准图各断言——6 个一环峰（公共半径 r₁、RMS 与最大偏差 ≤2%、角距 60±4°）、r₁∈[0.93,1.07]·29.49 nm⁻¹、≥4 个更弱 Bragg 峰（|q|∈[1.2r₁, 3r₁]）、`fit_ok=True`、反演 a 与 0.246 nm 偏差 ≤±7 %、单图 ≤60 s。
@@ -100,9 +100,9 @@ z(r) = (|F(r)| − level(r)) / sigma(r)
 复现命令：
 
 ```bash
-.venv/bin/python scripts/regression/check_bragg_peak_detection.py   # 54/54，约 100 s（预算 ≤150 s）
-for f in scripts/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
-.venv/bin/python -m ruff check src/stm_data_processing/utils/ scripts/regression/check_bragg_peak_detection.py
+.venv/bin/python tests/regression/check_bragg_peak_detection.py   # 54/54，约 100 s（预算 ≤150 s）
+for f in tests/regression/check_*.py; do .venv/bin/python "$f" || exit 1; done
+.venv/bin/python -m ruff check src/stm_data_processing/utils/ tests/regression/check_bragg_peak_detection.py
 ```
 
 ## 7. 标准数据实测基线（t5 复审钉死修订版实测，默认调用、不调参）

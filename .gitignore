@@ -66,3 +66,6 @@ tmp_verify/
 
 # CodeGraph index
 .codegraph/
+
+# uv cache (workspace-local cache directory for sandboxed runs)
+.uv-cache/

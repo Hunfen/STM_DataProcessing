@@ -30,6 +30,23 @@ uv sync
 pip install -e .
 ```
 
+核心安装只含轻量科学计算依赖，重且按功能选装的依赖拆成 extras：
+
+| extra | 内容 | 何时需要 |
+| --- | --- | --- |
+| `analysis` | `pymc` / `pytensor` / `ramanspy` | 贝叶斯建模与 Raman 谱分析 |
+| `ppt` | `opencv-python` | PPT 自动报告与绘图助手（`utils/plot_funcs.py`、`utils/AutoPPt_winnew_modified.py` 在模块级 `import cv2`） |
+| `gpu` | `cupy-cuda13x` | CUDA GPU 后端 |
+| `dev` | `ruff` / `pytest` | 开发与回归门 |
+
+```bash
+uv sync --extra ppt --extra dev
+# 或
+pip install -e ".[ppt,dev]"
+```
+
+核心计算路径（`import stm_data_processing` 及其子模块）不需要任何 extra；只有用到 PPT/绘图助手时才需要 `ppt`。
+
 可选 GPU 后端（需 CUDA 环境）：
 
 ```bash
@@ -183,6 +200,21 @@ for peak in result.peaks[:3]:                    # 亚像素 q 与不确定度�
 
 ## 模块结构
 
+仓库顶层（`intercalation/` 已拆分到独立仓库，不再属于本仓库）：
+
+```
+STM_DataProcessing/
+├── src/stm_data_processing/   # 包本体（轻量核心，见下）
+├── tests/regression/          # 回归自检：9 个 check_*.py + pytest 入口
+├── scripts/                   # 运维/服务器脚本（run_lindhard_re_chi_parallel.py、server/）
+├── docs/                      # 接口文档、设计规格、使用指南
+├── app/                       # Tauri 桌面应用（latticeSIM）
+├── skills/                    # 自包含的 Agent 技能
+└── pyproject.toml             # 依赖分层与 pytest 配置
+```
+
+`src/stm_data_processing/` 内部：
+
 ```
 src/stm_data_processing/
 ├── config.py          # CPU/GPU 后端统一管理（BACKEND / get_xp / set_backend）
@@ -220,10 +252,22 @@ Bragg 峰检测模块另有两份专门文档：
 
 ## 开发
 
+回归门只有一条命令：`tests/regression/` 下的 9 个 `check_*.py` 由 `tests/regression/test_regression_suite.py` 逐个以子进程运行（`cwd` = 仓库根），任一脚本非 0 退出即整轮失败。
+
 ```bash
-uv sync --extra dev
-uv run ruff check .
+.venv/bin/python -m pytest -q      # 全量回归（约 4–5 分钟，脚本自身打印 PASS/FAIL 汇总）
+.venv/bin/python -m ruff check .   # 代码规范
 ```
+
+开发依赖（含 `pytest`）与按需 extras：
+
+```bash
+uv sync --extra dev --extra ppt
+# 或
+pip install -e ".[dev,ppt]"
+```
+
+PPT 自动报告与绘图助手（`utils/plot_funcs.py`、`utils/AutoPPt_winnew_modified.py`）需要 `ppt` extra（`opencv-python`）；核心计算路径不需要它。
 
 ## 许可证
 

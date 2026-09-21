@@ -1,7 +1,7 @@
 """Regression checks for the PPT helper bug fixes (M8, M9, M14, NaN handling).
 
 Run from the repository root:
-    .venv/bin/python scripts/regression/check_ppt_helpers.py
+    .venv/bin/python tests/regression/check_ppt_helpers.py
 
 Covers:
   (a) subtractMeanPlane fitting correctness on a non-square 10x20 matrix;

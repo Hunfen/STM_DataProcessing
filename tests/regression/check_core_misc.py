@@ -1,7 +1,7 @@
 """Regression checks for core/misc bug fixes (M1, M10, M11, M12, M13).
 
 Run from the repository root:
-    .venv/bin/python scripts/regression/check_core_misc.py
+    .venv/bin/python tests/regression/check_core_misc.py
 
 Covers:
   - TmatQPI: minimal mock MLWFHamiltonian instantiation and CPU call
