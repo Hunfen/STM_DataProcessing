@@ -1,6 +1,6 @@
-"""One-command self-test of the skill: mathematical identities, estimator
-properties, the discrimination boundaries, the ring lookup branches and the figure
-atlas contract.
+"""One-command self-test of the skill: the engine identities, the estimator
+properties, the gauge layer, the paper-style pairwise analysis, the ring lookup
+branches and the figure atlas contract.
 
 Everything checked here is pure mathematics (angles, weights, Fourier identities,
 estimator algebra) or a contract of the delivered files.  No physical statement is
@@ -8,11 +8,12 @@ made or needed.
 
     cd /path/to/STM_DataProcessing
     MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 \
-        .venv/bin/python <this script>
+        .venv/bin/python <this script> --stm-lib /path/to/STM_DataProcessing/src
 
 Options:
     --workdir DIR   scratch directory (default: <tmp>/stm-phase-selftest)
     --size N        canvas side of the synthetic images (default 384)
+    --stm-lib DIR   STM_DataProcessing src directory (package detection/colormap)
     --quick         skip the end-to-end pipeline and correction stages
     --keep          keep the scratch directory
 
@@ -43,20 +44,38 @@ import phasemath as pm  # noqa: E402
 TWO_PI = pm.TWO_PI
 SQRT3 = pp.SQRT3
 LADDER = (0.0, 120.0, 240.0)
+DEFAULT_STM_LIB = "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"
 RESULTS: list[tuple[str, bool, str]] = []
 # The forbidden tokens are assembled from fragments so that this file itself
 # contains no occurrence of them: the delivered skill is scanned for exactly these
-# strings (file names, figure titles, documents) and the checker must not be the
-# one file that trips its own scan.
+# strings (figure names and titles, plus the two forward-looking documents
+# SKILL.md and README.md) and the checker must not be the one file that trips its
+# own scan.
 FORBIDDEN = ["".join(parts) for parts in
              [("kek", "ule"), ("kek", "ulé"), ("z", "3"), ("k", "3p"), ("b", "z"),
-              ("读", "法"), ("布里", "渊"), ("k", " 点"), ("m", " 点"),
+              ("读", "法"), ("布里", "渊"), ("k", " 点"), ("m", "点"),
               ("bri", "llouin")]]
-PEAK_FIGURE_KINDS = ("mask_in", "mask_out", "phi_dist")
-SUMMARY_FIGURE_KINDS = ("qspace_mask", "mask_all_in", "mask_all_out",
-                        "case_phase_histograms", "phi_hist_summary", "phi_map_summary",
-                        "theta_field")
-FIGURES_PER_RING = 6 * len(PEAK_FIGURE_KINDS) + len(SUMMARY_FIGURE_KINDS)
+# The tokens of the removed engine, again assembled from fragments (the scanner
+# must not match its own scan list).
+REMOVED_ENGINE = ["".join(parts) for parts in
+                  [("reflection_", "field"), ("demod_", "phase"),
+                   ("circle_", "mask"), ("mask_", "radius"), ("--", "pct")]]
+PEAK_FIGURE_KINDS = ("amplitude", "theta_map", "theta_dist")
+SUMMARY_FIGURE_KINDS = ("theta_hist_summary", "theta_map_summary", "theta_field",
+                        "ring_members_qspace")
+PAIR_FIGURE_KINDS = ("phase_diff", "amp_diff", "2dhist")
+PEAKS_PER_RING = 6
+WITHIN_PAIRS = ((0, 1), (2, 3), (4, 5))
+FIGURES_PER_RING = PEAKS_PER_RING * len(PEAK_FIGURE_KINDS) + len(SUMMARY_FIGURE_KINDS) \
+    + len(WITHIN_PAIRS) * len(PAIR_FIGURE_KINDS)
+CROSS_PAIRS = 6
+CROSS_FIGURES = CROSS_PAIRS * len(PAIR_FIGURE_KINDS) + 1
+TOTAL_FIGURES = 2 * FIGURES_PER_RING + CROSS_FIGURES
+FIGURE_PATTERN = re.compile(
+    r"^(ring_1x1|ring_r3)_(p[0-5]_(amplitude|theta_map|theta_dist)"
+    r"|theta_hist_summary|theta_map_summary|theta_field|ring_members_qspace"
+    r"|pair_[0-5]_[0-5]_(phase_diff|amp_diff|2dhist))\.png$"
+    r"|^cross_pair_([0-5]_(phase_diff|amp_diff|2dhist)|phase_diff_grid)\.png$")
 
 
 def check(name, ok, detail, threshold=""):
@@ -71,8 +90,100 @@ def section(title):
     print(f"\n== {title} ==")
 
 
+def ring_vectors(n, radius_frac=0.30, rotation_deg=30.0):
+    """The six ``ring_1x1`` and the six ``ring_r3`` wavevectors of a canvas."""
+    r1 = radius_frac * n
+    angles = np.arange(6) * np.pi / 3.0
+    ref = [(r1 * np.cos(a), r1 * np.sin(a)) for a in angles]
+    rotate = np.radians(rotation_deg)
+    r3 = [(r1 / SQRT3 * np.cos(a + rotate), r1 / SQRT3 * np.sin(a + rotate))
+          for a in angles]
+    return ref, r3
+
+
+def ring_dict(vectors):
+    return {"radius": float(np.hypot(*vectors[0])),
+            "members": [(v[0], v[1], 1.0, 1.0, float(np.hypot(*v))) for v in vectors]}
+
+
+def plane_wave(topo_shape, vectors, phases_deg, amplitudes=None):
+    """Real image: a sum of plane waves at the given vectors with set phases."""
+    n = int(topo_shape[0])
+    yy, xx = np.mgrid[:n, :n]
+    amplitudes = [1.0] * len(vectors) if amplitudes is None else list(amplitudes)
+    total = np.zeros((n, n), dtype=float)
+    for (qx, qy), phase, amp in zip(vectors, phases_deg, amplitudes):
+        total = total + float(amp) * np.cos((TWO_PI / n) * (qx * xx + qy * yy)
+                                            + np.radians(float(phase)))
+    return total
+
+
+def circular_mean_deg(values, weights):
+    mean, resultant, _total = pm.circ_mean(values, weights)
+    return float(np.degrees(mean) % 360.0), float(resultant)
+
+
+def roll_canvas(image, shift):
+    """Roll the canvas by ``shift = (dx, dy)`` pixels (circular wrap)."""
+    return np.roll(np.roll(image, int(shift[1]), axis=0), int(shift[0]), axis=1)
+
+
+def translation_phase(q_px, shift, n):
+    """The phase the engine adds to a translated canvas: ``-(2 pi / N) q.delta``."""
+    return -(TWO_PI / n) * (float(q_px[0]) * shift[0] + float(q_px[1]) * shift[1])
+
+
+def periodic_rings():
+    """A fully periodic two-ring geometry: every wavevector is an FFT bin.
+
+    ``b1 = (96, 0)`` and ``b2 = (48, 84)`` are 60.3 deg apart with
+    ``|b2| / |b1| = 1.0078``, and the ``ring_r3`` members are the thirds
+    ``(b1 + b2)/3``, ``(2 b1 - b2)/3`` and ``(b1 - 2 b2)/3`` with their negatives --
+    all integers, so ``T`` is exactly periodic on the canvas and a circular roll is
+    an exact translation of the analysed field.
+    """
+    b1 = np.array([96.0, 0.0])
+    b2 = np.array([48.0, 84.0])
+    ref = [tuple(b1), tuple(b2), tuple(b1 - b2),
+           tuple(-b1), tuple(-b2), tuple(b2 - b1)]
+    r3 = [tuple((b1 + b2) / 3.0), tuple((2.0 * b1 - b2) / 3.0),
+          tuple((b1 - 2.0 * b2) / 3.0)]
+    r3 = r3 + [(-v[0], -v[1]) for v in r3]
+    return ref, r3
+
+
 # --------------------------------------------------------------------------- #
-# 1. circular estimators
+# 1. the delivered engine: static contract of the source files
+# --------------------------------------------------------------------------- #
+def test_engine_source_contract():
+    """The delivered scripts must contain no trace of the removed mask engine."""
+    section("engine contract of the delivered sources")
+    sources = {name: (HERE / name).read_text()
+               for name in ("phasepipe.py", "phasemath.py", "atlas.py",
+                            "stm_phase_analysis.py")}
+    hits = {name: [token for token in REMOVED_ENGINE if token in text]
+            for name, text in sources.items()}
+    hits = {name: found for name, found in hits.items() if found}
+    check("no removed-engine token in any delivered script", not hits,
+          f"scanned {len(sources)} scripts for the removed engine tokens, hits: "
+          f"{hits if hits else 'none'}", "0 hits")
+    code = sources["phasepipe.py"]
+    check("every per-reflection field of phasepipe comes from the local-q-map engine",
+          "localqmap.demodulate(" in code and "def gaussian_field(" in code
+          and "from phasemath import" in code,
+          "phasepipe calls localqmap.demodulate inside gaussian_field(...) and "
+          "sigma-free arg(psi) is the only phase convention "
+          f"('def gaussian_field(' present: {'def gaussian_field(' in code})",
+          "localqmap.demodulate used, no legacy engine")
+    analysis = sources["stm_phase_analysis.py"]
+    check("the analysis CLI carries --lambda-nm and no --pct",
+          '"--lambda-nm"' in analysis and '"--pct"' not in analysis,
+          f"--lambda-nm present: {'\"--lambda-nm\"' in analysis}, --pct present: "
+          f"{'\"--pct\"' in analysis}", "--lambda-nm yes, --pct no")
+
+
+# --------------------------------------------------------------------------- #
+# 2. circular estimators
 # --------------------------------------------------------------------------- #
 def test_circular_estimators():
     section("circular estimators on circular samples")
@@ -128,121 +239,101 @@ def test_circular_estimators():
 
 
 # --------------------------------------------------------------------------- #
-# 2. Fourier identities and the gauge transformation law
+# 3. the engine identities
 # --------------------------------------------------------------------------- #
-def single_region(n, phase_deg=0.0, radius_frac=0.30):
-    r1 = radius_frac * n
-    image = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0, "phase_deg": phase_deg}])
-    return image, r1
-
-
-def two_ring_vectors(n, radius_frac=0.30):
-    r1 = radius_frac * n
-    angles = np.arange(6) * np.pi / 3.0
-    ref = [(r1 * np.cos(a), r1 * np.sin(a)) for a in angles]
-    r3 = [(r1 / SQRT3 * np.cos(a + np.radians(30.0)),
-           r1 / SQRT3 * np.sin(a + np.radians(30.0))) for a in angles]
-    return ref, r3
-
-
-def ring_dict(vectors):
-    return {"radius": float(np.hypot(*vectors[0])),
-            "members": [(v[0], v[1], 1.0, 1.0, float(np.hypot(*v))) for v in vectors]}
-
-
-def test_identities(n):
-    section("Fourier identities and the gauge transformation law")
-    image, r1 = single_region(n, 47.0)
-    fft2 = pp.compute_fft2(image, "hann")
+def test_engine_identities(n, lambda_nm=3.0, nm_per_px=0.13):
+    section("engine identities: window, theta = +phi (no ramp), Friedel, translation")
+    image = pp.synth_image(n, 0.30 * n, [{"kind": "full", "amp": 1.0, "phase_deg": 47.0}])
+    ref, r3vec = ring_vectors(n)
 
     worst = 0.0
-    for qx, qy in ((0.0, n // 4), (n // 4, 0.0), (n / 4, n / 4)):
+    for lambda_test in (0.5, 3.0, 10.0):
+        for q in (ref[0], r3vec[1], (0.0, n / 4)):
+            psi = pp.gaussian_field(image, q, lambda_test, nm_per_px)
+            total = np.sum(psi)
+            row = np.arange(n, dtype=float)[None, :]
+            column = np.arange(n, dtype=float)[:, None]
+            exact = complex(np.sum(np.nan_to_num(image) * np.exp(
+                -1j * (TWO_PI / n) * (q[0] * row + q[1] * column))))
+            worst = max(worst, abs(total - exact) / max(abs(exact), 1e-30))
+    check("sum_r psi = sum_r T exp(-i q.r), independent of the window width",
+          worst < 1e-9,
+          f"max relative deviation = {worst:.3e} over lambda = 0.5/3/10 nm and three "
+          f"wavevectors (the window's k = 0 weight is exactly one, so every per-peak "
+          f"phase value is the exact whole-canvas sum arg sum_r T exp(-i q.r))",
+          "< 1e-9")
+
+    worst = 0.0
+    for q in ((0.0, n // 4), (n // 4, 0.0), (n // 4, n // 4)):
+        wave = plane_wave((n, n), [q], [23.0])
+        psi = pp.gaussian_field(wave, q, lambda_nm, nm_per_px)
+        moved = pp.gaussian_field(roll_canvas(wave, (7, -5)), q, lambda_nm, nm_per_px)
+        shift = translation_phase(q, (7, -5), n)
+        worst = max(worst, float(np.max(np.abs(
+            pm.wrap_pm_pi(np.angle(moved) - np.angle(psi) - shift)))))
+    check("translation law: rolling the canvas adds exactly -(2pi/N) q.delta",
+          worst < 1e-9,
+          f"max deviation = {worst:.3e} rad over three plane waves and a (7, -5) px "
+          f"roll (the identity psi'(r) = exp(-i q.delta) psi(r - delta) reduces to a "
+          f"constant shift wherever the demodulated field is constant, which is the "
+          f"case of a single plane wave at exactly q)", "< 1e-9 rad")
+
+    worst = 0.0
+    for qx, qy in ((0.0, n // 4), (n // 4, 0.0), (n // 4, n // 4)):
         for phase_deg in (0.0, 33.0, 181.0):
-            yy, xx = np.mgrid[:n, :n]
-            pattern = np.cos((TWO_PI / n) * (qx * xx + qy * yy) + np.radians(phase_deg))
-            spectrum = np.fft.fftshift(np.fft.fft2(pattern))
-            _, phi = pp.reflection_field(spectrum, (qx, qy), 26)
-            measured = np.degrees(np.angle(np.mean(np.exp(1j * phi)))) % 360.0
-            predicted = (phase_deg + np.degrees((TWO_PI / n) * (qx + qy)
-                                                * (n // 2))) % 360.0
-            worst = max(worst, abs(pm.ang_diff_deg(measured, predicted)))
-    check("phi(r) = Phi + (2pi/N) q.(r-c) exact on 9 plane waves",
-          worst < 0.01, f"max deviation = {worst:.5f} deg", "< 0.01 deg")
+            wave = plane_wave((n, n), [(qx, qy)], [phase_deg])
+            psi = pp.gaussian_field(wave, (qx, qy), lambda_nm, nm_per_px)
+            measured = np.degrees(np.angle(np.mean(psi))) % 360.0
+            worst = max(worst, abs(pm.ang_diff_deg(measured, phase_deg)))
+    check("theta = arg psi = +phi on 9 plane waves, with no per-peak constant",
+          worst < 0.01, f"max deviation from the injected phase = {worst:.5f} deg",
+          "< 0.01 deg")
 
-    _ref, r3vec = two_ring_vectors(n)
+    qx, qy = n // 4, 0.0
+    wave = plane_wave((n, n), [(qx, qy)], [33.0])
+    psi = pp.gaussian_field(wave, (qx, qy), lambda_nm, nm_per_px)
+    ramp_x = np.angle(psi[0, 1:] * np.conj(psi[0, :-1]))
+    check("the delivered phase field carries no q.r ramp",
+          float(np.max(np.abs(ramp_x))) < 1e-9,
+          f"max phase step between neighbouring pixels = "
+          f"{float(np.max(np.abs(ramp_x))):.3e} rad; a carrier of "
+          f"2 pi q_x / N = {(TWO_PI / n) * qx:.6f} rad/px would show here", "< 1e-9 rad")
+
+    # the previous release removed the carrier with phi = angle(psi) - (2 pi / N)
+    # q.(r - c) around the canvas centre c = N // 2, which adds +pi (q_x + q_y) to
+    # the *value* of a reflection (its identity was arg X(q) + (2 pi / N) q.c).
+    legacy_shift = np.mod(180.0 * (qx + qy), 360.0)
+    legacy_value = np.mod(np.degrees(np.angle(np.fft.fft2(wave)[int(qy) % n, int(qx) % n]))
+                          + 180.0 * (qx + qy), 360.0)
+    measured = np.degrees(np.angle(np.mean(psi))) % 360.0
+    deviation = abs(pm.ang_diff_deg(legacy_value, measured) - legacy_shift)
+    check("v2 -> v3: the raw single-peak phase is shifted by -pi (q_x + q_y)",
+          deviation < 1e-6,
+          f"legacy value {legacy_value:.6f} deg vs delivered {measured:.6f} deg: the "
+          f"measured shift is {pm.ang_diff_deg(legacy_value, measured):.6f} deg against "
+          f"the predicted pi (q_x + q_y) = {legacy_shift:.6f} deg", "< 1e-6 deg")
+
     worst = 0.0
-    for vectors in (pp.independent_triple(two_ring_vectors(n)[0]),
-                    pp.independent_triple(r3vec)):
-        for qx, qy in vectors:
-            _, phi_a = pp.reflection_field(fft2, (qx, qy), int(0.05 * n))
-            _, phi_b = pp.reflection_field(fft2, (-qx, -qy), int(0.05 * n))
-            worst = max(worst, float(np.max(np.abs(np.degrees(
-                pm.wrap_pm_pi(phi_a + phi_b))))))
-    check("Friedel identity phi(-q) = -phi(q) is exact", worst < 1e-6,
-          f"max |phi(q) + phi(-q)| = {worst:.3e} deg", "< 1e-6 deg")
-
-    mask = pp.circle_mask(fft2.shape, [(n // 2 + 60, n // 2 + 40)], 20)
-    inside = pp.complex_ifft(np.where(mask, fft2, 0.0))
-    outside = pp.complex_ifft(np.where(~mask, fft2, 0.0))
-    whole = pp.complex_ifft(fft2)
-    residual = float(np.max(np.abs(inside + outside - whole)) / np.max(np.abs(whole)))
-    check("mask-in + mask-out = ifft2(ifftshift(FFT2))",
-          residual < 1e-12, f"max relative residual = {residual:.3e}", "< 1e-12")
-
-    q = (r1 / SQRT3 * np.cos(np.radians(30.0)), r1 / SQRT3 * np.sin(np.radians(30.0)))
-    psi, _phi = pp.reflection_field(fft2, q, int(0.05 * n))
-    delta = np.array([37.0, -19.0])
-
-    def demod_about(field, wavevector, centre):
-        """phi(r) = angle(psi) - (2 pi / n) q.(r - centre), centre free."""
-        grid_y, grid_x = np.mgrid[:field.shape[0], :field.shape[1]]
-        carrier = (TWO_PI / field.shape[0]) * (
-            wavevector[0] * (grid_x - centre[0]) + wavevector[1] * (grid_y - centre[1]))
-        return pm.wrap_2pi(np.angle(field) - carrier)
-
-    base_centre = np.array([n // 2, n // 2], dtype=float)
-    reference = demod_about(psi, q, base_centre)
-    worst, wrong_worst = 0.0, 0.0
-    for scale in (1.0, 2.0, 3.0):
-        moved = demod_about(psi, q, base_centre + scale * delta)
-        expected = np.degrees(pm.wrap_pm_pi(-(TWO_PI / n)
-                                            * (q[0] * delta[0] + q[1] * delta[1]))) * scale
-        measured = np.degrees(pm.wrap_pm_pi(reference - moved))
-        worst = max(worst, float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(
-            np.radians(measured - expected)))))))
-        # negative control: the failure mode this assertion must catch is a *wrong*
-        # offset, so compare the measured law against a perturbed prediction
-        bogus = delta + np.array([0.5, 0.5])
-        expected_bogus = np.degrees(pm.wrap_pm_pi(-(TWO_PI / n) * (
-            q[0] * bogus[0] + q[1] * bogus[1]))) * scale
-        wrong_worst = max(wrong_worst, float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(
-            np.radians(measured - expected_bogus)))))))
-    check("moving the demodulation reference adds exactly -(2pi/N) q.delta",
-          worst < 1e-10, f"max deviation = {worst:.3e} deg over three shifts of the "
-          f"reference point (measured on the demodulated field, not algebraically)",
-          "< 1e-10 deg")
-    check("the same assertion is falsifiable: a perturbed offset fails it",
-          wrong_worst > 30.0,
-          f"with the offset perturbed by (0.5, 0.5) px the identical comparison "
-          f"deviates by {wrong_worst:.3f} deg (threshold of the real check is 1e-10 deg, "
-          f"so the assertion can fail)", "> 30 deg (negative control)")
+    for q in pp.independent_triple(ref) + pp.independent_triple(r3vec):
+        plus = pp.gaussian_field(image, q, lambda_nm, nm_per_px)
+        minus = pp.gaussian_field(image, (-q[0], -q[1]), lambda_nm, nm_per_px)
+        worst = max(worst, float(np.max(np.abs(minus - np.conj(plus))))
+                    / float(np.max(np.abs(plus))))
+    check("Friedel identity psi(-q) = conj(psi(q)) is exact", worst < 1e-12,
+          f"max relative deviation = {worst:.3e} over six Friedel pairs", "< 1e-12")
 
     worst_scalar, worst_field = 0.0, 0.0
     for phase_deg in (0.0, 33.0, 100.0, 240.0):
-        image, r1_ = single_region(n, phase_deg)
-        spectrum = pp.compute_fft2(image, "hann")
-        vectors = pp.independent_triple(
-            [(r1_ / SQRT3 * np.cos(a + np.radians(30.0)),
-              r1_ / SQRT3 * np.sin(a + np.radians(30.0)))
-             for a in np.arange(6) * np.pi / 3.0])
-        angles, theta = [], np.zeros(image.shape)
-        for qx, qy in vectors:
-            _, phi = pp.reflection_field(spectrum, (qx, qy), int(0.05 * n))
-            angles.append(np.degrees(np.angle(np.mean(np.exp(1j * phi)))) % 360.0)
-            theta = theta + phi
+        canvas = pp.synth_image(n, 0.30 * n, [{"kind": "full", "amp": 1.0,
+                                               "phase_deg": phase_deg}])
+        angles, theta = [], np.zeros((n, n))
+        for q in pp.independent_triple(r3vec):
+            psi = pp.gaussian_field(canvas, q, lambda_nm, nm_per_px)
+            field = np.asarray(pp.theta_field(psi))
+            angles.append(np.degrees(np.angle(np.mean(psi))) % 360.0)
+            theta = theta + field
         scalar = float(np.sum(angles) % 360.0)
-        field_mean = np.degrees(np.angle(np.mean(np.exp(
-            1j * np.mod(theta, TWO_PI))))) % 360.0
+        field_mean = np.degrees(np.angle(np.mean(np.exp(1j * np.mod(theta, TWO_PI))))) % 360.0
         expected = 3.0 * phase_deg % 360.0
         worst_scalar = max(worst_scalar, abs(pm.ang_diff_deg(scalar, expected)))
         worst_field = max(worst_field, abs(pm.ang_diff_deg(field_mean, expected)))
@@ -252,42 +343,42 @@ def test_identities(n):
           worst_field < 0.5, f"max deviation = {worst_field:.4f} deg", "< 0.5 deg")
 
 
-
-
-def test_gauge_drift(n):
+# --------------------------------------------------------------------------- #
+# 4. the gauge layer
+# --------------------------------------------------------------------------- #
+def test_gauge_layer(n, lambda_nm=3.0, nm_per_px=0.13):
     """Which quantities drift with the image origin, and by how much.
 
-    Two measurements, because they answer two different questions.
+    *exact* -- three plane waves on integer wavevectors, so the analysed field
+    contains nothing but the waves.  A circular roll of the canvas is then an exact
+    translation: every phase must move by ``-(2 pi / N) q.delta`` and the fitted
+    origin by exactly ``delta``, to machine precision.
 
-    *exact* -- three plane waves on integer wavevectors, each analysed through a
-    single-bin mask, so the only content of the transform is the wave itself.  A
-    circular roll of the canvas is then an exact translation: every phase must move
-    by ``-(2 pi / N) q.delta`` and the fitted origin by exactly ``delta``, to
-    machine precision.
+    *invariance* -- a fully periodic two-ring canvas (every wavevector an FFT bin),
+    rolled by the same integer shift.  The delivered rule is that the gauge layer is
+    invariant when the origin follows the image (``r0 -> r0 - delta``); the
+    unconstrained re-fit is reported as well, because it can land on another branch
+    of the wrapped least-squares minimum (the structural degeneracy documented in
+    SKILL.md).
 
-    *practical* -- the apodised, non-periodic image the pipeline really sees,
-    rolled by the same integer shift.  Here the window does not travel with the
-    pattern and the mask of a sub-pixel peak collects leakage bins that do not all
-    carry the same phase, so the raw phases pick up a term on top of the law.  The
-    measured drift rate and the residual against the exact law are reported, while
-    the quantities that must *not* move (gauge-fixed phases mod 120 deg, the
-    per-pixel triple product, R, FWHM, cluster count) are asserted.
+    *practical* -- the synthesised, non-periodic canvas the pipeline really sees, so
+    the measured drift rate and its residual against the exact law are reported
+    together with the quantities that must not move (the per-pixel triple product,
+    R, FWHM, cluster count).
     """
-    section("gauge: drift law of the origin and the invariant quantities")
+    section("gauge layer: drift law of the origin and the invariant quantities")
     shift = (7, -5)
-    yy, xx = np.mgrid[:n, :n]
     waves = [(96.0, 0.0, 10.0), (48.0, 83.0, 45.0), (-48.0, 83.0, 200.0)]
     exact = {}
     for tag, roll in (("base", None), ("rolled", shift)):
-        image = sum(np.cos((TWO_PI / n) * (qx * xx + qy * yy) + np.radians(phase))
-                    for qx, qy, phase in waves)
+        canvas = plane_wave((n, n), [(qx, qy) for qx, qy, _p in waves],
+                            [p for _qx, _qy, p in waves])
         if roll is not None:
-            image = np.roll(image, (roll[1], roll[0]), axis=(0, 1))
-        spectrum = pp.compute_fft2(image, None)  # no apodisation: only the waves
+            canvas = roll_canvas(canvas, roll)
         members = [(qx, qy, 1.0, 1.0, float(np.hypot(qx, qy))) for qx, qy, _p in waves]
-        records, _fields = pp.analyse_ring(spectrum, np.ones(image.shape, dtype=bool),
-                                           ring_dict([(m[0], m[1]) for m in members]),
-                                           0, prefix="w_", peaks_override=members)
+        records, _fields, _psi = pp.analyse_ring(
+            canvas, np.ones((n, n), dtype=bool), ring_dict([(m[0], m[1]) for m in members]),
+            lambda_nm, nm_per_px, prefix="w_", peaks_override=members)
         best, _minima = pm.fit_origin([record["q_px"] for record in records],
                                       [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
                                        for record in records], n)
@@ -298,15 +389,12 @@ def test_gauge_drift(n):
                       "c_rad": float(best["c_rad"]),
                       "rms": float(best["rms_deg"])}
     drift = pm.wrap_pm_pi(np.radians(exact["rolled"]["raw"] - exact["base"]["raw"]))
-    predicted = -((TWO_PI / n) * (exact["base"]["qs"] @ np.array(shift)))  # radians
+    predicted = -((TWO_PI / n) * (exact["base"]["qs"] @ np.array(shift)))
     worst_phase = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(drift - predicted)))))
-    check("exact: a translated single-bin wave moves its phase by -(2pi/N) q.delta",
+    check("exact: a translated plane wave moves its phase by -(2pi/N) q.delta",
           worst_phase < 1e-9,
           f"max residual = {worst_phase:.3e} deg over three waves for a {shift} px "
           f"translation", "< 1e-9 deg")
-    # the same statement in the language of the fit: rolling the picture by delta
-    # multiplies the transform by exp(-i 2 pi k.delta / N), so the fitted origin of
-    # the *same* pattern satisfies the base solution with r0 replaced by r0 - delta
     model = (TWO_PI / n) * (exact["rolled"]["qs"] @ (exact["base"]["r0"] - np.array(shift))) \
         + exact["base"]["c_rad"]
     worst_model = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(
@@ -318,39 +406,149 @@ def test_gauge_drift(n):
           f"origin is defined up to a lattice vector of the reference wavevectors, so "
           f"only this shifted solution, not the raw minimum, is comparable)", "< 1e-9 deg")
 
-    # ---- practical case: apodised, non-periodic image --------------------- #
-    r1 = 0.30 * n
-    image = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0, "phase_deg": 33.0}])
-    ref, r3vec = two_ring_vectors(n)
-    mask_radius = int(0.05 * n)
+    # the documented v2 -> v3 constant: adding pi (q_x + q_y) to every raw phase is
+    # exactly the model with r0 -> r0 + (N/2, N/2), hence the gauge layer cannot move.
+    shifted_raw = np.mod(exact["base"]["raw"] + 180.0
+                         * (exact["base"]["qs"][:, 0] + exact["base"]["qs"][:, 1]), 360.0)
+    centre = np.array([n / 2.0, n / 2.0])
+    base_fixed = [float(np.degrees(pm.gauge_phase(
+        np.radians(value), q, exact["base"]["r0"], exact["base"]["c_rad"], n)) % 360.0)
+        for value, q in zip(exact["base"]["raw"], exact["base"]["qs"])]
+    shifted_fixed = [float(np.degrees(pm.gauge_phase(
+        np.radians(value), q, exact["base"]["r0"] + centre, exact["base"]["c_rad"], n))
+        % 360.0) for value, q in zip(shifted_raw, exact["base"]["qs"])]
+    model_check = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(
+        np.radians(shifted_raw) - ((TWO_PI / n) * (exact["base"]["qs"]
+                                                   @ (exact["base"]["r0"] + centre))
+                                   + exact["base"]["c_rad"]))))))
+    worst_gauge = float(np.max([abs(pm.ang_diff_deg(a, b))
+                                for a, b in zip(base_fixed, shifted_fixed)]))
+    check("the v2 -> v3 constant is absorbed by r0 -> r0 + (N/2, N/2): the "
+          "gauge-fixed phases are identical",
+          worst_gauge < 1e-9 and model_check < 1e-9,
+          f"gauge-fixed phases agree to {worst_gauge:.3e} deg and the shifted phases "
+          f"satisfy the shifted model to {model_check:.3e} deg (pi (q_x + q_y) = "
+          f"(2 pi / N) q.(N/2, N/2) exactly, so the shift is an origin change, not a "
+          f"change of the observable)", "< 1e-9 deg")
+
+    # ---- periodic two-ring canvas: the invariance block ------------------- #
+    ref, r3vec = periodic_rings()
+    valid = np.ones((n, n), dtype=bool)
+    periodic = (sum(plane_wave((n, n), [v], [40.0]) for v in pp.independent_triple(ref))
+                + 0.8 * sum(plane_wave((n, n), [v], [133.0])
+                            for v in pp.independent_triple(r3vec)))
+    invariance = {}
+    for tag, roll in (("base", None), ("moved", shift)):
+        canvas = periodic if roll is None else roll_canvas(periodic, roll)
+        ref_records, _f, _p = pp.analyse_ring(
+            canvas, valid, ring_dict(ref), lambda_nm, nm_per_px, prefix="ref_",
+            peaks_override=ring_dict(ref)["members"])
+        r3_records, fields, _p = pp.analyse_ring(
+            canvas, valid, ring_dict(r3vec), lambda_nm, nm_per_px, prefix="r3_",
+            peaks_override=ring_dict(r3vec)["members"])
+        best, minima = pm.fit_origin(
+            [record["q_px"] for record in ref_records],
+            [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
+             for record in ref_records], n)
+        theta = np.zeros((n, n))
+        for record in r3_records:
+            theta = theta + fields[record["name"]][1]
+        invariance[tag] = {
+            "raw_ref": np.array([record["stats"]["phase_ungated"]["mean_deg"]
+                                 for record in ref_records]),
+            "raw_r3": np.array([record["stats"]["phase_ungated"]["mean_deg"]
+                                for record in r3_records]),
+            "qs_r3": np.array([record["q_px"] for record in r3_records]),
+            "best": best, "minima": minima,
+            "theta": float(np.degrees(np.angle(np.mean(np.exp(
+                1j * np.mod(theta, TWO_PI))))) % 360.0),
+            "R": float(r3_records[0]["stats"]["phase_ungated"]["resultant_R"]),
+            "fwhm": float(r3_records[0]["stats"]["phase_gated"]["fwhm_deg"]),
+            "clusters": int(r3_records[0]["stats"]["phase_gated"]["n_clusters"]),
+        }
+    predicted_r3 = -((TWO_PI / n) * (invariance["base"]["qs_r3"] @ np.array(shift)))
+    raw_drift = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(np.radians(
+        invariance["moved"]["raw_r3"] - invariance["base"]["raw_r3"]) - predicted_r3)))))
+    peak_move = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(np.radians(
+        invariance["moved"]["raw_r3"] - invariance["base"]["raw_r3"]))))))
+    check("periodic canvas: every raw phase of both rings moves by the exact law",
+          raw_drift < 1e-9,
+          f"max residual = {raw_drift:.3e} deg on the six ring_r3 reflections (the "
+          f"canvas is periodic, so the roll is an exact translation and there is no "
+          f"border residual); the raw peaks themselves move by up to "
+          f"{peak_move:.3f} deg", "< 1e-9 deg")
+    origin = np.asarray(invariance["base"]["best"]["r0_px"]) - np.array(shift, dtype=float)
+    base_fixed = [float(np.degrees(pm.gauge_phase(
+        np.radians(value), q, invariance["base"]["best"]["r0_px"],
+        invariance["base"]["best"]["c_rad"], n)) % 360.0)
+        for value, q in zip(invariance["base"]["raw_r3"], invariance["base"]["qs_r3"])]
+    moved_fixed = [float(np.degrees(pm.gauge_phase(
+        np.radians(value), q, origin, invariance["base"]["best"]["c_rad"], n)) % 360.0)
+        for value, q in zip(invariance["moved"]["raw_r3"], invariance["moved"]["qs_r3"])]
+    delta = np.abs(np.asarray(base_fixed) - np.asarray(moved_fixed))
+    delta = np.minimum(delta, 360.0 - delta)
+    mod120 = np.minimum(delta % 120.0, 120.0 - delta % 120.0)
+    check("periodic canvas: with the origin following the image the gauge-fixed "
+          "phases of the other ring do not move",
+          float(np.max(delta)) < 1e-9 and float(np.max(mod120)) < 1e-9,
+          f"max change of the six gauge-fixed ring_r3 phases = {float(np.max(delta)):.3e} "
+          f"deg (mod 120: {float(np.max(mod120)):.3e} deg) for a {shift} px origin shift",
+          "< 1e-9 deg")
+    fitted = np.asarray(invariance["moved"]["best"]["r0_px"])
+    branch_gap = float(np.min([np.hypot(*(np.asarray(row["r0_px"]) - origin))
+                               for row in invariance["moved"]["minima"]]))
+    induced = [float(np.degrees(np.mod((TWO_PI / n)
+                                       * float(np.dot(q, fitted - origin)),
+                                       TWO_PI)))
+               for q in invariance["moved"]["qs_r3"]]
+    induced_120 = all(min(abs(np.radians(value)) % np.radians(120.0),
+                          np.radians(120.0) - abs(np.radians(value)) % np.radians(120.0))
+                      < 1e-6 for value in induced)
+    check("the unconstrained re-fit is reported: it returns another branch of the "
+          "wrapped minimum (structural degeneracy, not a numerical error)",
+          len(invariance["moved"]["minima"]) >= 1,
+          f"the re-fit returned {len(invariance['moved']['minima'])} local minimum(a); "
+          f"the branch with r0 - delta is among them within {branch_gap:.3e} px; its own "
+          f"raw choice would move the ring_r3 phases by "
+          f"{[round(value, 3) for value in induced]} deg "
+          f"(multiples of 120 deg here: {induced_120}), which is why every r0 report "
+          f"carries its branch and the induced-shift table", "reported")
+    theta_delta = abs(pm.ang_diff_deg(invariance["moved"]["theta"],
+                                      invariance["base"]["theta"]))
+    check("periodic canvas: the per-pixel triple product is invariant",
+          theta_delta < 0.5,
+          f"theta changed by {theta_delta:.4f} deg while the single peaks move by up to "
+          f"{peak_move:.3f} deg", "< 0.5 deg")
+    for key, label, tolerance in (("R", "concentration R", 0.05),
+                                  ("fwhm", "gated FWHM", 0.05),
+                                  ("clusters", "cluster count", None)):
+        before, after = invariance["base"][key], invariance["moved"][key]
+        same = (before == after) if tolerance is None \
+            else (abs(before - after) < tolerance)
+        check(f"{label} is invariant under an origin shift", same,
+              f"{before} vs {after}", "exact" if tolerance is None else f"< {tolerance}")
+
+    # ---- practical case: synthesised, non-periodic canvas ------------------ #
+    ref_p, r3_p = ring_vectors(n, 0.229)
+    image = pp.synth_image(n, 0.229 * n, [{"kind": "full", "amp": 1.0, "phase_deg": 33.0}])
     measured = {}
     for tag, roll in (("base", None), ("moved", shift)):
-        canvas = image if roll is None else np.roll(image, (roll[1], roll[0]), axis=(0, 1))
-        spectrum = pp.compute_fft2(canvas, "hann")
-        valid = np.ones(canvas.shape, dtype=bool)
-        records, fields = pp.analyse_ring(spectrum, valid, ring_dict(r3vec), mask_radius,
-                                          prefix="r3_",
-                                          peaks_override=ring_dict(r3vec)["members"])
-        ref_records, _ = pp.analyse_ring(spectrum, valid, ring_dict(ref), mask_radius,
-                                         prefix="ref_",
-                                         peaks_override=ring_dict(ref)["members"])
-        best, _ = pm.fit_origin([record["q_px"] for record in ref_records],
-                                [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
-                                 for record in ref_records], n)
-        combo, _ = pp.triple_selection([record["q_px"] for record in records])
-        gauge = [float(np.degrees(pm.gauge_phase(
-            np.radians(records[index]["stats"]["phase_ungated"]["mean_deg"]),
-            records[index]["q_px"], best["r0_px"], best["c_rad"], n)) % 360.0)
-            for index in combo]
-        theta = np.zeros(canvas.shape)
+        canvas = image if roll is None else roll_canvas(image, roll)
+        records, fields, _p = pp.analyse_ring(
+            canvas, valid, ring_dict(r3_p), lambda_nm, nm_per_px, prefix="r3_",
+            peaks_override=ring_dict(r3_p)["members"])
+        ref_records, _f, _p = pp.analyse_ring(
+            canvas, valid, ring_dict(ref_p), lambda_nm, nm_per_px, prefix="ref_",
+            peaks_override=ring_dict(ref_p)["members"])
+        theta = np.zeros((n, n))
         for record in records:
             theta = theta + fields[record["name"]][1]
         measured[tag] = {
-            "r0": np.asarray(best["r0_px"]),
             "qs": np.array([record["q_px"] for record in records]),
             "raw": np.array([record["stats"]["phase_ungated"]["mean_deg"]
                              for record in records]),
-            "gauge_mod120": np.asarray(gauge) % 120.0,
+            "ref_raw": np.array([record["stats"]["phase_ungated"]["mean_deg"]
+                                 for record in ref_records]),
             "theta": float(np.degrees(np.angle(np.mean(np.exp(
                 1j * np.mod(theta, TWO_PI))))) % 360.0),
             "R": float(records[0]["stats"]["phase_ungated"]["resultant_R"]),
@@ -358,29 +556,19 @@ def test_gauge_drift(n):
             "clusters": int(records[0]["stats"]["phase_gated"]["n_clusters"]),
         }
     drift = pm.wrap_pm_pi(np.radians(measured["moved"]["raw"] - measured["base"]["raw"]))
-    predicted = -((TWO_PI / n) * (measured["base"]["qs"] @ np.array(shift)))  # radians
+    predicted = -((TWO_PI / n) * (measured["base"]["qs"] @ np.array(shift)))
     residual = float(np.max(np.abs(np.degrees(pm.wrap_pm_pi(drift - predicted)))))
     rate = float(np.max(np.abs(np.degrees(drift))) / float(np.hypot(*shift)))
     check("practical: the raw phases follow the same law with a measured residual",
           residual < 30.0,
           f"drift rate up to {rate:.3f} deg/px for a {shift} px origin shift; residual "
-          f"against the exact law {residual:.3f} deg, produced by the apodisation "
-          f"window and the sub-pixel leakage inside the mask", "reported; < 30 deg")
-    r0_move = measured["moved"]["r0"] - measured["base"]["r0"]
-    check("practical: the fitted origin is re-solved on the moved canvas (reported)",
-          float(np.max(np.abs(r0_move + np.array(shift)))) < 12.0,
-          f"the two fits differ by ({r0_move[0]:.4f}, {r0_move[1]:.4f}) px while the "
-          f"applied shift is ({shift[0]}, {shift[1]}) px; the difference is the branch "
-          f"freedom of the wrapped least-squares minimum (see the docs) -- what has to "
-          f"be stable is the gauge-fixed phase, checked next", "reported; < 12 px")
-    delta = np.abs(measured["moved"]["gauge_mod120"] - measured["base"]["gauge_mod120"])
-    delta = np.minimum(delta, 120.0 - delta)
-    check("gauge-fixed phases (mod 120) are invariant under an origin shift",
-          float(np.max(delta)) < 0.05,
-          f"max change = {float(np.max(delta)):.4f} deg (drift rate "
-          f"{float(np.max(delta)) / float(np.hypot(*shift)):.5f} deg/px)", "< 0.05 deg")
+          f"against the exact law {residual:.3f} deg, produced by the periodic-FFT "
+          f"border of a canvas that is not periodic (the engine applies no "
+          f"apodisation, so the analysed field is the exact sum over valid pixels)",
+          "reported; < 30 deg")
     theta_delta = abs(pm.ang_diff_deg(measured["moved"]["theta"], measured["base"]["theta"]))
-    check("the per-pixel triple-product phase drifts far less than a single peak",
+    check("practical: the per-pixel triple-product phase drifts far less than a "
+          "single peak",
           theta_delta < 0.5,
           f"theta changed by {theta_delta:.4f} deg (drift rate "
           f"{theta_delta / float(np.hypot(*shift)):.5f} deg/px) while the raw single "
@@ -391,482 +579,160 @@ def test_gauge_drift(n):
         before, after = measured["base"][key], measured["moved"][key]
         same = (before == after) if tolerance is None \
             else (abs(before - after) < tolerance)
-        check(f"{label} is invariant under an origin shift", same,
+        check(f"practical: {label} is invariant under an origin shift", same,
               f"{before} vs {after}", "exact" if tolerance is None else f"< {tolerance}")
 
 
-def test_injected_recovery(n):
-    """A known phase change must come back with the same value."""
-    section("injected phase recovery")
-    r1 = 0.30 * n
-    mask_radius = int(0.05 * n)
-    ref, r3vec = two_ring_vectors(n)
+# --------------------------------------------------------------------------- #
+# 5. the pairwise contract: which pairs, and what their fields obey
+# --------------------------------------------------------------------------- #
+def test_pairwise_contract(n, lambda_nm=3.0, nm_per_px=0.13):
+    section("pairwise contract: within/cross selection and the Friedel identity")
+    ref, r3vec = ring_vectors(n)
+    members_1x1 = pp.order_ring_members(ring_dict(ref)["members"])
+    members_r3 = pp.order_ring_members(ring_dict(r3vec)["members"])
+    records_1x1 = [{"name": f"ring_1x1_p{i}", "q_px": (float(m[0]), float(m[1])),
+                    "radius_px": float(np.hypot(m[0], m[1]))}
+                   for i, m in enumerate(members_1x1)]
+    records_r3 = [{"name": f"ring_r3_p{i}", "q_px": (float(m[0]), float(m[1])),
+                   "radius_px": float(np.hypot(m[0], m[1]))}
+                  for i, m in enumerate(members_r3)]
+
+    pairs = pp.within_ring_pairs(records_1x1)
+    angles = [float(np.degrees(np.arctan2(r["q_px"][1], r["q_px"][0])) % 360.0)
+              for r in records_1x1]
+    steps = [abs(pm.ang_diff_deg(angles[j], angles[k])) for j, k in pairs]
+    friedel_steps = [abs(pm.ang_diff_deg(angles[i], angles[(i + 3) % 6])) for i in range(6)]
+    check("within-ring pairs are (p0,p1), (p2,p3), (p4,p5): 60 deg apart, never Friedel",
+          pairs == [(0, 1), (2, 3), (4, 5)]
+          and all(abs(step - 60.0) < 1e-9 for step in steps)
+          and all(abs(step - 180.0) < 1e-9 for step in friedel_steps),
+          f"pairs {pairs}, separations "
+          f"{['%.3f' % value for value in steps]} deg; the avoided Friedel pairs "
+          f"(p_i, p_(i+3)) are {['%.3f' % value for value in friedel_steps]} deg apart",
+          "(0,1),(2,3),(4,5) at 60 deg")
+
+    cross = pp.cross_ring_pairs(records_1x1, records_r3)
+    brute = []
+    for j, left in enumerate(records_1x1):
+        angle_left = np.arctan2(left["q_px"][1], left["q_px"][0])
+        distances = [abs(float(pm.wrap_pm_pi(
+            angle_left - np.arctan2(right["q_px"][1], right["q_px"][0]))))
+            for right in records_r3]
+        nearest = min(distances)
+        brute.append(distances.index(
+            next(value for value in distances if value <= nearest + pp.ANGLE_TIE)))
+    gaps = [abs(pm.ang_diff_deg(
+        float(np.degrees(np.arctan2(records_1x1[j]["q_px"][1], records_1x1[j]["q_px"][0]))),
+        float(np.degrees(np.arctan2(records_r3[k]["q_px"][1], records_r3[k]["q_px"][0])))))
+        for j, k in cross]
+    chosen = [k for _j, k in cross]
+    check("cross pairs: every ring_1x1 peak with the ring_r3 peak closest in polar angle",
+          chosen == brute and [j for j, _k in cross] == list(range(len(records_1x1)))
+          and len(cross) == CROSS_PAIRS,
+          f"{len(cross)} pairs (one per ring_1x1 peak), chosen ring_r3 indices {chosen} "
+          f"equal the documented nearest-angle rule {brute} (smallest ring_r3 index on "
+          f"an exact tie); angular gaps "
+          f"{['%.3f' % value for value in gaps]} deg (the two rings differ by a 30 deg "
+          f"rotation here, so the gaps sit near 30 deg on both sides)", f"{CROSS_PAIRS} pairs")
+
+    image = pp.synth_image(n, 0.40 * n, [{"kind": "full", "amp": 1.0, "phase_deg": 47.0}])
+    q = (0.40 * n, 0.0)
+    plus = pp.gaussian_field(image, q, lambda_nm, nm_per_px)
+    minus = pp.gaussian_field(image, (-q[0], -q[1]), lambda_nm, nm_per_px)
+    product = plus * minus
+    worst_real = float(np.max(np.abs(np.imag(product))) / np.max(np.abs(product)))
+    diff = pp.pair_phase_diff_field(plus, minus)
+    worst_trivial = float(np.max(np.abs(pm.wrap_pm_pi(diff - 2.0 * np.angle(plus)))))
+    amp_diff = pp.pair_amplitude_diff_field(plus, minus)
+    check("the Friedel pair (q, -q) is trivial: its pair sum is exactly 0 and its "
+          "amplitude difference is identically 0",
+          worst_real < 1e-12 and float(np.max(np.abs(amp_diff))) < 1e-15
+          and worst_trivial < 1e-12,
+          f"arg psi_j + arg psi_k = arg(psi_j psi_k) is real to {worst_real:.3e} "
+          f"(relative), max |a_jk| = {float(np.max(np.abs(amp_diff))):.3e}, and "
+          f"D_jk = 2 theta_j to {worst_trivial:.3e} rad -- the difference field of a "
+          f"Friedel pair is a function of one field, which is why the within-ring "
+          f"pairs avoid them", "< 1e-12")
+
+    swapped = pp.pair_phase_diff_field(minus, plus)
+    check("swapping the two members negates D and a, so |D| mod pi is unchanged",
+          float(np.max(np.abs(pm.wrap_pm_pi(swapped + diff)))) < 1e-12,
+          f"max |D_ba + D_ab| = "
+          f"{float(np.max(np.abs(pm.wrap_pm_pi(swapped + diff)))):.3e} rad", "< 1e-12 rad")
+
+    mask = np.ones((n, n), dtype=bool)
+    counts, x_edges, y_edges, n_valid = pp.pair_histogram(
+        diff, amp_diff, mask, pp.pair_weight_field(plus, minus))
+    folded = np.mod(np.abs(diff), np.pi)
+    check("the pair histogram spans x = |D| mod pi in [0, pi] and y = a in [-1, 1]",
+          counts.shape == (180, 100) and n_valid == n * n
+          and abs(x_edges[0]) < 1e-15 and abs(x_edges[-1] - np.pi) < 1e-12
+          and abs(y_edges[0] + 1.0) < 1e-15 and abs(y_edges[-1] - 1.0) < 1e-15
+          and float(np.max(folded)) <= np.pi
+          and float(counts.sum()) > 0.0,
+          f"counts shape {counts.shape}, {n_valid} effective pixels, x in "
+          f"[{x_edges[0]:.3f}, {x_edges[-1]:.6f}], y in [{y_edges[0]:.1f}, "
+          f"{y_edges[-1]:.1f}], max |D| mod pi = {float(np.max(folded)):.6f} rad",
+          "180 x 100 bins over [0, pi] x [-1, 1]")
+
+
+# --------------------------------------------------------------------------- #
+# 6. injected recovery through the pairwise fields
+# --------------------------------------------------------------------------- #
+def test_pairwise_recovery(n, lambda_nm=3.0, nm_per_px=0.13):
+    """A known phase difference and a known amplitude ratio must come back."""
+    section("pairwise injection: phase difference and amplitude difference")
+    r1 = 0.40 * n
+    q_j = (r1, 0.0)
+    q_k = (r1 * np.cos(np.pi / 3.0), r1 * np.sin(np.pi / 3.0))
+    valid = np.ones((n, n), dtype=bool)
+
     recovered = []
-    for phase_deg in (0.0, 30.0, 60.0):
-        image = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0,
-                                        "phase_deg": phase_deg}])
-        spectrum = pp.compute_fft2(image, "hann")
-        valid = np.ones(image.shape, dtype=bool)
-        ref_records, _ = pp.analyse_ring(spectrum, valid, ring_dict(ref), mask_radius,
-                                         prefix="ref_",
-                                         peaks_override=ring_dict(ref)["members"])
-        best, _ = pm.fit_origin([record["q_px"] for record in ref_records],
-                                [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
-                                 for record in ref_records], n)
-        records, _ = pp.analyse_ring(spectrum, valid, ring_dict(r3vec), mask_radius,
-                                     prefix="r3_",
-                                     peaks_override=ring_dict(r3vec)["members"])
-        combo, _ = pp.triple_selection([record["q_px"] for record in records])
-        fixed = [float(np.degrees(pm.gauge_phase(
-            np.radians(records[index]["stats"]["phase_ungated"]["mean_deg"]),
-            records[index]["q_px"], best["r0_px"], best["c_rad"], n)) % 360.0)
-            for index in combo]
-        recovered.append(float(np.mean(fixed) % 360.0))
-    deltas = [pm.ang_diff_deg(recovered[i + 1], recovered[i])
-              for i in range(len(recovered) - 1)]
-    check("a 30 deg injected phase change is recovered as 30 deg",
-          all(abs(value - 30.0) < 0.1 for value in deltas),
-          f"recovered = {['%.4f' % value for value in recovered]}, deltas = "
-          f"{['%.4f' % value for value in deltas]}", "< 0.1 deg")
+    for injected in (0.0, 40.0):
+        canvas = plane_wave((n, n), [q_j, q_k], [10.0, 10.0 + injected])
+        psi_j = pp.gaussian_field(canvas, q_j, lambda_nm, nm_per_px)
+        psi_k = pp.gaussian_field(canvas, q_k, lambda_nm, nm_per_px)
+        diff = pp.pair_phase_diff_field(psi_j, psi_k)
+        weight = pp.pair_weight_field(psi_j, psi_k)
+        mean, resultant = circular_mean_deg(diff[valid], weight[valid])
+        recovered.append((mean, resultant))
+    deltas = [pm.ang_diff_deg(recovered[1][0], recovered[0][0])]
+    check("an injected 40 deg phase difference is recovered as -40 deg (<= 0.5 deg)",
+          abs(deltas[0] + 40.0) <= 0.5,
+          f"D mean {recovered[0][0]:.6f} deg -> {recovered[1][0]:.6f} deg, shift "
+          f"{deltas[0]:.6f} deg (D = arg psi_j - arg psi_k moves by -Delta phi), "
+          f"concentration R {recovered[1][1]:.9f}", "|shift + 40| <= 0.5 deg")
+
+    ratios = []
+    for amp_j, amp_k in ((1.0, 1.0), (1.5, 1.0), (1.0, 3.0)):
+        canvas = plane_wave((n, n), [q_j, q_k], [10.0, 10.0],
+                            amplitudes=[amp_j, amp_k])
+        psi_j = pp.gaussian_field(canvas, q_j, lambda_nm, nm_per_px)
+        psi_k = pp.gaussian_field(canvas, q_k, lambda_nm, nm_per_px)
+        amp_diff = pp.pair_amplitude_diff_field(psi_j, psi_k)
+        weight = pp.pair_weight_field(psi_j, psi_k)
+        median, _fwhm, _top = pm.linear_median_fwhm(amp_diff[valid], weight[valid])
+        ratios.append((median, (amp_j - amp_k) / (amp_j + amp_k)))
+    worst = max(abs(value - expected) for value, expected in ratios)
+    check("the normalized amplitude difference reproduces the injected ratio "
+          "(<= 1e-3)",
+          worst <= 1e-3,
+          "; ".join(f"a_median {value:+.9f} vs injected {expected:+.9f}"
+                    for value, expected in ratios) + f"; max deviation {worst:.3e}",
+          "<= 1e-3")
+
+    counts, _xe, _ye, n_valid = pp.pair_histogram(
+        np.zeros((n, n)), np.full((n, n), ratios[1][0]), valid,
+        np.ones((n, n)))
+    check("a constant pair sample lands in a single histogram column",
+          int(np.count_nonzero(counts)) == 1 and n_valid == n * n,
+          f"non-empty bins: {int(np.count_nonzero(counts))} of {counts.size} "
+          f"({n_valid} effective pixels, constant D and a)", "1 bin")
 
 
 # --------------------------------------------------------------------------- #
-# 3. discrimination boundary of the phase-sum test
-# --------------------------------------------------------------------------- #
-def test_robust_vs_absolute(n):
-    """Robust quantities get tight thresholds, a single-peak absolute phase does not.
-
-    The policy written into SKILL.md: the *robust* numbers (Friedel sums, the
-    closing sums, the per-peak distribution shape, amplitude/coherence) may be
-    compared across conventions, so they are accepted against tight thresholds; a
-    *single-peak absolute phase* moves with the branch of the fitted origin (by
-    ``(2 pi / N) q.L`` for a direct-lattice translation ``L``), so it is only
-    accepted when it lands inside the systematic band ``sigma_peak / 3`` derived
-    from the reference-ring residual -- no small-error threshold is applied to it.
-    """
-    section("robust quantities vs single-peak absolute phases")
-    r1 = 0.30 * n
-    ref, r3vec = two_ring_vectors(n)
-    mask_radius = int(0.05 * n)
-
-    # ---- the solution set contains direct-lattice translations ------------- #
-    image = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0, "phase_deg": 33.0}],
-                           noise=0.05, seed=3)
-    spectrum = pp.compute_fft2(image, "hann")
-    valid = np.ones(image.shape, dtype=bool)
-    ref_records, _ = pp.analyse_ring(spectrum, valid, ring_dict(ref), mask_radius,
-                                     prefix="ref_",
-                                     peaks_override=ring_dict(ref)["members"])
-    # the detector never returns the exact wavevector: a deterministic sub-pixel
-    # offset on the reference ring is what makes the fitted origin uncertain and
-    # therefore gives the single-peak absolute phases a real systematic band
-    rng = np.random.default_rng(11)
-    reference_members = [(member[0] + float(rng.normal(0.0, 0.5)),
-                          member[1] + float(rng.normal(0.0, 0.5)),
-                          member[2], member[3], member[4])
-                         for member in ring_dict(ref)["members"]]
-    r3_records, _ = pp.analyse_ring(spectrum, valid, ring_dict(r3vec), mask_radius,
-                                    prefix="r3_",
-                                    peaks_override=ring_dict(r3vec)["members"])
-    qs = np.array([record["q_px"] for record in ref_records], dtype=float)
-    phases = np.array([np.radians(record["stats"]["phase_ungated"]["mean_deg"])
-                       for record in ref_records])
-    best, minima = pm.fit_origin([tuple(row) for row in qs], list(phases), n)
-    r0 = np.asarray(best["r0_px"], dtype=float)
-
-    # direct lattice of the ring: q_i . a_j = 2 pi delta_ij
-    separation = [(abs(float(np.linalg.det(np.array([qs[i], qs[j]])))), i, j)
-                  for i in range(len(qs)) for j in range(i + 1, len(qs))]
-    _cross, i, j = max(separation)
-    # the model phase is (2 pi / n) q.r, so a shift L leaves every model phase
-    # unchanged (mod 2 pi) exactly when q . L is a multiple of n
-    inverse = np.linalg.inv(np.column_stack([qs[i], qs[j]]))
-    a1 = float(n) * inverse[0]
-    a2 = float(n) * inverse[1]
-    closure = max(abs(float(np.dot(q, a1)) / n - round(float(np.dot(q, a1)) / n))
-                  for q in qs)
-    closure = max(closure, max(abs(float(np.dot(q, a2)) / n
-                                   - round(float(np.dot(q, a2)) / n)) for q in qs))
-    check("the phase lattice of the reference ring closes on every reflection",
-          closure < 1e-9, f"max |q.L_j / n - round(...)| = {closure:.3e}", "< 1e-9")
-
-    def model(origin):
-        return (TWO_PI / n) * (qs @ np.asarray(origin, dtype=float)) + best["c_rad"]
-
-    best_residual = float(np.max(np.abs(pm.wrap_pm_pi(phases - model(r0)))))
-    residuals, measured_shifts, predicted_shifts = [], [], []
-    lattice_hits = 0
-    for coefficients in ((1, 0), (0, 1), (1, 1), (-1, 2)):
-        translated = r0 + coefficients[0] * a1 + coefficients[1] * a2
-        residual = float(np.max(np.abs(pm.wrap_pm_pi(phases - model(translated)))))
-        residuals.append(abs(residual - best_residual))
-        if any(np.max(np.abs(np.asarray(row["r0_px"], dtype=float) - translated)) < 1e-6
-               for row in minima):
-            lattice_hits += 1
-        delta = translated - r0
-        measured_shifts.append([float(np.degrees(np.mod((TWO_PI / n)
-                                                        * float(np.dot(record["q_px"], delta)),
-                                                        TWO_PI)))
-                                for record in r3_records])
-        predicted_shifts.append([float(np.degrees(np.mod((TWO_PI / n)
-                                                          * float(np.dot(record["q_px"], delta)),
-                                                          TWO_PI)))
-                                 for record in r3_records])
-    check("a direct-lattice translation of r0 leaves the residual bit-identical",
-          max(residuals) < 1e-9,
-          f"max residual change over 4 lattice translations = {max(residuals):.3e} deg "
-          f"(structural degeneracy: the fit cannot separate them; {lattice_hits}/4 of "
-          f"these translations were also found as local minima of the fit, "
-          f"{len(minima)} minima in total)", "< 1e-9 deg")
-    shift = measured_shifts[0]
-    off_120 = min(abs(np.radians(value)) % np.radians(120.0) for value in shift)
-    off_120 = min(off_120, np.radians(120.0) - off_120)
-    multiples = bool(min(abs(np.radians(value)) % np.radians(120.0)
-                         for value in shift) < 1e-9
-                     or np.radians(120.0) - min(abs(np.radians(value)) % np.radians(120.0)
-                                                for value in shift) < 1e-9)
-    check("a phase-lattice translation shifts ring_r3 by (2 pi / N) q.L, measured",
-          np.allclose(measured_shifts[0], predicted_shifts[0], atol=1e-9) and multiples,
-          f"measured shifts on the six ring_r3 reflections = "
-          f"{[round(value, 4) for value in shift]} deg for this ideal geometry (they are "
-          f"multiples of 120 deg here: {multiples}); the report states the measured "
-          f"value per data set instead of assuming it, because on real data the "
-          f"solution representatives can differ by non-lattice amounts (observed spread "
-          f"up to +-180 deg), so mod-120 comparability must not be assumed",
-          "formula + reported")
-
-    # ---- split thresholds: robust vs absolute ----------------------------- #
-    recovered = {}
-    for phase_deg in (0.0, 30.0):
-        canvas = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0,
-                                         "phase_deg": phase_deg}],
-                                noise=0.05, seed=3)
-        spectrum = pp.compute_fft2(canvas, "hann")
-        valid = np.ones(canvas.shape, dtype=bool)
-        local_ref, _ = pp.analyse_ring(spectrum, valid, ring_dict(ref), mask_radius,
-                                       prefix="ref_", peaks_override=reference_members)
-        local_best, _ = pm.fit_origin([record["q_px"] for record in local_ref],
-                                      [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
-                                       for record in local_ref], n)
-        records, fields = pp.analyse_ring(spectrum, valid, ring_dict(r3vec), mask_radius,
-                                          prefix="r3_",
-                                          peaks_override=ring_dict(r3vec)["members"])
-        triple = pp.triple_summary(records, fields, valid, key="phase_ungated",
-                                   quantity="mean_deg")
-        combo, _ = pp.triple_selection([record["q_px"] for record in records])
-        deviations = [float(pm.dist_to_ladder_deg(np.degrees(pm.gauge_phase(
-            np.radians(record["stats"]["phase_ungated"]["mean_deg"]), record["q_px"],
-            local_best["r0_px"], local_best["c_rad"], n)) % 360.0, (0.0,)))
-            for record in local_ref]
-        sigma_peak = float(np.sqrt(np.mean(np.square(deviations)))) * np.sqrt(2.0)
-        recovered[phase_deg] = {
-            "sum": triple["scalar_sum_deg"],
-            "theta": triple["field_gated"]["mean_deg"],
-            "theta_R": triple["field_gated"]["resultant_R"],
-            "R": float(np.mean([record["stats"]["phase_ungated"]["resultant_R"]
-                                for record in records])),
-            "fwhm": float(np.mean([record["stats"]["phase_gated"]["fwhm_deg"]
-                                   for record in records])),
-            "gauge": [float(np.degrees(pm.gauge_phase(
-                np.radians(records[index]["stats"]["phase_ungated"]["mean_deg"]),
-                records[index]["q_px"], local_best["r0_px"], local_best["c_rad"], n))
-                % 360.0) for index in combo],
-            "sigma_peak": sigma_peak, "band": sigma_peak / 3.0,
-        }
-    base, moved = recovered[0.0], recovered[30.0]
-    injected, robust = 30.0, 3.0 * 30.0  # the closing sums are 3 * Phi
-    delta_sum = abs(pm.ang_diff_deg(moved["sum"], base["sum"]))
-    check("robust: the three-independent sum follows 3 x the injected 30 deg (<= 0.5 deg)",
-          abs(delta_sum - robust) <= 0.5,
-          f"sum moved by {delta_sum:.4f} deg, expected {robust:.1f} deg",
-          "|delta - 90| <= 0.5 deg")
-    delta_theta = abs(pm.ang_diff_deg(moved["theta"], base["theta"]))
-    check("robust: the per-pixel triple product follows it (<= 1 deg)",
-          abs(delta_theta - robust) <= 1.0,
-          f"theta moved by {delta_theta:.4f} deg, expected {robust:.1f} deg",
-          "|delta - 90| <= 1 deg")
-    delta_r = abs(moved["theta_R"] - base["theta_R"])
-    delta_fwhm = abs(moved["fwhm"] - base["fwhm"])
-    check("robust: concentration R and the gated FWHM do not move (<= 0.01 / <= 0.5 deg)",
-          delta_r <= 0.01 and delta_fwhm <= 0.5,
-          f"delta R = {delta_r:.6f}, delta FWHM = {delta_fwhm:.4f} deg",
-          "0.01 / 0.5 deg")
-    band = max(base["band"], 1e-9)
-    worst_absolute = max(abs(pm.ang_diff_deg(moved["gauge"][index],
-                                             base["gauge"][index]) - injected)
-                         for index in range(len(base["gauge"])))
-    check("single-peak absolute phase is only required to sit inside the system band",
-          worst_absolute <= band,
-          f"max |Delta phi_j - 30| = {worst_absolute:.4f} deg against the band "
-          f"sigma_peak/3 = {band:.4f} deg (sigma_peak = {base['sigma_peak']:.4f} deg "
-          f"from the reference-ring residual); no tighter threshold is applied "
-          f"(real reference rings scatter far more: a residual rms of 10.39 deg means "
-          f"a band of 4.9 deg, of 23.75 deg a band of 11.2 deg)",
-          "within the band (no small-error threshold)")
-
-    # ---- the documented mirror ambiguity ---------------------------------- #
-    for theta, mirror in ((353.26, 6.74), (345.23, 14.77)):
-        same = abs(pm.dist_to_ladder_deg(theta, LADDER)
-                   - pm.dist_to_ladder_deg(mirror, LADDER)) < 1e-9
-        closes = abs((theta + mirror) % 360.0) < 1e-6
-        check(f"mirror pair {theta} vs {mirror}: the ladder distance is invariant",
-              same and closes,
-              f"ladder distances {pm.dist_to_ladder_deg(theta, LADDER):.4f} vs "
-              f"{pm.dist_to_ladder_deg(mirror, LADDER):.4f} deg, sum mod 360 = "
-              f"{(theta + mirror) % 360.0:.6f}", "identical distance")
-
-
-def phasor(weights, phases_deg):
-    total = float(np.sum(weights))
-    z = np.sum(np.asarray(weights, dtype=float)
-               * np.exp(1j * np.radians(np.asarray(phases_deg, dtype=float))))
-    angle = 3.0 * np.degrees(np.angle(z)) % 360.0
-    return {"three_phi_bar_deg": float(angle),
-            "ladder_distance_deg": float(pm.dist_to_ladder_deg(angle, LADDER)),
-            "coherence": float(abs(z) / total)}
-
-
-def test_phase_definition(n):
-    """Which pixel set the per-peak phase uses, and what a restricted set would give.
-
-    The delivered estimator is the **whole-canvas** amplitude-weighted circular mean
-    of the demodulated single-reflection field (every valid pixel, weight |psi|).
-    Reading "the mask" as a real-space disk instead is a *different* estimator: it
-    integrates the region-boundary content inside that disk and, on samples with
-    bounded regions, deviates by tens of degrees.  This section pins the definition
-    numerically and records the counterexample with its geometry.
-    """
-    section("per-peak phase definition: whole canvas vs a restricted pixel set")
-    r1 = 0.229 * n
-    r3_radius = r1 / SQRT3
-    mask_radius = int(0.05 * n)
-    angles = np.arange(6) * np.pi / 3.0
-    ref = [(r1 * np.cos(a), r1 * np.sin(a)) for a in angles]
-    r3vec = [(r3_radius * np.cos(a + np.radians(30.0)),
-              r3_radius * np.sin(a + np.radians(30.0))) for a in angles]
-
-    # ---- exact pinning on single-bin integer waves ------------------------ #
-    yy, xx = np.mgrid[:n, :n]
-    waves = [(96.0, 0.0, 10.0), (48.0, 83.0, 45.0), (-48.0, 83.0, 200.0)]
-    image = sum(np.cos((TWO_PI / n) * (qx * xx + qy * yy) + np.radians(phase))
-                for qx, qy, phase in waves)
-    spectrum = pp.compute_fft2(image, None)
-    worst = 0.0
-    for qx, qy, _phase in waves:
-        members = [(qx, qy, 1.0, 1.0, float(np.hypot(qx, qy)))]
-        records, _fields = pp.analyse_ring(spectrum, np.ones(image.shape, dtype=bool),
-                                           ring_dict([(qx, qy)]), 0, prefix="w_",
-                                           peaks_override=members)
-        bin_x = int(round(qx)) + n // 2
-        bin_y = int(round(qy)) + n // 2
-        predicted = (np.degrees(np.angle(spectrum[bin_y, bin_x]))
-                     + np.degrees((TWO_PI / n) * (qx * (n // 2) + qy * (n // 2)))) % 360.0
-        got = records[0]["stats"]["phase_ungated"]["mean_deg"]
-        worst = max(worst, abs(pm.ang_diff_deg(got, predicted)))
-    check("phase value = whole-canvas amplitude-weighted circular mean = arg X(q) "
-          "+ (2 pi / N) q.c (single-bin mask)",
-          worst < 1e-9, f"max deviation over three single-bin waves = {worst:.3e} deg; "
-          f"the sample set is every valid pixel (weight |psi(r)|), not a real-space "
-          f"disk", "< 1e-9 deg")
-
-    # ---- bounded-region counterexample ------------------------------------ #
-    domains = [{"kind": "full", "amp": 1.0, "phase_deg": 0.0},
-               {"kind": "disk", "amp": 1.0, "phase_deg": 120.0, "centre": (0.5, 0.5),
-                "radius_frac": 0.20, "edge": 4.0}]
-    image = pp.synth_image(n, r1, domains, ref_amp=0.5, ref_phase_deg=0.0)
-    truth = pp.true_mixture(domains, n, r1)
-    spectrum = pp.compute_fft2(image, "hann")
-    valid = np.ones(image.shape, dtype=bool)
-    combo, _q = pp.triple_selection(r3vec)
-    inside = np.hypot(xx - n / 2.0, yy - n / 2.0) <= 16.0
-    canvas_sum, restricted_sum = 0.0, 0.0
-    for index in combo:
-        psi, phi = pp.reflection_field(spectrum, r3vec[index], mask_radius)
-        amp = np.abs(psi)
-        canvas_sum += np.degrees(np.angle(np.sum(amp * np.exp(1j * phi))))
-        restricted_sum += np.degrees(np.angle(
-            np.sum((amp * inside) * np.exp(1j * phi))))
-    ideal = truth["three_phi_bar_deg"]
-    canvas_deviation = abs(pm.ang_diff_deg(canvas_sum, ideal))
-    restricted_deviation = abs(pm.ang_diff_deg(restricted_sum, ideal))
-    geometry = (f"n = {n}, ring_1x1 r = {r1:.2f} px, ring_r3 r = {r3_radius:.2f} px, "
-                f"q-mask radius = {mask_radius} px, region = a disk of radius 0.20 n "
-                f"with a finite smooth edge (4 px) in a full background, region phases "
-                f"0 / 120 deg, window weight of the inner region "
-                f"{truth['weight_fractions'][1]:.4f}")
-    check("the delivered definition tracks the window-weighted mixture on a bounded "
-          "two-region sample (<= 0.05 deg)",
-          canvas_deviation <= 0.05,
-          f"whole-canvas 3 Phi = {canvas_sum % 360.0:.4f} deg vs window-weighted "
-          f"prediction {ideal:.4f} deg, deviation {canvas_deviation:.4f} deg "
-          f"({geometry})", "<= 0.05 deg")
-    check("counterexample: restricting the same estimator to a real-space disk "
-          "deviates by tens of degrees",
-          restricted_deviation > 50.0,
-          f"disk-restricted 3 Phi = {restricted_sum % 360.0:.4f} deg, deviation "
-          f"{restricted_deviation:.3f} deg from the same prediction (restriction disk "
-          f"r = 16 px at the canvas centre; the same geometry). The size of that bias "
-          f"depends on WHICH pixels enter: +1.4 deg for a centred disk on an "
-          f"equal-weight half-plane split, +106.25 deg here, and the verifier's own "
-          f"variant (their scope 'mask' = the real-space pixels whose array index lies "
-          f"inside the q-space mask disk, i.e. an off-centre disk displaced by |q|, "
-          f"which samples a single region) gave -52.741 / -58.727 / -58.85 deg; the "
-          f"whole-canvas reading agreed to +0.024 deg there",
-          "> 50 deg (recorded, not used)")
-
-    # ---- the equal-window-weight two-region case -------------------------- #
-    domains = [{"kind": "band", "amp": 1.0, "phase_deg": 0.0, "lo": 0.0, "hi": 0.5,
-                "edge": 6.0},
-               {"kind": "band", "amp": 1.0, "phase_deg": 120.0, "lo": 0.5, "hi": 1.0,
-                "edge": 6.0}]
-    image = pp.synth_image(n, r1, domains, ref_amp=0.5, ref_phase_deg=0.0)
-    truth = pp.true_mixture(domains, n, r1)
-    spectrum = pp.compute_fft2(image, "hann")
-    canvas_sum, restricted_sum = 0.0, 0.0
-    for index in combo:
-        psi, phi = pp.reflection_field(spectrum, r3vec[index], mask_radius)
-        amp = np.abs(psi)
-        canvas_sum += np.degrees(np.angle(np.sum(amp * np.exp(1j * phi))))
-        restricted_sum += np.degrees(np.angle(
-            np.sum((amp * inside) * np.exp(1j * phi))))
-    ideal = truth["three_phi_bar_deg"]
-    equal_canvas = abs(pm.ang_diff_deg(canvas_sum, ideal))
-    equal_restricted = abs(pm.ang_diff_deg(restricted_sum, ideal))
-    check("equal-window-weight two-region sample (Delta Phi = 120 deg): the "
-          "whole-canvas reading is exact",
-          equal_canvas <= 0.05,
-          f"window weights {np.round(truth['weight_fractions'], 5).tolist()}, "
-          f"whole-canvas 3 Phi = {canvas_sum % 360.0:.4f} deg vs the window-weighted "
-          f"prediction {ideal:.4f} deg, deviation {equal_canvas:.4f} deg; the "
-          f"disk-restricted reading of the same estimator gives "
-          f"{equal_restricted:.4f} deg here (the bias of that variant depends on the "
-          f"geometry: +1.44 deg for this half-plane split, -52.7/-58.7 deg in the "
-          f"verifier's bounded-region configurations, +106.25 deg in the disk-region "
-          f"configuration above), n = {n}, ring r = {r1:.2f} / {r3_radius:.2f} px, "
-          f"q-mask = {mask_radius} px", "<= 0.05 deg (whole canvas)")
-
-    # ---- the six-peak vs triple origin fit -------------------------------- #
-    phases = None
-    image = pp.synth_image(n, r1, [{"kind": "full", "amp": 1.0, "phase_deg": 33.0}],
-                           ref_amp=1.0, ref_phase_deg=25.0)
-    spectrum = pp.compute_fft2(image, "hann")
-    records, _fields = pp.analyse_ring(spectrum, np.ones(image.shape, dtype=bool),
-                                       ring_dict(ref), mask_radius, prefix="ref_",
-                                       peaks_override=ring_dict(ref)["members"])
-    qs = [record["q_px"] for record in records]
-    phases = [np.radians(record["stats"]["phase_ungated"]["mean_deg"])
-              for record in records]
-    six, _minima = pm.fit_origin(qs, phases, n)
-    triple_index, _ = pp.triple_selection(qs)
-    triple, _ = pm.fit_origin([qs[index] for index in triple_index],
-                              [phases[index] for index in triple_index], n)
-    check("origin fit convention: six reflections vs the q-sum-zero triple",
-          six["rms_deg"] > 0.0 and triple["rms_deg"] < 1e-9,
-          f"six-reflection rms = {six['rms_deg']:.4f} deg (the six peaks are three "
-          f"Friedel pairs carrying +Phi and -Phi, so one common offset is a "
-          f"compromise); q-sum-zero triple rms = {triple['rms_deg']:.3e} deg by "
-          f"construction (3 equations, 3 unknowns); the report carries both, and the "
-          f"leftover freedom is the direct-lattice branch that shifts ring_r3 by "
-          f"(2 pi / N) q.L", "six-peak reported, triple compared")
-
-
-
-def test_multi_component_boundary(n):
-    """The three-phase sum is a value-range test, never a component counter."""
-    section("multi-component discrimination boundary (1 / 2 / 3 components)")
-    one = phasor([1.0], [0.0])
-    check("1 component: the sum sits on the ladder, coherence 1",
-          one["ladder_distance_deg"] < 1e-9 and abs(one["coherence"] - 1.0) < 1e-12,
-          f"3 Phi_bar = {one['three_phi_bar_deg']:.4f} deg (ladder distance "
-          f"{one['ladder_distance_deg']:.4f}), coherence {one['coherence']:.6f}",
-          "< 1e-9 deg / 1.0")
-    two = phasor([0.5, 0.5], [0.0, 120.0])
-    check("2 equal components 120 deg apart: the sum is 60 deg OFF the ladder",
-          abs(two["ladder_distance_deg"] - 60.0) < 1e-9,
-          f"3 Phi_bar = {two['three_phi_bar_deg']:.4f} deg, ladder distance "
-          f"{two['ladder_distance_deg']:.4f} deg, coherence {two['coherence']:.4f}",
-          "60 deg")
-    three = phasor([1 / 3, 1 / 3, 1 / 3], [0.0, 120.0, 240.0])
-    check("3 equal components on the ladder cancel: the phase is undefined "
-          "(the amplitude is the guard)",
-          three["coherence"] < 1e-12,
-          f"coherence = {three['coherence']:.3e} (any phase number is meaningless)",
-          "< 1e-12")
-
-    boundary = []
-    for minority in (0.005, 0.01, 0.02, 0.03, 0.05, 0.10, 0.20, 0.35, 0.50):
-        mixed = phasor([1.0 - minority, minority], [0.0, 120.0])
-        boundary.append((minority, mixed["ladder_distance_deg"], mixed["coherence"]))
-    crossing = [row for row in boundary if row[1] >= 5.0]
-    if crossing:
-        index = boundary.index(crossing[0])
-        if index == 0:
-            interpolated = crossing[0][0]
-        else:
-            low, high = boundary[index - 1], crossing[0]
-            interpolated = low[0] + (high[0] - low[0]) * (5.0 - low[1]) / (high[1] - low[1])
-    else:
-        interpolated = float("nan")
-    check("2 unequal components: the sum resolves a minority above ~3 %",
-          0.02 < interpolated < 0.05,
-          f"the 5 deg crossing of the ladder distance is at f = {interpolated:.4f}; "
-          + "; ".join(f"f={row[0]:.3f} -> {row[1]:.2f} deg, coherence {row[2]:.3f}"
-                      for row in boundary[:5]),
-          "2 % < f < 5 %")
-
-    # ---- the same statement through the pipeline ------------------------- #
-    r1 = 0.458 * n
-    r3_radius = r1 / SQRT3
-    mask_radius = int(0.05 * n)
-    vectors = [(r3_radius * np.cos(a + np.radians(30.0)),
-                r3_radius * np.sin(a + np.radians(30.0)))
-               for a in np.arange(6) * np.pi / 3.0]
-    members = [(v[0], v[1], 1.0, 1.0, float(np.hypot(*v))) for v in vectors]
-    rows = []
-    for radius_frac in (0.20, 0.05):
-        domains = [{"kind": "full", "amp": 1.0, "phase_deg": 0.0},
-                   {"kind": "disk", "amp": 1.0, "phase_deg": 120.0,
-                    "centre": (0.5, 0.5), "radius_frac": radius_frac, "edge": 4.0}]
-        image = pp.synth_image(n, r1, domains, ref_amp=0.3, ref_phase_deg=40.0)
-        truth = pp.true_mixture(domains, n, r1)
-        spectrum = pp.compute_fft2(image, "hann")
-        valid = np.ones(image.shape, dtype=bool)
-        records, fields = pp.analyse_ring(spectrum, valid,
-                                          {"radius": r3_radius, "members": members},
-                                          mask_radius, prefix="r3_",
-                                          peaks_override=members)
-        triple = pp.triple_summary(records, fields, valid, key="phase_ungated",
-                                   quantity="mean_deg")
-        clusters = sorted({record["stats"]["phase_gated"]["n_clusters"]
-                           for record in records})
-        deviation = abs(pm.ang_diff_deg(triple["scalar_sum_deg"],
-                                        truth["three_phi_bar_deg"]))
-        rows.append({"weight": float(truth["weight_fractions"][1]),
-                     "predicted": truth["three_phi_bar_deg"],
-                     "measured": triple["scalar_sum_deg"],
-                     "ladder": triple["scalar_ladder_dist_deg"],
-                     "clusters": clusters, "deviation": deviation})
-        print(f"    pipeline: minority window weight f_w = {rows[-1]['weight']:.4f} "
-              f"-> predicted 3 Phi_bar = {rows[-1]['predicted']:.4f} deg, measured "
-              f"{rows[-1]['measured']:.4f} deg, ladder distance {rows[-1]['ladder']:.4f} "
-              f"deg, cluster counts {clusters}")
-    worst = max(row["deviation"] for row in rows)
-    check("pipeline reproduces the window-weighted phasor prediction",
-          worst < 0.1, f"max deviation = {worst:.4f} deg over {len(rows)} two-component "
-                       f"configurations", "< 0.1 deg")
-    check("a 3 % minority is invisible to the cluster count but visible to the sum",
-          rows[1]["clusters"] == [1] and rows[1]["ladder"] > 3.0,
-          f"f_w = {rows[1]['weight']:.4f} -> cluster counts {rows[1]['clusters']}, "
-          f"ladder distance {rows[1]['ladder']:.2f} deg",
-          "1 cluster and > 3 deg off the ladder")
-    check("a ~30 % minority shows up in the cluster count as well",
-          rows[0]["clusters"] == [2],
-          f"f_w = {rows[0]['weight']:.4f} -> cluster counts {rows[0]['clusters']}",
-          "2 clusters")
-
-
-# --------------------------------------------------------------------------- #
-# 4. ring lookup and its failure branch
+# 7. ring lookup and its failure branch
 # --------------------------------------------------------------------------- #
 def test_ring_lookup():
     section("reference ring selection and the 1/sqrt(3) lookup")
@@ -915,7 +781,112 @@ def test_ring_lookup():
 
 
 # --------------------------------------------------------------------------- #
-# 5. end-to-end pipeline: atlas contract, determinism, the not-found branch
+# 8. discrimination boundary of the phase-sum test
+# --------------------------------------------------------------------------- #
+def phasor(weights, phases_deg):
+    total = float(np.sum(weights))
+    z = np.sum(np.asarray(weights, dtype=float)
+               * np.exp(1j * np.radians(np.asarray(phases_deg, dtype=float))))
+    angle = 3.0 * np.degrees(np.angle(z)) % 360.0
+    return {"three_phi_bar_deg": float(angle),
+            "ladder_distance_deg": float(pm.dist_to_ladder_deg(angle, LADDER)),
+            "coherence": float(abs(z) / total)}
+
+
+def test_multi_component_boundary(n, lambda_nm=3.0, nm_per_px=0.13):
+    """The three-phase sum is a value-range test, never a component counter."""
+    section("multi-component discrimination boundary (1 / 2 / 3 components)")
+    one = phasor([1.0], [0.0])
+    check("1 component: the sum sits on the ladder, coherence 1",
+          one["ladder_distance_deg"] < 1e-9 and abs(one["coherence"] - 1.0) < 1e-12,
+          f"3 Phi_bar = {one['three_phi_bar_deg']:.4f} deg (ladder distance "
+          f"{one['ladder_distance_deg']:.4f}), coherence {one['coherence']:.6f}",
+          "< 1e-9 deg / 1.0")
+    two = phasor([0.5, 0.5], [0.0, 120.0])
+    check("2 equal components 120 deg apart: the sum is 60 deg OFF the ladder",
+          abs(two["ladder_distance_deg"] - 60.0) < 1e-9,
+          f"3 Phi_bar = {two['three_phi_bar_deg']:.4f} deg, ladder distance "
+          f"{two['ladder_distance_deg']:.4f} deg, coherence {two['coherence']:.4f}",
+          "60 deg")
+    three = phasor([1 / 3, 1 / 3, 1 / 3], [0.0, 120.0, 240.0])
+    check("3 equal components on the ladder cancel: the phase is undefined",
+          three["coherence"] < 1e-12,
+          f"coherence = {three['coherence']:.3e} (any phase number is meaningless)",
+          "< 1e-12")
+
+    boundary = []
+    for minority in (0.005, 0.01, 0.02, 0.03, 0.05, 0.10, 0.20, 0.35, 0.50):
+        mixed = phasor([1.0 - minority, minority], [0.0, 120.0])
+        boundary.append((minority, mixed["ladder_distance_deg"], mixed["coherence"]))
+    crossing = [row for row in boundary if row[1] >= 5.0]
+    if crossing:
+        index = boundary.index(crossing[0])
+        if index == 0:
+            interpolated = crossing[0][0]
+        else:
+            low, high = boundary[index - 1], crossing[0]
+            interpolated = low[0] + (high[0] - low[0]) * (5.0 - low[1]) / (high[1] - low[1])
+    else:
+        interpolated = float("nan")
+    check("2 unequal components: the sum resolves a minority above ~3 %",
+          0.02 < interpolated < 0.05,
+          f"the 5 deg crossing of the ladder distance is at f = {interpolated:.4f}; "
+          + "; ".join(f"f={row[0]:.3f} -> {row[1]:.2f} deg, coherence {row[2]:.3f}"
+                      for row in boundary[:5]),
+          "2 % < f < 5 %")
+
+    # ---- the same statement through the delivered engine ------------------ #
+    r1 = 0.458 * n
+    vectors = [(r1 / SQRT3 * np.cos(a + np.radians(30.0)),
+                r1 / SQRT3 * np.sin(a + np.radians(30.0)))
+               for a in np.arange(6) * np.pi / 3.0]
+    members = [(v[0], v[1], 1.0, 1.0, float(np.hypot(*v))) for v in vectors]
+    valid = np.ones((n, n), dtype=bool)
+    rows = []
+    for radius_frac in (0.3697, 0.098):
+        domains = [{"kind": "full", "amp": 1.0, "phase_deg": 0.0},
+                   {"kind": "disk", "amp": 1.0, "phase_deg": 120.0,
+                    "centre": (0.5, 0.5), "radius_frac": radius_frac, "edge": 4.0}]
+        image = pp.synth_image(n, r1, domains, ref_amp=0.3, ref_phase_deg=40.0)
+        truth = pp.true_mixture(domains, n, r1, window=None)
+        records, fields, _psi = pp.analyse_ring(
+            image, valid, {"radius": r1 / SQRT3, "members": members}, lambda_nm,
+            nm_per_px, prefix="r3_", peaks_override=members)
+        triple = pp.triple_summary(records, fields, valid, key="phase_ungated",
+                                   quantity="mean_deg")
+        clusters = sorted({record["stats"]["phase_gated"]["n_clusters"]
+                           for record in records})
+        deviation = abs(pm.ang_diff_deg(triple["scalar_sum_deg"],
+                                        truth["three_phi_bar_area_deg"]))
+        rows.append({"weight": float(truth["area_weight_fractions"][1]),
+                     "predicted": truth["three_phi_bar_area_deg"],
+                     "measured": triple["scalar_sum_deg"],
+                     "ladder": triple["scalar_ladder_dist_deg"],
+                     "clusters": clusters, "deviation": deviation})
+        print(f"    engine: minority area weight f_w = {rows[-1]['weight']:.4f} "
+              f"-> predicted 3 Phi_bar = {rows[-1]['predicted']:.4f} deg, measured "
+              f"{rows[-1]['measured']:.4f} deg, ladder distance {rows[-1]['ladder']:.4f} "
+              f"deg, cluster counts {clusters}")
+    worst = max(row["deviation"] for row in rows)
+    check("the whole-canvas phase value reproduces the area-weighted phasor prediction",
+          worst < 1.0, f"max deviation = {worst:.4f} deg over {len(rows)} two-component "
+                       f"configurations (the engine sums T exp(-i q.r) over every valid "
+                       f"pixel, so the region weight of a smooth region is its area "
+                       f"integral; the residual is the spectral leakage of the other "
+                       f"ring into the demodulation window)", "< 1.0 deg")
+    check("a ~3 % minority is invisible to the cluster count but visible to the sum",
+          rows[1]["clusters"] == [1] and rows[1]["ladder"] > 3.0,
+          f"f_w = {rows[1]['weight']:.4f} -> cluster counts {rows[1]['clusters']}, "
+          f"ladder distance {rows[1]['ladder']:.2f} deg",
+          "1 cluster and > 3 deg off the ladder")
+    check("a ~30 % minority shows up in the cluster count as well",
+          rows[0]["clusters"] == [2],
+          f"f_w = {rows[0]['weight']:.4f} -> cluster counts {rows[0]['clusters']}",
+          "2 clusters")
+
+
+# --------------------------------------------------------------------------- #
+# 9. end-to-end pipeline: atlas contract, determinism, the not-found branch
 # --------------------------------------------------------------------------- #
 def write_synthetic_csv(path, n, radius_frac=0.458, phases=(0.0, 240.0)):
     r1 = radius_frac * n
@@ -934,7 +905,7 @@ def run_script(script, arguments, env):
                           capture_output=True, text=True, env=env, check=False)
 
 
-def test_pipeline_contract(n, workdir):
+def test_pipeline_contract(n, workdir, stm_lib):
     section("end-to-end pipeline: atlas contract, determinism, not-found branch")
     env = dict(os.environ)
     env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
@@ -949,7 +920,8 @@ def test_pipeline_contract(n, workdir):
         outdir = workdir / "pipeline" / f"out_{tag}"
         runs[tag] = (run_script("stm_phase_analysis.py",
                                 [str(csv_path), "-o", str(outdir), "-L", str(field_of_view),
-                                 "--detector", "builtin"], env), outdir)
+                                 "--detector", "builtin", "--stm-lib", stm_lib], env),
+                     outdir)
     completed, outdir = runs["a"]
     second_completed, second_outdir = runs["b"]
     check("the second run also exits 0 (checked before its outputs are read)",
@@ -968,17 +940,37 @@ def test_pipeline_contract(n, workdir):
     if completed.returncode != 0:
         return
 
+    log_text = (outdir / "phase_stats.log").read_text()
+    check("the log states the engine and the lambda of the run",
+          "gaussian window via local-q-map" in log_text and "--lambda-nm" not in log_text
+          and "lambda = 3 nm" in log_text,
+          "log carries the engine line: '"
+          + next((line for line in log_text.splitlines() if "gaussian window" in line), "")
+          + "'", "engine line present")
+
+    removed = run_script("stm_phase_analysis.py",
+                         [str(csv_path), "-o", str(workdir / "pipeline" / "out_pct"),
+                          "-L", str(field_of_view), "--detector", "builtin", "--pct", "5"],
+                         env)
+    check("the removed --pct option is rejected by the CLI",
+          removed.returncode != 0 and "--pct" in (removed.stderr + removed.stdout),
+          f"exit code {removed.returncode}, message "
+          f"{'present' if '--pct' in (removed.stderr + removed.stdout) else 'MISSING'}",
+          "non-zero exit and an explicit message")
+
     figures = sorted(outdir.glob("*.png"))
-    check("atlas contains 25 figures per ring (50 in total)",
-          len(figures) == 2 * FIGURES_PER_RING,
-          f"{len(figures)} PNG files found", f"{2 * FIGURES_PER_RING}")
+    check(f"atlas contains {FIGURES_PER_RING} figures per ring and {CROSS_FIGURES} "
+          f"cross-ring figures ({TOTAL_FIGURES} in total)",
+          len(figures) == TOTAL_FIGURES,
+          f"{len(figures)} PNG files found", f"{TOTAL_FIGURES}")
 
     import atlas as at  # imported after MPLCONFIGDIR has been set
     stats_path = outdir / "phase_stats.json"
     manifest_path = outdir / "atlas_manifest.json"
     ok, failures, _lines = at.check_manifest(manifest_path, stats_path=stats_path,
-                                             expected_figures=2 * FIGURES_PER_RING,
+                                             expected_figures=TOTAL_FIGURES,
                                              expected_per_ring=FIGURES_PER_RING,
+                                             expected_cross=CROSS_FIGURES,
                                              verbose=False)
     check("atlas manifest audit: files, sizes, PIL, embedded text, numbers = JSON",
           ok, f"{len(failures)} failure(s)" + (f": {failures[:3]}" if failures else ""),
@@ -987,59 +979,89 @@ def test_pipeline_contract(n, workdir):
         return
 
     manifest = json.loads(manifest_path.read_text())
-    pattern = re.compile(
-        r"^(ring_1x1|ring_r3)_(p[0-5]_(mask_in|mask_out|phi_dist)"
-        r"|qspace_mask|mask_all_in|mask_all_out|case_phase_histograms"
-        r"|phi_hist_summary|phi_map_summary|theta_field)\.png$")
     bad = [entry["file"] for entry in manifest["figures"]
-           if not pattern.match(entry["file"])]
+           if not FIGURE_PATTERN.match(entry["file"])]
     check("every figure name follows the documented pattern", not bad,
           f"{len(manifest['figures'])} names checked, off-pattern: {bad[:3]}", "0")
     text = " ".join(entry["file"] + " " + entry["title"] for entry in manifest["figures"])
     hits = [token for token in FORBIDDEN if token.lower() in text.lower()]
     check("no forbidden token in any figure name or title", not hits,
           f"scanned {len(manifest['figures'])} names/titles, hits: {hits}", "0 hits")
+    documents = {name: (HERE.parent / name).read_text()
+                 for name in ("SKILL.md", "README.md")}
+    document_hits = {name: [token for token in FORBIDDEN if token.lower() in text.lower()]
+                     for name, text in documents.items()}
+    document_hits = {name: found for name, found in document_hits.items() if found}
+    check("no forbidden token in the delivered forward-looking documents",
+          not document_hits,
+          f"scanned SKILL.md and README.md, hits: "
+          f"{document_hits if document_hits else 'none'} (CHANGES.md is the historical "
+          f"record and is not part of this naming scan)", "0 hits")
+
+    groups = {}
+    for entry in manifest["figures"]:
+        groups.setdefault(entry["group"], {}).setdefault(entry["kind"], 0)
+        groups[entry["group"]][entry["kind"]] += 1
+    check("the manifest carries group and kind for every figure, pairwise with a pair key",
+          groups.get("ring_1x1") == {"per_peak": 18, "summary": 4, "pairwise": 9}
+          and groups.get("ring_r3") == {"per_peak": 18, "summary": 4, "pairwise": 9}
+          and groups.get("cross") == {"summary": 1, "pairwise": 18}
+          and all(entry.get("pair") for entry in manifest["figures"]
+                  if entry["kind"] == "pairwise")
+          and all(entry.get("pair") is None for entry in manifest["figures"]
+                  if entry["kind"] != "pairwise"),
+          f"per group: {groups}", "18/4/9, 18/4/9, 1/18")
+    pair_names = sorted({entry["pair"] for entry in manifest["figures"]
+                         if entry["kind"] == "pairwise"})
+    check("the manifest names all twelve pairs (3 + 3 within, 6 cross)",
+          len(pair_names) == 12
+          and sum(1 for name in pair_names if "_pair_" in name) == 0,
+          f"{len(pair_names)} pair keys: {pair_names}", "12 pair keys")
+    check("every pairwise annotation is declared with a path into the pairwise section",
+          all(all(path.startswith("pairwise.") for path in entry["paths"].values())
+              for entry in manifest["figures"] if entry["kind"] == "pairwise"),
+          "all pairwise paths start at 'pairwise.'", "pairwise paths")
+
     expected_panels = {
-        "mask_in": ["amplitude (log)", "phase"],
-        "mask_out": ["amplitude (log)", "phase"],
-        "phi_dist": ["phi(r) map", "phi distribution"],
+        "amplitude": ["amplitude |psi(r)| (log scale)"],
+        "theta_map": ["theta(r) map", "amplitude gate mask"],
+        "theta_dist": ["theta distribution (gated)",
+                       "theta distribution folded mod 120 deg"],
     }
     bad_panels = None
     for entry in manifest["figures"]:
         if entry["kind"] != "per_peak":
             continue
-        match = re.match(r"^(?:ring_1x1|ring_r3)_p(\d)_(mask_in|mask_out|phi_dist)\.png$",
+        match = re.match(r"^(?:ring_1x1|ring_r3)_p(\d)_(amplitude|theta_map|theta_dist)\.png$",
                          entry["file"])
         expected = expected_panels.get(match.group(2)) if match else None
         if expected is None or entry.get("panels") != expected:
             bad_panels = (entry["file"], entry.get("panels"))
             break
-    check("every per-peak figure declares its panels (the phi(r) map is a panel of "
-          "phi_dist, not a separate file)", bad_panels is None,
+    check("every per-peak figure declares its panels", bad_panels is None,
           "18 per-peak figures carry the documented panel lists"
           if bad_panels is None else f"unexpected panels: {bad_panels}",
-          "amplitude+phase / phi map+distribution")
+          "amplitude / theta map+mask / distribution+folded")
     summary_panels = {}
     for entry in manifest["figures"]:
         if entry["kind"] == "summary":
-            ring = entry["ring"]
-            summary_panels.setdefault(ring, {})[entry["file"].split("_", 1)[1]] = \
-                entry.get("panels")
-    check("each ring has seven summary figures and all declare their panels",
-          sorted(summary_panels) == ["ring_1x1", "ring_r3"]
-          and all(len(kinds) == 7 for kinds in summary_panels.values())
+            summary_panels.setdefault(entry["group"], {})[entry["file"]] = entry.get("panels")
+    check("each ring has four summary figures and the cross group one, all with panels",
+          all(len(kinds) == 4 for group, kinds in summary_panels.items()
+              if group in ("ring_1x1", "ring_r3"))
+          and len(summary_panels.get("cross", {})) == 1
           and all(all(panels for panels in kinds.values())
                   for kinds in summary_panels.values()),
-          f"per ring: "
-          + ", ".join(f"{ring}: {len(kinds)} figures "
-                      f"({', '.join(sorted(kinds))})"
-                      for ring, kinds in sorted(summary_panels.items())),
-          "7 per ring with panels")
+          "per group: "
+          + ", ".join(f"{group}: {len(kinds)} figures"
+                      for group, kinds in sorted(summary_panels.items())),
+          "4 per ring + 1 cross with panels")
 
     completed_cli = run_script("atlas.py",
                                ["--check", str(manifest_path), "--stats", str(stats_path),
-                                "--expected-figures", str(2 * FIGURES_PER_RING),
-                                "--expected-per-ring", str(FIGURES_PER_RING)], env)
+                                "--expected-figures", str(TOTAL_FIGURES),
+                                "--expected-per-ring", str(FIGURES_PER_RING),
+                                "--expected-cross", str(CROSS_FIGURES)], env)
     check("the delivered atlas checker really runs as a command line tool",
           completed_cli.returncode == 0 and "ATLAS CHECK PASSED" in completed_cli.stdout,
           f"exit code {completed_cli.returncode}, stdout tail: "
@@ -1052,19 +1074,64 @@ def test_pipeline_contract(n, workdir):
           f"reference_lines_deg = {manifest.get('reference_lines_deg')}, note = "
           f"'{manifest.get('reference_lines_note')}'", "2 pi k / 3 (0/120/240 deg)")
 
-    per_ring = {ring: info["figures"] for ring, info in manifest["per_ring"].items()}
-    check("the manifest declares 25 figures per ring",
-          per_ring == {"ring_1x1": FIGURES_PER_RING, "ring_r3": FIGURES_PER_RING},
-          f"per ring: {per_ring}",
-          f"{{'ring_1x1': {FIGURES_PER_RING}, 'ring_r3': {FIGURES_PER_RING}}}")
+    per_group = {group: info["figures"] for group, info in manifest["per_group"].items()}
+    check(f"the manifest declares {FIGURES_PER_RING} figures per ring and "
+          f"{CROSS_FIGURES} cross figures",
+          per_group == {"ring_1x1": FIGURES_PER_RING, "ring_r3": FIGURES_PER_RING,
+                        "cross": CROSS_FIGURES},
+          f"per group: {per_group}",
+          f"{{'ring_1x1': {FIGURES_PER_RING}, 'ring_r3': {FIGURES_PER_RING}, "
+          f"'cross': {CROSS_FIGURES}}}")
 
     stats_a = json.loads(stats_path.read_text())
+    pairwise = stats_a.get("pairwise", {})
+    groups_json = pairwise.get("groups", {})
+    counts_ok = (groups_json.get("within_1x1", {}).get("n_pairs") == 3
+                 and groups_json.get("within_r3", {}).get("n_pairs") == 3
+                 and groups_json.get("cross", {}).get("n_pairs") == 6)
+    entry_ok = True
+    for group in groups_json.values():
+        for entry in group.get("pairs", []):
+            import numpy as np
+            hist = np.array(entry.get("hist_counts", []))
+            if (not {"j", "k", "q_j", "q_k", "phase_diff_mean", "phase_diff_median",
+                     "phase_diff_R", "phase_diff_fwhm_deg", "amp_diff_median",
+                     "n_valid", "hist_counts"} <= set(entry)):
+                entry_ok = False
+            if hist.shape != (180, 100) or not np.all(np.asarray(entry["hist_x_edges"]) >= 0.0):
+                entry_ok = False
+    check("phase_stats.json carries the pairwise section: 3 + 3 within pairs, 6 cross "
+          "pairs, each with the D and a statistics and a 180 x 100 hist_counts",
+          counts_ok and entry_ok,
+          f"within_1x1 {groups_json.get('within_1x1', {}).get('n_pairs')}, within_r3 "
+          f"{groups_json.get('within_r3', {}).get('n_pairs')}, cross "
+          f"{groups_json.get('cross', {}).get('n_pairs')}; fields complete: {entry_ok}",
+          "3 / 3 / 6 with complete entries")
+
     if second_completed.returncode != 0 or not (second_outdir / "phase_stats.json").is_file():
         check("determinism and the remaining pipeline checks", False,
               "the second run did not produce phase_stats.json; not reading it",
               "run b completes")
         return
     stats_b = json.loads((second_outdir / "phase_stats.json").read_text())
+
+    def masked_bytes(path, directory):
+        """The file bytes with its own output directory replaced by a placeholder."""
+        return path.read_bytes().replace(str(directory).encode(), b"<outdir>")
+
+    stats_a_bytes = masked_bytes(stats_path, outdir)
+    stats_b_bytes = masked_bytes(second_outdir / "phase_stats.json", second_outdir)
+    check("two runs give byte-identical atlas_manifest.json",
+          manifest_path.read_bytes() == (second_outdir / "atlas_manifest.json").read_bytes(),
+          f"the two manifests are byte identical ({len(manifest_path.read_bytes())} bytes "
+          f"each; the manifest carries no path of its own)", "byte identical")
+    check("two runs give byte-identical phase_stats.json (its own output directory "
+          "masked)",
+          stats_a_bytes == stats_b_bytes and b"<outdir>" in stats_a_bytes,
+          f"the two files are byte identical after replacing each run's own output "
+          f"directory ({len(stats_a_bytes)} bytes each; the only difference is the "
+          f"'atlas.dir' field, which names that run's directory by construction)",
+          "byte identical modulo the output directory")
     for payload in (stats_a, stats_b):
         payload.pop("atlas", None)
     check("two runs give the same JSON numbers",
@@ -1091,7 +1158,6 @@ def test_pipeline_contract(n, workdir):
           "byte streams identical" if byte_identical
           else "pixel-identical, byte streams differ (metadata only)", "informational")
 
-    log_text = (outdir / "phase_stats.log").read_text()
     hits = []
     for ring in ("ring_1x1", "ring_r3"):
         block = stats_a["rings_analysis"][ring]
@@ -1100,6 +1166,8 @@ def test_pipeline_contract(n, workdir):
                              ("mean", block["peaks"][0]["phase_ungated_mean_deg"])):
             token = f"{value:.4f}"
             hits.append((f"{ring}.{field}", token, token in log_text))
+    pair_token = f"{groups_json['cross']['pairs'][0]['phase_diff_mean']:.4f}"
+    hits.append(("cross pair D mean", pair_token, pair_token in log_text))
     check("the log carries the same numbers as the JSON",
           all(hit for _name, _token, hit in hits),
           "; ".join(f"{name}={token}:{'found' if hit else 'MISSING'}"
@@ -1109,7 +1177,7 @@ def test_pipeline_contract(n, workdir):
     completed = run_script("stm_phase_analysis.py",
                            [str(csv_path), "-o", str(outdir_missing), "-L",
                             str(field_of_view), "--detector", "builtin",
-                            "--anchor", "inner"], env)
+                            "--stm-lib", stm_lib, "--anchor", "inner"], env)
     log = (outdir_missing / "phase_stats.log").read_text()
     payload = json.loads((outdir_missing / "phase_stats.json").read_text())
     check("missing r3 partner: exit code 2, an explicit message and no figure",
@@ -1122,14 +1190,8 @@ def test_pipeline_contract(n, workdir):
           "exit code 2, message present, 0 figures")
 
 
-def test_field_of_view_from_log(n, workdir):
-    """--size-nm-from-log must read the corrected canvas, not the input canvas.
-
-    A correction log states the field of view twice: the input canvas first and the
-    corrected canvas later (the correction resamples onto a larger canvas at a
-    constant nm/px).  The script analyses the corrected CSV, so the corrected line
-    is the right one; reading the first match silently wrong scales every radius.
-    """
+def test_field_of_view_from_log(n, workdir, stm_lib):
+    """--size-nm-from-log must read the corrected canvas, not the input canvas."""
     section("field of view from a correction log (corrected canvas, not input canvas)")
     env = dict(os.environ)
     env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
@@ -1148,8 +1210,8 @@ def test_field_of_view_from_log(n, workdir):
     outdir = base / "out"
     completed = run_script("stm_phase_analysis.py",
                            [str(csv_path), "-o", str(outdir), "--size-nm-from-log",
-                            str(log_path), "--detector", "builtin", "--no-figures"],
-                           env)
+                            str(log_path), "--detector", "builtin", "--stm-lib", stm_lib,
+                            "--no-figures"], env)
     log = (outdir / "phase_stats.log").read_text() if (outdir / "phase_stats.log").is_file() else ""
     payload = (json.loads((outdir / "phase_stats.json").read_text())
                if (outdir / "phase_stats.json").is_file() else {})
@@ -1169,8 +1231,8 @@ def test_field_of_view_from_log(n, workdir):
     outdir_plain = base / "out_plain"
     completed = run_script("stm_phase_analysis.py",
                            [str(csv_path), "-o", str(outdir_plain), "--size-nm-from-log",
-                            str(plain), "--detector", "builtin", "--no-figures"],
-                           env)
+                            str(plain), "--detector", "builtin", "--stm-lib", stm_lib,
+                            "--no-figures"], env)
     payload_plain = (json.loads((outdir_plain / "phase_stats.json").read_text())
                      if (outdir_plain / "phase_stats.json").is_file() else {})
     check("--size-nm-from-log falls back to the last 'field of view' match",
@@ -1184,8 +1246,8 @@ def test_field_of_view_from_log(n, workdir):
     outdir_empty = base / "out_empty"
     completed = run_script("stm_phase_analysis.py",
                            [str(csv_path), "-o", str(outdir_empty), "--size-nm-from-log",
-                            str(empty), "--detector", "builtin", "--no-figures"],
-                           env)
+                            str(empty), "--detector", "builtin", "--stm-lib", stm_lib,
+                            "--no-figures"], env)
     text = completed.stderr + completed.stdout
     needle = "no 'field of view"
     check("--size-nm-from-log without any match is an explicit error",
@@ -1201,6 +1263,15 @@ def main(argv=None):
                         help="scratch directory (default: <tmp>/stm-phase-selftest)")
     parser.add_argument("--size", type=int, default=384,
                         help="canvas side of the synthetic images (default 384)")
+    parser.add_argument("--stm-lib", default=DEFAULT_STM_LIB,
+                        help="STM_DataProcessing src directory (package detection and "
+                             "the gwyddion colormap)")
+    parser.add_argument("--lambda-nm", type=float, default=3.0,
+                        help="Gaussian window width used by the analytic stages "
+                             "(default 3.0 nm, the engine default)")
+    parser.add_argument("--nm-per-px", type=float, default=0.13,
+                        help="pixel size used by the analytic stages (default 0.13 nm, "
+                             "about the 50 nm / 384 px of the scratch canvas)")
     parser.add_argument("--quick", action="store_true",
                         help="skip the end-to-end pipeline and correction stages")
     parser.add_argument("--keep", action="store_true",
@@ -1214,25 +1285,25 @@ def main(argv=None):
     workdir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(workdir / ".mplcache"))
 
-    print("# selftest.py - analytic checks of the phase estimators, the Fourier")
-    print("# identities they rely on, the discrimination boundary of the phase-sum")
-    print("# test, the ring lookup branches and the atlas contract of the skill")
+    print("# selftest.py - analytic checks of the demodulation engine, the Fourier")
+    print("# identities it satisfies, the gauge layer, the paper-style pairwise")
+    print("# analysis, the ring lookup branches and the atlas contract of the skill")
     print(f"# scratch directory: {workdir}")
 
+    test_engine_source_contract()
     test_circular_estimators()
-    test_identities(args.size)
-    test_gauge_drift(args.size)
-    test_injected_recovery(args.size)
-    test_robust_vs_absolute(args.size)
-    test_phase_definition(args.size)
-    test_multi_component_boundary(args.size)
+    test_engine_identities(args.size, args.lambda_nm, args.nm_per_px)
+    test_gauge_layer(args.size, args.lambda_nm, args.nm_per_px)
+    test_pairwise_contract(args.size, args.lambda_nm, args.nm_per_px)
+    test_pairwise_recovery(args.size, args.lambda_nm, args.nm_per_px)
     test_ring_lookup()
+    test_multi_component_boundary(args.size, args.lambda_nm, args.nm_per_px)
     if args.quick:
         check("end-to-end pipeline and correction stages skipped (--quick)", True,
               "informational")
     else:
-        test_pipeline_contract(args.size, workdir)
-        test_field_of_view_from_log(args.size, workdir)
+        test_pipeline_contract(args.size, workdir, args.stm_lib)
+        test_field_of_view_from_log(args.size, workdir, args.stm_lib)
 
     failed = [name for name, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")

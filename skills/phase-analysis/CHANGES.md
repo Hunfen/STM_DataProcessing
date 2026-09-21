@@ -1,9 +1,73 @@
 # 相对仓库现有版本（v1）的改动说明
 
+> **最新一版是 v3.0（2026-09-20）**，改动清单见下面第一节；它相对的是 **v2**（不是 v1）。
+> 下面其余各节是历史条目（v2 与 v2.1），保留原样。
+
 对照对象：仓库 `skills/stm-topo-phase-analysis/`（`SKILL.md` + `README.md` +
 `scripts/stm_topo_correct.py` + `scripts/stm_phase_analysis.py`）。
-下面逐条列出**改了什么**、**为什么**。所有数字都可在 `selftest_output.txt` 与
-`e2e_scratch/smoke_run.log` 里查到。
+下面逐条列出**改了什么**、**为什么**。所有数字都可在 self-test 输出里查到。
+
+---
+
+## v3.0（2026-09-20：换引擎 + 论文式成对相位差 + 81 张图集）
+
+用户批准的计划（图集粒度 B）分三部分，全部在 staging 内实现、复核后落盘。
+
+### A 引擎替换：废弃硬圆 mask 引擎，改用 local-q-map 的 Gaussian 窗
+
+| # | 改动 | 理由 |
+| --- | --- | --- |
+| A1 | `phasepipe.py` **删除** `reflection_field`（单反射圆 mask + iFFT）、`demod_phase`（`φ = angle(ψ) − (2π/N) q·(r−c)`）、`circle_mask`、`complex_ifft`；新增 `gaussian_field(topo, q_px, lambda_nm, nm_per_px)`，把 FFT 像素波矢换成 `q_rad_px = 2π q_px / N` 后**薄封装调用 `localqmap.demodulate`**（按路径 import sibling skill `skills/local-q-map/scripts/localqmap.py`，不复制、不修改引擎源码） | 论文口径要求 Gaussian 窗局域解调；硬圆 mask 的"减法解调"会引入与窗/掩膜几何有关的伪影，且解调相位自带斜坡 |
+| A2 | 相位口径统一为 **`θ_q(r) = arg ψ_q(r) ≈ +φ_q(r)`**：无 `q·(r−c)` 斜坡、无每峰常数；`phasepipe.theta_field(psi)` 是唯一入口 | 与 `local-q-map` skill 同一约定，跨 skill 可直接比较 |
+| A3 | `stm_phase_analysis.py`：删除 `--pct`、`mask_radius` 及全部相关产物（log 行、JSON 的 `mask_pct`/`mask_radius_px`、per-peak `mask_in/mask_out` 图、`qspace_mask`/`mask_all_in`/`mask_all_out`/`case_phase_histograms` 图）；新增 `--lambda-nm`（默认 **3.0 nm**）与 `--pair-bins-x/--pair-bins-y`（默认 180/100） | 引擎换代后 mask 半径不再是参数；λ 是引擎唯一的新参数 |
+| A4 | `analyse_ring` 签名改为 `(topo, valid, ring, lambda_nm, nm_per_px, …, peaks_override=None)`，返回 `(records, fields, psi)` | 逐峰场现在来自实空间图像的窗解调，不再来自 FFT2 的 mask |
+| A5 | **不动的部分**：峰检测、环聚类、1/√3 配对、`choose_rings`、三重积（含 `--project-q`）、`fold_to_120`、gauge 拟合与分支表、系统带、Friedel/三独立和、每峰分布形状、幅度/相干度 | 只换输入相位场；这些量的定义与代码逻辑逐字未改，v2 的方法学结论继续有效 |
+| A6 | 三条恒等式写进 SKILL 与 self-test：`Σ_r ψ = Σ_r T e^(−i q·r)`（窗的 `k=0` 权重恰为 1 ⇒ 与 λ 无关）、`ψ_{−q} = conj(ψ_q)`、`ψ'(r) = e^(−i q·δ) ψ(r−δ)` | 逐峰相位值 = 全画布幅度加权圆均值 = `arg Σ T e^(−i q·r)`，这是**换引擎后唯一改变的定义**（旧口径是 `mask` 内相干和） |
+
+**raw 单峰相位的平移**：v2 的相位值（单 bin mask 恒等式）= `arg X(q) + (2π/N) q·c`，`c = (N/2, N/2)`；
+换成 v3 后同一反射的相位值为 `φ`，即**每峰平移 `−π(q_x + q_y)`**。该常数恰是**原点平移
+`(N/2, N/2)`**（`(2π/N) q·(N/2, N/2) = π(q_x+q_y)`），被 gauge 拟合完全吸收
+（`r0_v3 = r0_v2 − (N/2, N/2)`）⇒ **gauge 后相位、闭合和、分布形状、成对差全部逐位不变**。
+self-test 对该平移与其吸收各有一条断言（阈值 1e-6° 与 1e-9°）。
+
+### B 论文式成对相位差分析（新增）
+
+| # | 改动 | 理由 |
+| --- | --- | --- |
+| B1 | 每对 `(j,k)` 定义 `D_jk(r) = wrap(arg ψ_j − arg ψ_k) = arg(ψ_j·conj(ψ_k))`、`a_jk(r) = (\|ψ_j\|−\|ψ_k\|)/(\|ψ_j\|+\|ψ_k\|)`、权重 `\|ψ_j ψ_k\|`、有效像素 = 两场有效掩码**交集** | 论文式成对量：相位差场 + 归一化幅度差场 |
+| B2 | 2D 直方图：x = `\|D\| mod π` ∈ [0,π]（默认 180 bins），y = `a` ∈ [−1,1]（默认 100 bins） | D 与其 Friedel 对应共享同一分布 ⇒ 折叠到 [0,π] |
+| B3 | 组内对 `(p0,p1),(p2,p3),(p4,p5)`（12 点钟起顺时针编号）**刻意避开 Friedel 对** | Friedel 对 `(q,−q)`：`D = 2θ_j`（一个场的平凡函数）、`a ≡ 0`、`θ_j+θ_{−j} ≡ 0`，不携带独立信息（self-test 逐条实测） |
+| B4 | 跨环对 = 每个 `ring_1x1` 峰配**方位角最近**的 `ring_r3` 峰，共 6 对；两环相差 30° 时的等距并列取 `ring_r3` **下标最小**者（`phasepipe.ANGLE_TIE`） | 跨环配对只看方位角，不看强度/倍率 |
+| B5 | `phase_stats.json` 新增 `pairwise` 段：`definition` / `bins` / `groups`（`within_1x1`、`within_r3`、`cross`），每对含 `j`、`k`、`q_j`、`q_k`、`phase_diff_mean/median/R/fwhm_deg/n_clusters`、`amp_diff_median/fwhm`、`n_valid`、`hist_counts`（含 `hist_x_edges`/`hist_y_edges`）、`paths` | 成对量的唯一数字来源；图-数字注解指向这些路径 |
+| B6 | log 新增成对段：每组每对的 D 均值/中位数/R/FWHM/簇数与 a 中位数、有效像素数 | 便于日志核查 |
+
+### C 图集契约：31/环×2 + 跨环 19 = 81 张
+
+| # | 改动 | 理由 |
+| --- | --- | --- |
+| C1 | 逐峰图改 3 张：`RING_p{i}_amplitude`（\|ψ\| log 图）、`RING_p{i}_theta_map`（θ(r) 图 + 幅度门掩膜）、`RING_p{i}_theta_dist`（θ 分布 + `θ mod 120°` 折叠分布，虚线 = `2πk/3`） | mask 图随引擎废除；θ 是新的唯一相位场 |
+| C2 | 每族汇总 4 张：`RING_theta_hist_summary`（六峰 2×3）、`RING_theta_map_summary`（六峰 2×3）、`RING_theta_field`（三重积 θ 图 + 分布）、`RING_ring_members_qspace`（FFT2 log 幅度上标出六个谱峰位置，`p0…p5` 标在径向外侧） | 用 θ 场的对应图替换 φ 场的旧图；不再画 mask 圆 |
+| C3 | 组内成对 3 张 ×3 对：`RING_pair_{j}_{k}_phase_diff / _amp_diff / _2dhist` | 每对三个交付图 |
+| C4 | 跨环 6 对 ×3 张 + `cross_pair_phase_diff_grid`（六对 D 场 2×3 汇总）= 19 张 | 跨环契约 |
+| C5 | 张数：每族 `3×6 + 4 + 3×3 = 31`，跨环 `6×3 + 1 = 19`，合计 **81** | 粒度 B |
+| C6 | `atlas.py`：条目新增 `group`（`ring_1x1`/`ring_r3`/`cross`）、`kind`（`per_peak`/`summary`/`pairwise`）、`pair`（成对键 `"<j>+<k>"`）；manifest 的 `per_ring` 换成 `per_group`（含 `per_peak`/`summary`/`pairwise`/`peaks`/`pairs` 计数）；`check_manifest` 增 `expected_cross`，并核对 `group`/`kind`/`peak`/`pair` 自洽；`--check` 支持 `--expected-per-ring 31 --expected-cross 19`（`--expected-figures 81`） | 图集契约必须机器可核 |
+| C7 | 删除 `atlas.py` 的 mask 类绘图方法（`mask_pair` / `qspace_mask` / `case_histograms` / `phi_distribution` / `grid_histograms` / `grid_maps`），换成 `amplitude_map` / `theta_map` / `theta_distribution` / `grid_theta_histograms` / `grid_theta_maps` / `theta_field` / `ring_members` / `pair_field` / `pair_2dhist` / `pair_grid` | 与 C1–C4 一一对应 |
+| C8 | `phase_stats.json` 的整数计数数组（`hist_counts`）按行内联写出（`dump_json`），避免逐元素换行把 JSON 撑成百万行 | 81 张图集 + 12 对的直方图后，默认缩进写法体积/行数都不可用 |
+
+### D 文档与自检
+
+| # | 改动 | 理由 |
+| --- | --- | --- |
+| D1 | `SKILL.md` 重写：§3.1 引擎与相位约定（`θ=+φ`、无斜坡、恒等式三件套、周期性边界如实说明）、§3.2 成对分析、§3.3 v2→v3 变与不变、§4 新图集清单与 manifest 字段、§5 self-test 表、§6 变与不变更新；`SKILL_VERSION = "3.0"` | 文档必须与实现逐条对应 |
+| D2 | `README.md` 更新：文件表、依赖（显式声明 sibling skill `local-q-map`）、命令（81/31/19）、关键点 | 同上 |
+| D3 | `selftest.py` 重写（80 项）：① 引擎源码契约（无旧引擎 token、只经 `gaussian_field`、CLI 有 `--lambda-nm` 无 `--pct`）；② 引擎恒等式（Σψ 与 λ 无关 3×3、平移律、θ=+φ 9 个平面波、无斜坡、Friedel、v2→v3 平移）；③ gauge 层（精确律、`(N/2,N/2)` 吸收、周期画布上 gauge 不变、非周期画布漂移率如实报告、分支表）；④ 成对契约（组内 3 对 60°、跨环 6 对最近方位角、Friedel 对平凡性、交换反号、直方图边界）；⑤ 成对注入回收（Δφ ≤ 0.5°、幅度比 ≤ 1e-3）；⑥ 环定位分支；⑦ 多成分边界（面积权重）；⑧ 端到端（81 张图集、命名模式、命名纪律扫描（图名/图标题 + SKILL.md/README.md）、PIL、注解 = JSON、`--pct` 被拒、两个 JSON **逐字节相同**（`phase_stats.json` 掩掉各自输出目录字段 `atlas.dir` 后）、图逐像素相同、缺 r3 分支）；⑨ `--size-nm-from-log` 三项 | 覆盖用户列出的全部验收项 |
+
+**验证**：`selftest.py --stm-lib <repo>/src` 退出码 **0**、**80/80** 通过；
+`atlas.py --check … --expected-figures 81 --expected-per-ring 31 --expected-cross 19` 打印
+`ATLAS CHECK PASSED`（0 failure）；`py_compile` 五个脚本全部通过；
+`cmp` 确认 `skills/local-q-map/scripts/localqmap.py` 与仓库原件逐字节一致（本 skill 只读引用）。
+
+**未改动**：`data/`、`data_processing/` 的既有产物，以及任何本 skill 目录之外的文件。
 
 ---
 
@@ -123,13 +187,13 @@
 
 | # | 改动 | 理由 |
 | --- | --- | --- |
-| 6.1 | SKILL.md 把逐峰相位的**像素集合**钉死为「全画布全部有效像素（权重 `\|ψ(r)\|`）」，写明公式 `φ(r) = angle(ψ(r)) − (2π/N)q·(r−c)`，并明确**不是**实空间圆盘子集、**不是**加门样本 | 同一句"mask 内幅度加权圆均值"有两种不等价读法；本 skill 实现的是全画布（无偏）那一支，必须写明 |
+| 6.1 | SKILL.md 把逐峰相位的**像素集合**钉死为「全画布全部有效像素（权重 `\|ψ(r)\|`）」，写明公式 `φ(r) = angle(ψ(r)) − (2π/N)q·(r−c)`，并明确**不是**实空间圆盘子集、**不是**加门样本 | 同一句"mask 内幅度加权圆均值"有两种不等价口径；本 skill 实现的是全画布（无偏）那一支，必须写明 |
 | 6.2 | 自测新增单 bin 平面波的定义钉死检查（`= arg X(q) + (2π/N)q·c`，实测 4.8e-12°） | 让"定义"成为可执行断言，而不是文档措辞 |
-| 6.3 | 自测新增**有界两区域反例**：全画布读法差 0.0015°，实空间圆盘子集读法差 106.250°（阈值 > 50° 仅记录）；检查文本打印完整几何并附 verifier 独立值 | 让"换个像素集合会差几十度"成为可复算的证据 |
+| 6.3 | 自测新增**有界两区域反例**：全画布口径差 0.0015°，实空间圆盘子集口径差 106.250°（阈值 > 50° 仅记录）；检查文本打印完整几何并附 verifier 独立值 | 让"换个像素集合会差几十度"成为可复算的证据 |
 | 6.4 | §5 的回收阈值限定为**单区域 / 全局调制**配置并给出几何参数 | 回收精度声明必须与定义、配置、几何绑定 |
 | 6.5 | gauge 段写明**六峰**拟合口径与六峰 rms 的语义（模型一致性诊断；合成注入 Φ_ref = 25° → rms = 25.0000°），并新增 `gauge.triple_fit`（q-sum-zero 三峰，rms 恒 0、无诊断信息）与 `gauge.fit_convention` | verifier 独立发现六峰最小二乘对 ±Φ 图案是折中解；必须给出两个口径的数字与各自含义 |
 
-| 6.6 | 自测补**等窗权重**两区域用例（左右各半、ΔΦ = 120°、窗权重 0.5026/0.4974）：全画布读法差 **0.0002°**，同配置圆盘子集读法 +1.437°（偏差随几何变，与 6.3 的 +106.25° 并列记录）；r₀ 行内与 JSON 增「六峰 rms 是模型一致性诊断、不是相位噪声」的说明（`gauge.rms_deg_note`） | captain/verifier 的补充点 1、2：等权用例要单独有，"六峰 rms 别被下游误读为相位噪声"要在 r₀ 报告里就地写明 |
+| 6.6 | 自测补**等窗权重**两区域用例（左右各半、ΔΦ = 120°、窗权重 0.5026/0.4974）：全画布口径差 **0.0002°**，同配置圆盘子集口径 +1.437°（偏差随几何变，与 6.3 的 +106.25° 并列记录）；r₀ 行内与 JSON 增「六峰 rms 是模型一致性诊断、不是相位噪声」的说明（`gauge.rms_deg_note`） | captain/verifier 的补充点 1、2：等权用例要单独有，"六峰 rms 别被下游误读为相位噪声"要在 r₀ 报告里就地写明 |
 
 ## 7 t3 修复（2026-09-18，来自 t2 的 F4/F5/F6）
 

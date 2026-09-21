@@ -4,9 +4,30 @@ The stage order mirrors the topographic phase pipeline of the analysis:
 
     image -> apodised FFT2 -> reflection detection (sub-pixel)
           -> ring radii -> the (1x1, r3) ring pair identified by the radius ratio
-          -> single-reflection circular mask -> complex iFFT
-          -> phi(r) = angle(psi) - (2*pi/N) q.(r - c)
+          -> per-reflection Gaussian-window demodulation (the local-q-map engine)
+          -> theta(r) = arg(psi_q(r))                     (no q.r ramp)
           -> amplitude gate -> phase statistics -> lattice-referenced gauge fix
+          -> paper-style pairwise phase differences of two reflections
+
+Phase convention
+----------------
+Every per-reflection field comes from ``localqmap.demodulate`` (the engine of the
+sibling ``local-q-map`` skill), reached through ``gaussian_field``:
+
+    psi_q(r)   = FFT^-1{ FFT[ T(r) exp(-i q.r) ] * exp(-Lambda^2 |k|^2 / 2) }
+    theta_q(r) = arg psi_q(r)  ~  +phi_q(r)          (the demodulated convention)
+
+so the map carries no ``q.r`` ramp and no per-reflection constant: a reflection at
+``q`` whose real-space content is ``A cos(q.r + phi)`` contributes
+``psi_q ~ (A/2) exp(+i phi)``.  Because the window's ``k = 0`` weight is exactly
+one, ``sum_r psi_q(r) = sum_r T(r) exp(-i q.r)`` holds exactly for every
+``Lambda``; with a real ``T`` the Friedel relation ``psi_{-q} = conj(psi_q)`` is
+exact, and a circular roll of the canvas acts as the exact translation
+
+    psi'_q(r) = exp(-i q.delta) * psi_q(r - delta)       (T'(r) = T(r - delta))
+
+which reduces to a constant phase offset ``exp(-i q.delta)`` wherever the
+demodulated field itself is constant (a single plane wave at exactly ``q``).
 
 Names
 -----
@@ -35,9 +56,21 @@ known exactly, which is what makes the study a ground-truth experiment.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
-from phasemath import (TWO_PI, circ_mean, linear_median_fwhm, weighted_stats)
+from phasemath import (TWO_PI, circ_mean, linear_median_fwhm, weighted_stats,
+                       wrap_pm_pi)
+
+# The demodulation engine of the sibling skill ``local-q-map`` is used as delivered,
+# by path (the two skills are installed side by side under ``skills/``).
+_LOCAL_Q_MAP_SCRIPTS = (Path(__file__).resolve().parents[2] / "local-q-map" / "scripts")
+if str(_LOCAL_Q_MAP_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_LOCAL_Q_MAP_SCRIPTS))
+
+import localqmap  # noqa: E402  (needs the path insert above)
 
 SQRT3 = float(np.sqrt(3.0))
 LADDER_120 = (0.0, 120.0, 240.0)
@@ -64,31 +97,36 @@ def window_array(name, n):
 
 
 def compute_fft2(image, window="hann"):
-    """``fftshift(fft2(image * window))`` -- the spectrum the pipeline analyses."""
+    """``fftshift(fft2(image * window))`` -- the spectrum used for detection."""
     arr = np.asarray(image, dtype=float)
     arr = np.nan_to_num(arr, nan=float(np.nanmean(arr)))
     return np.fft.fftshift(np.fft.fft2(arr * window_array(window, arr.shape[0])))
 
 
-def complex_ifft(freq):
-    return np.fft.ifft2(np.fft.ifftshift(freq))
+def gaussian_field(topo, q_px, lambda_nm, nm_per_px):
+    """Demodulated complex local field ``psi_q`` of one reflection.
+
+    Thin wrapper over the sibling skill's engine: the wavevector is converted from
+    the FFT-pixel convention used everywhere in this skill (an offset from the DC
+    bin, i.e. ``numpy.fft.fftfreq(n) * n``) into ``q_rad_px = 2 pi q_px / N`` and
+    handed to ``localqmap.demodulate`` together with the Gaussian window width
+    ``lambda_nm`` (the local-q-map default is 3.0 nm).  The returned field is
+    ``psi_q(r) ~ (A/2) exp(+i phi_q(r))``: no ``q.r`` ramp, no per-reflection
+    constant, and ``arg psi_q`` is the demodulated phase used by every estimator
+    of this skill.
+    """
+    array = np.asarray(topo, dtype=float)
+    if array.ndim != 2 or array.shape[0] != array.shape[1]:
+        raise ValueError(f"the canvas must be square, got {array.shape}")
+    n = int(array.shape[0])
+    q_rad_px = (TWO_PI / n) * np.asarray(q_px, dtype=float)
+    return localqmap.demodulate(array, q_rad_px=q_rad_px, lambda_nm=lambda_nm,
+                                nm_per_px=nm_per_px)
 
 
-def demod_phase(psi, q_px):
-    """``phi(r) = angle(psi) - (2*pi/N) q.(r - c)`` with ``c = N // 2``."""
-    n = psi.shape[0]
-    centre = n // 2
-    yy, xx = np.mgrid[:n, :n]
-    carrier = (TWO_PI / n) * (q_px[0] * (xx - centre) + q_px[1] * (yy - centre))
-    return np.mod(np.angle(psi) - carrier, TWO_PI)
-
-
-def circle_mask(shape, centres, radius):
-    mask = np.zeros(shape, dtype=bool)
-    yy, xx = np.ogrid[:shape[0], :shape[1]]
-    for px, py in centres:
-        mask |= (xx - px) ** 2 + (yy - py) ** 2 <= radius ** 2
-    return mask
+def window_px(lambda_nm, nm_per_px):
+    """The Gaussian window width of the engine in pixels (``Lambda / nm_per_px``)."""
+    return float(lambda_nm) / float(nm_per_px)
 
 
 # --------------------------------------------------------------------------- #
@@ -251,15 +289,14 @@ def snap_to_true_vectors(members, true_vectors, expect=6):
 # --------------------------------------------------------------------------- #
 # per-reflection phase field and statistics
 # --------------------------------------------------------------------------- #
-def reflection_field(fft2, q_px, mask_radius):
-    """Single-reflection circular mask, complex iFFT and demodulated phase."""
-    n = fft2.shape[0]
-    centre = n // 2
-    ix = int(round(q_px[0])) + centre
-    iy = int(round(q_px[1])) + centre
-    mask = circle_mask(fft2.shape, [(ix, iy)], mask_radius)
-    psi = complex_ifft(np.where(mask, fft2, 0.0))
-    return psi, demod_phase(psi, q_px)
+def theta_field(psi):
+    """``theta(r) = arg(psi(r))`` wrapped into ``[0, 2 pi)``.
+
+    The single phase convention of this skill: the demodulated field already
+    carries no ``q.r`` ramp, so the phase of a reflection is its argument with no
+    further carrier removal and no per-reflection constant.
+    """
+    return np.mod(np.angle(np.asarray(psi)), TWO_PI)
 
 
 def gate_mask(amp, valid, gate):
@@ -275,7 +312,7 @@ def gate_mask(amp, valid, gate):
     return valid & (amp > threshold)
 
 
-def reflection_stats(phi, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
+def reflection_stats(theta, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
     """Phase and amplitude statistics of one reflection.
 
     Two phase conventions are reported per reflection:
@@ -284,21 +321,22 @@ def reflection_stats(phi, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
                  the brighter half of the field of view, i.e. of the regions that
                  carry that reflection strongly.
     ``ungated``  the same estimator over every valid pixel, weighted by the local
-                 amplitude; this reproduces ``angle`` of the undivided FFT peak
-                 exactly (``sum_r psi(r) = N^2 X(q)``), so it is the reflection's
-                 global phase rather than the phase of a subset of the field.
+                 amplitude; this is exactly ``arg sum_r psi(r)`` and, because the
+                 engine's window has ``k = 0`` weight one, it equals
+                 ``arg sum_r T(r) exp(-i q.r)`` -- the reflection's global phase,
+                 independent of the window width.
 
     Amplitude statistics are reported ungated on purpose: under a ``p50`` gate the
     amplitude median is the gate threshold by construction and carries no extra
     information.
     """
     good = gate_mask(amp, valid, gate)
-    gated = weighted_stats(phi[good], amp[good], bins=bins, smooth_deg=smooth_deg)
-    allpix = weighted_stats(phi[valid], amp[valid], bins=bins, smooth_deg=smooth_deg)
+    gated = weighted_stats(theta[good], amp[good], bins=bins, smooth_deg=smooth_deg)
+    allpix = weighted_stats(theta[valid], amp[valid], bins=bins, smooth_deg=smooth_deg)
     amp_median, amp_fwhm, _ = linear_median_fwhm(amp[valid])
     amp_gated_median, amp_gated_fwhm, _ = linear_median_fwhm(amp[good])
-    _gmean, g_r, _ = circ_mean(phi[good], amp[good])
-    _umean, u_r, _ = circ_mean(phi[valid], amp[valid])
+    _gmean, g_r, _ = circ_mean(theta[good], amp[good])
+    _umean, u_r, _ = circ_mean(theta[valid], amp[valid])
     return {
         "gate_fraction": float(np.count_nonzero(good) / max(np.count_nonzero(valid), 1)),
         "phase_ungated": allpix,
@@ -311,6 +349,139 @@ def reflection_stats(phi, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
         "R_ungated": float(u_r),
         "R_gated": float(g_r),
     }
+
+
+# --------------------------------------------------------------------------- #
+# paper-style pairwise phase-difference analysis
+# --------------------------------------------------------------------------- #
+WITHIN_PAIRS = ((0, 1), (2, 3), (4, 5))
+# Two ring_r3 peaks can sit at the same angular distance from a ring_1x1 peak (the
+# two rings are 30 degrees apart in the hexagonal geometry), so the nearest-angle
+# rule needs an explicit tie tolerance: distances closer than this count as equal
+# and the smallest ring_r3 index wins.
+ANGLE_TIE = 1e-9
+
+
+def pair_phase_diff_field(psi_j, psi_k):
+    """``D_jk(r) = wrap(arg psi_j(r) - arg psi_k(r))`` in ``(-pi, pi]``.
+
+    ``arg(z_j * conj(z_k)) = arg z_j - arg z_k`` (mod ``2 pi``), so the difference
+    of two demodulated fields is one complex product; neither field carries a
+    ``q.r`` ramp, so the difference carries none either.
+    """
+    product = np.asarray(psi_j, dtype=complex) * np.conj(np.asarray(psi_k, dtype=complex))
+    return np.asarray(np.angle(product), dtype=float)
+
+
+def pair_amplitude_diff_field(psi_j, psi_k):
+    """``a_jk(r) = (|psi_j| - |psi_k|) / (|psi_j| + |psi_k|)`` in ``[-1, 1]``."""
+    left = np.abs(np.asarray(psi_j, dtype=complex))
+    right = np.abs(np.asarray(psi_k, dtype=complex))
+    total = left + right
+    out = np.zeros_like(total)
+    good = total > 0.0
+    out[good] = (left[good] - right[good]) / total[good]
+    return out
+
+
+def pair_weight_field(psi_j, psi_k):
+    """``|psi_j psi_k|``, the amplitude weight of a pair sample."""
+    return (np.abs(np.asarray(psi_j, dtype=complex))
+            * np.abs(np.asarray(psi_k, dtype=complex)))
+
+
+def pair_histogram(phase_diff, amp_diff, mask, weight, bins_phase=180,
+                   bins_amplitude=100):
+    """2D histogram of ``(|D| mod pi, a)`` over the pair's effective pixels.
+
+    ``x`` folds the phase difference onto ``[0, pi]`` (the modulo-``pi`` folding
+    that ``D`` and its Friedel counterpart share), ``y`` is the normalised
+    amplitude difference in ``[-1, 1]``.  Returns
+    ``(counts, x_edges, y_edges, n_valid)``; ``counts[i, j]`` is the ``|psi_j
+    psi_k|``-weighted count of samples with ``x`` in bin ``i`` and ``y`` in bin
+    ``j``.
+    """
+    good = np.asarray(mask, dtype=bool)
+    x = np.mod(np.abs(np.asarray(phase_diff, dtype=float)), np.pi)
+    y = np.asarray(amp_diff, dtype=float)
+    keep = good & np.isfinite(x) & np.isfinite(y)
+    counts, x_edges, y_edges = np.histogram2d(
+        x[keep], y[keep], bins=[int(bins_phase), int(bins_amplitude)],
+        range=[[0.0, np.pi], [-1.0, 1.0]],
+        weights=np.asarray(weight, dtype=float)[keep])
+    return counts.astype(float), x_edges, y_edges, int(np.count_nonzero(keep))
+
+
+def pair_analysis(psi_j, psi_k, valid_j, valid_k, bins_phase=180, bins_amplitude=100,
+                  bins=3600, smooth_deg=2.0):
+    """The three fields and the statistics of one reflection pair.
+
+    The effective pixels of a pair are the intersection of the two validity masks.
+    The phase-difference statistics use the circular estimators of ``phasemath``
+    with the weight ``|psi_j psi_k|``; the amplitude-difference statistic is the
+    weighted linear median of ``a_jk`` over the same pixels.
+    """
+    mask = np.asarray(valid_j, dtype=bool) & np.asarray(valid_k, dtype=bool)
+    phase_diff = pair_phase_diff_field(psi_j, psi_k)
+    amp_diff = pair_amplitude_diff_field(psi_j, psi_k)
+    weight = pair_weight_field(psi_j, psi_k)
+    stats = weighted_stats(phase_diff[mask], weight[mask], bins=bins,
+                           smooth_deg=smooth_deg)
+    amp_median, amp_fwhm, _ = linear_median_fwhm(amp_diff[mask], weight[mask])
+    counts, x_edges, y_edges, n_valid = pair_histogram(
+        phase_diff, amp_diff, mask, weight, bins_phase=bins_phase,
+        bins_amplitude=bins_amplitude)
+    return {
+        "phase_diff": phase_diff,
+        "amp_diff": amp_diff,
+        "weight": weight,
+        "mask": mask,
+        "phase_diff_mean_deg": float(stats["mean_deg"]),
+        "phase_diff_median_deg": float(stats["median_deg"]),
+        "phase_diff_R": float(stats["resultant_R"]),
+        "phase_diff_fwhm_deg": float(stats["fwhm_deg"]),
+        "phase_diff_n_clusters": int(stats["n_clusters"]),
+        "amp_diff_median": float(amp_median),
+        "amp_diff_fwhm": float(amp_fwhm),
+        "n_valid": int(n_valid),
+        "hist_counts": counts,
+        "hist_x_edges": x_edges,
+        "hist_y_edges": y_edges,
+    }
+
+
+def within_ring_pairs(records, expect=6):
+    """Index pairs ``(j, k)`` analysed inside one ring: (p0,p1), (p2,p3), (p4,p5).
+
+    The peaks of a ring are numbered clockwise from 12 o'clock, so these three
+    pairs join reflections 60 degrees apart and deliberately avoid the Friedel
+    pairs (p0,p3), (p1,p4), (p2,p5): for a Friedel pair ``psi_{-q} = conj(psi_q)``,
+    so its phase-difference field is a trivial function of one field instead of an
+    independent pair observable.
+    """
+    return [(j, k) for j, k in WITHIN_PAIRS if k < len(records)]
+
+
+def cross_ring_pairs(records_1x1, records_r3):
+    """For every ``ring_1x1`` peak, the ``ring_r3`` peak closest in polar angle.
+
+    The polar-angle distance of two peaks of the two rings is generally not unique
+    (the hexagonal geometry puts a ``ring_1x1`` peak between two ``ring_r3`` peaks
+    whenever the rings are 30 degrees apart), so distances that differ by less than
+    ``ANGLE_TIE`` count as equal and the smallest ``ring_r3`` index is used.
+    """
+    pairs = []
+    for j, left in enumerate(records_1x1):
+        angle_left = np.arctan2(left["q_px"][1], left["q_px"][0])
+        best, best_distance = None, np.inf
+        for k, right in enumerate(records_r3):
+            angle_right = np.arctan2(right["q_px"][1], right["q_px"][0])
+            distance = abs(float(wrap_pm_pi(angle_left - angle_right)))
+            if distance < best_distance - ANGLE_TIE:
+                best, best_distance = k, distance
+        if best is not None:
+            pairs.append((j, best))
+    return pairs
 
 
 def friedel_pairs(peaks_q):
@@ -357,30 +528,33 @@ def triple_selection(peaks_q):
 # --------------------------------------------------------------------------- #
 # ring level analysis
 # --------------------------------------------------------------------------- #
-def analyse_ring(fft2, valid, ring, mask_radius, gate="p50", bins=3600,
+def analyse_ring(topo, valid, ring, lambda_nm, nm_per_px, gate="p50", bins=3600,
                  smooth_deg=2.0, expect=6, prefix="", peaks_override=None):
     """Phase statistics of all reflections of one ring.
 
-    ``peaks_override`` replaces the detected six reflections by a supplied list
-    of the same tuples (used by the synthetic study to demodulate with the
-    ground-truth wavevectors; the mask centre is still the integer bin of the
-    supplied wavevector).
+    Every field is demodulated with ``gaussian_field`` at the wavevector of the
+    reflection, so the phase of a reflection is ``theta = arg(psi)`` with no ramp
+    and no per-reflection constant.
 
-    Returns ``(records, fields)``: ``records`` is a list of per-reflection dicts
-    (wavevector, sub-pixel offset from the integer mask centre, statistics) and
-    ``fields`` maps the peak name to ``(q_px, phi, amp)`` for the gauge fix and
-    the per-pixel triple product.
+    ``peaks_override`` replaces the detected six reflections by a supplied list of
+    the same tuples (used by the synthetic study to demodulate with the
+    ground-truth wavevectors).  ``psi`` maps the peak name to the complex
+    demodulated field, and ``fields`` to ``(q_px, theta, amp)`` for the gauge fix,
+    the per-pixel triple product and the pairwise analysis.
+
+    Returns ``(records, fields, psi)``.
     """
     peaks = (ring_six(ring["members"], expect=expect) if peaks_override is None
              else list(peaks_override))
-    n = fft2.shape[0]
+    n = int(np.asarray(topo).shape[0])
     centre = n // 2
-    records, fields = [], {}
+    records, fields, psi_map = [], {}, {}
     for i, (qx, qy, amplitude, snr, radius) in enumerate(peaks):
         name = f"{prefix}p{i}"
-        psi, phi = reflection_field(fft2, (qx, qy), mask_radius)
+        psi = gaussian_field(topo, (qx, qy), lambda_nm, nm_per_px)
+        theta = theta_field(psi)
         amp = np.abs(psi)
-        stats = reflection_stats(phi, amp, valid, gate=gate, bins=bins,
+        stats = reflection_stats(theta, amp, valid, gate=gate, bins=bins,
                                  smooth_deg=smooth_deg)
         records.append({
             "name": name, "q_px": (float(qx), float(qy)),
@@ -389,8 +563,9 @@ def analyse_ring(fft2, valid, ring, mask_radius, gate="p50", bins=3600,
             "radius_px": float(radius), "fft_amplitude": float(amplitude),
             "snr": float(snr), "stats": stats,
         })
-        fields[name] = ((float(qx), float(qy)), phi, amp)
-    return records, fields
+        fields[name] = ((float(qx), float(qy)), theta, amp)
+        psi_map[name] = psi
+    return records, fields, psi_map
 
 
 def pair_summary(records, key="phase_gated", quantity="mean_deg"):
