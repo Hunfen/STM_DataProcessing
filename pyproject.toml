@@ -67,6 +67,12 @@ exclude = ["tests*", "docs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A gate that cannot fail is worse than no gate: if the `check_*.py` glob ever
+# matches nothing (tests/ renamed, emptied or moved), the suite must ERROR at
+# collection instead of reporting "1 skipped" and exiting 0.  pytest 9 spells
+# this `fail_at_collect` (its only failing value; a bare "fail" is rejected
+# with exit code 4).
+empty_parameter_set_mark = "fail_at_collect"
 
 [tool.ruff]
 target-version = "py312"
