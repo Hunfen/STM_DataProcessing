@@ -73,6 +73,9 @@ testpaths = ["tests"]
 # this `fail_at_collect` (its only failing value; a bare "fail" is rejected
 # with exit code 4).
 empty_parameter_set_mark = "fail_at_collect"
+markers = [
+    "localdata: regression check needs measurement data that only exists on the maintainer's workstation; deselected in CI",
+]
 
 [tool.ruff]
 target-version = "py312"

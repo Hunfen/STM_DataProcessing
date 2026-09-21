@@ -39,7 +39,7 @@ jobs:
           python -c "import stm_data_processing, stm_data_processing.stm.qpi_jdos, stm_data_processing.dft.wannier90.mlwf_hamiltonian, stm_data_processing.utils.lattice; print('core import OK')"
 
   full-test:
-    name: full regression (pytest)
+    name: regression (data-independent subset)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,5 +48,9 @@ jobs:
           python-version: "3.12"
       - name: Install dev and ppt extras
         run: python -m pip install ".[dev,ppt]"
-      - name: Run the regression gate
-        run: pytest -q
+      # The maintainer's one-command gate (`pytest -q`) runs all nine checks and
+      # needs measurement data that deliberately never leaves this machine. CI
+      # runs only the data-independent subset; `-m "not localdata"` reports how
+      # many checks it deselected, so the split stays visible.
+      - name: Run the data-independent regression subset
+        run: pytest -q -m "not localdata"

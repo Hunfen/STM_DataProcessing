@@ -7,6 +7,18 @@ script as a subprocess from the repository root and fails when a child exits
 non-zero, so the one command gate is::
 
     .venv/bin/python -m pytest -q
+
+Checks that need measurement data which only exists on the maintainer's
+workstation are marked ``localdata``: the local gate above selects everything,
+while CI runs the data-independent subset::
+
+    .venv/bin/python -m pytest -q -m "not localdata"
+
+The classification is mechanical, never optimistic: a script is ``localdata``
+as soon as it references a local absolute path (``/Users/``), which is exactly
+how the data-dependent checks reach the real scans. A newly added check that
+reads such a path is therefore deselected in CI automatically instead of
+turning the CI job red.
 """
 
 from __future__ import annotations
@@ -20,6 +32,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK_SCRIPTS = sorted(Path(__file__).resolve().parent.glob("check_*.py"))
 _TAIL_LINES = 60
+LOCAL_PATH_MARK = "/Users/"
 
 
 def _tail(text: str) -> str:
@@ -36,7 +49,18 @@ def _failure_report(script: Path, completed: subprocess.CompletedProcess) -> str
     )
 
 
-@pytest.mark.parametrize("script", CHECK_SCRIPTS, ids=lambda path: path.stem)
+def needs_local_data(script: Path) -> bool:
+    """True when ``script`` references a local absolute path (``/Users/``)."""
+    return LOCAL_PATH_MARK in script.read_text(encoding="utf-8")
+
+
+def _param(script: Path) -> pytest.param:
+    """One parametrized case, tagged ``localdata`` when it needs local data."""
+    marks = [pytest.mark.localdata] if needs_local_data(script) else []
+    return pytest.param(script, marks=marks, id=script.stem)
+
+
+@pytest.mark.parametrize("script", [_param(script) for script in CHECK_SCRIPTS])
 def test_check_script_exits_zero(script: Path) -> None:
     """Each regression check script must exit 0 when run from the repo root."""
     completed = subprocess.run(
