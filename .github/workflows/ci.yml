@@ -20,9 +20,42 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install ruff
-        run: python -m pip install "ruff>=0.15.1"
+        run: |
+          # Take the exact version from pyproject's dev extra instead of a
+          # floating range: the formatter's output is part of what CI now
+          # enforces, so installing "the newest ruff" would let a ruff release
+          # redden the format gate with no repository change at all (this
+          # project was already bitten - `uv format` shipped 0.12.5 style, a
+          # probe resolved 0.15.22, the venv has 0.16.8, and the three
+          # disagreed about 31 files).
+          spec="$(python -c '
+          import pathlib, tomllib
+          dev = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"]
+          print(next(item for item in dev if item.startswith("ruff")))
+          ')"
+          echo "installing $spec"
+          python -m pip install "$spec"
+      # `ruff check .` on an EMPTY file set prints "All checks passed!" and
+      # exits 0 - a bare lint step is a gate that cannot fail, the same vacuous
+      # gate class the regression suite closed with `empty_parameter_set_mark`.
+      # So the file set is made explicit here: the tracked Python files of the
+      # checkout (exactly what CI has, and what `ruff check .` resolves in a
+      # clean tree), ruff is handed that list, and an empty list is an error
+      # instead of a green tick.  The count is echoed so the log shows how much
+      # was actually linted.
       - name: Lint
-        run: ruff check .
+        run: |
+          if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+            echo "::error::not inside a git checkout: the file set to lint cannot be determined"
+            exit 1
+          fi
+          count="$(git ls-files -- '*.py' '*.pyi' | wc -l | tr -d ' ')"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::no tracked Python file to lint: a gate that passes on an empty file set is vacuous"
+            exit 1
+          fi
+          echo "ruff check: linting $count tracked Python file(s)"
+          git ls-files -z -- '*.py' '*.pyi' | xargs -0 ruff check
       # `ruff format --check` exits 0 when it finds NO Python file at all (it
       # only writes "warning: No Python files found under the given path(s)" to
       # stderr), so a bare `ruff format --check .` would silently pass on an
