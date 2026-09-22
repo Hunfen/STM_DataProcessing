@@ -1643,7 +1643,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "ramanspy", marker = "extra == 'analysis'", specifier = ">=0.2.10" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.8" },
     { name = "scipy", specifier = ">=1.16.0" },
     { name = "sympy", specifier = ">=1.12" },
     { name = "tqdm", specifier = ">=4.67.0" },
