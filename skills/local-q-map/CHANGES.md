@@ -161,3 +161,132 @@ check 2 此前只断言**全局**统计量（幅度中位数误差 6.1e-6、画�
   并另有一条「两者谱差 = 缺口贡献」的精确断言（相对 2.3e-16 ≤ 1e-7）。
 - **幅度 FWHM 的边界情形**：分布峰落在直方图首/末 bin 时会导致半峰宽无下降沿；实现改为两端补零 bin，
   保证半峰线总能达到（均一分布仍返回 NaN，属正常）。
+
+## 2026-09（v1.0，逐 q 产物改为 HDF5 优先）
+
+### 目标与范围
+
+每个 q 原先写出 **4 个 `.npy`**（`field` / `amplitude` / `theta` / `mask`）。本仓的数据产物一律
+HDF5 优先（`docs/hdf5_convention.md`），故把这 4 个数组**合并为 1 个 `<stem>_q{j}.h5`**，
+四个数据集名与语义保持不变；PNG、`local_q_map.log`、`local_q_map_report.json` 与 CSV 读入口径**不动**。
+
+### 新增
+
+1. **`scripts/h5io.py`（新文件）**：仓库 `src/stm_data_processing/io/h5_convention.py` 的**自包含镜像**
+   ——h5 写入路径不依赖 `stm_data_processing`（该文件只 import 标准库 + `h5py` + `numpy`）。
+   *（说明：本 skill 对包的其余依赖只有 §3 的 `--stm-lib` `bragg_peak` 可选导入
+   （`localqmap.py` 里三处函数内的 try/except，导入失败会退回本地副本/记 `no_detector`），
+   那是基矢取向测量的既有设计，与 h5 约定无关，本次未改动。）*
+   常量与函数一一对应：
+   `SCHEMA_VERSION = 1`、`COMPRESSION = 'gzip'`、`COMPRESSION_OPTS = 4`、`CHUNK_TARGET_BYTES = 1 << 20`、
+   `chunk_shape()`（**显式**分块：从最后一维起填满 ~1 MiB 未压缩字节预算，预算用完后其余维每块 1 个元素；
+   小于预算时 `chunks == shape`，仍是显式分块）、`utc_now_iso()`、`create_dataset()`
+   （`track_times=False` + gzip/4 + 显式 chunks + 可选 `units` 属性）、`write_file_metadata()`
+   （根属性 `schema_version` / `generator` / `creation_date`）、`write_product()`
+   （一个文件 = 一次计算的一个产物）；`PRODUCT_DATASETS` 列出本 skill 的四个数据集名。
+2. **`localqmap.save_products(path, *, field, amplitude, theta, mask, generator)`**：取代 `save_npy()`，
+   一次写出 `<stem>_q{j}.h5`——`field`（complex128）、`amplitude`（float64）、`theta`（float64，
+   `units = 'rad'`）、`mask`（float64，1 = 有效，无量纲不写 units）。
+3. **`stm_local_q_map.py`**：`GENERATOR = Path(__file__).name` 进根属性 `generator`；
+   逐 q 的 `artifacts` 由 4 个 `.npy` 变成 `{h5, amplitude_png, theta_png, mask_png}`（报告与
+   `written` 同步指向 h5）；`--no-figures` 的语义不变（只少 3 张 PNG，h5 照写）。
+   报告里其余内容**逐字不动**——包括 `conventions.theta_png`（`degrees(angle(exp(1j * npy)))`）与
+   `conventions.invalid_pixels`（"kept finite in every npy"）这两处字面提到 "npy" 的说明。
+
+冻结 schema（`SKILL.md` §4.6、`README.md` §3.1）：根属性 `schema_version = 1`（int）、
+`generator = 'stm_local_q_map.py'`、`creation_date`（ISO-8601 带时区）；每个数据集 `track_times=False`、
+`compression='gzip'`、`compression_opts=4`、显式 `chunks`；`theta` 带 `units='rad'`。
+
+### 保持不变（逐项核对）
+
+> 当时的措辞滞后：`conventions.theta_png` 与 `conventions.invalid_pixels` 的字面仍写 "npy"。
+> 它们不在 t3 的授权改动范围内（冻结 schema 要求「其余产物保持精确的原名与原内容」，
+> 只授权把 `artifacts` 指向 h5），因此当时**逐字保留**；后续轮次已修正，见文末
+> 「报告 conventions 措辞修正（t6）」。
+
+同一份合成输入（N=256、两个 q）在改动前后各跑一次完整 CLI（同一 `-o` 路径，故报告里的绝对路径可比）：
+
+- **6 张 PNG 逐字节相同**（sha256 全部相等）；
+- **报告 JSON 的差异只有本改动必须改的部分**：每个 q 的 `artifacts`（4 个 `*_npy` 键 → 1 个 `h5` 键）
+  与顶层 `written`（"产物路径必须继续被报告"，该清单自然跟着指向 h5）。把这两处按改动说明归一后，
+  两份 JSON **完全相等**（数值、键、字段一个不差，逐字段比较为 `True`）；
+- **log 的差异只有 `# written:` 一行**（24 行其余逐行相同）；
+- **数值逐位不变**：新 h5 的四个数据集与改动前的 4 个 `.npy` **逐字节相同**
+  （`field` / `amplitude` / `theta` / `mask`，两个 q 都对，`tobytes()` 相等）。
+
+> 注：契约里「JSON 报告 sha256 相同」与「报告 `artifacts` 改指 h5」在字面上互斥——产物路径是报告正文的一部分。
+> 因此上面对「JSON 不变」的验证按「除本改动必须改的字段外逐字段相同」执行，并把差异逐行列出。
+
+### self-test
+
+- 新增 **check 12**「逐 q h5 产物契约」：4 个 npy 被 1 个 h5 取代且目录内无 `.npy`；根属性 /
+  gzip-4 / 显式分块（与 `h5io.chunk_shape` 逐数据集比对）/ `track_times=False` / `theta` 的 `units='rad'`
+  全符合；报告的 `artifacts` 指向 h5；`--no-figures` 恰好只写 h5 + 报告 + log；**负向对照**
+  （删掉 h5 文件 → `FileNotFoundError`；删掉一个数据集 → `KeyError` 点名该数据集），
+  保证「读产物的断言在 h5 或数据集缺失时会变红，而不是静默通过」。
+- 修改的既有断言（原 → 现）：
+  | 位置 | 改前 | 改后（同样或更强的覆盖） |
+  | --- | --- | --- |
+  | check 3 | `np.load(..._q0_field.npy)` | 读 `<stem>_q0.h5` 的 `field` 数据集（缺文件/数据集即抛错） |
+  | check 4 | `np.load(..._q0_amplitude.npy)` ×2 | 读同一 h5 的 `amplitude` 数据集 |
+  | check 4 | `not list(out_strict.glob("*.npy"))`、`len(list(out_report_frame.glob("*.npy"))) == 4` | `*.h5` 计数（0 / 1）**且**两个目录都没有 `.npy`（更强） |
+  | check 8 | 四个 `.npy` 逐个 `np.load` | 一次 `load_products()` 读四个数据集；断言改名为「every h5 dataset stays finite」 |
+  | check 9 | 「14 个文件逐字节相同」（含 8 个 npy） | 「6 张 PNG 逐字节相同 + 2 个 h5 × 4 个数据集逐位相同（8/8）」——h5 文件字节只差每次运行的 `creation_date`，故按数据集断言（覆盖不降） |
+  | check 11 | 期望 21 个文件（每 q 4 npy + 3 png） | 期望 16 个文件（每 q 1 h5 + 3 png）**并把「目录内没有多余文件」也断言上**（更强） |
+  | check 11 | 「npy 契约」（dtype/形状/掩码值/有限） | 「h5 契约」：同样断言 + `mask` 也是 `float64` |
+- 断言 **46 → 51 条**、检查 **11 → 12 项**，全部通过（退出码 0）。改动前 HEAD 版本的 self-test
+  （11 项 / 46 条）也在同一台机器上复跑确认全过，作为「没有断言被悄悄删掉或放宽」的基线。
+- 文档：`SKILL.md` 新增 §4.6（h5 约定）并更新 §4.1/§4.2/§4.3/§5/§6/§7；`README.md` 新增 §3.1
+  并更新文件表与产物表。`scripts/` 内已无任何 `np.save` / `np.savez`（自检 fixture 用 `np.savetxt` 写 CSV，
+  不是产物）。
+
+## 2026-09（v1.0，报告 conventions 措辞修正）
+
+### 问题
+
+t3 把逐 q 的四个 `.npy` 换成 `<stem>_q{j}.h5` 之后，运行报告自身的 `conventions` 里仍有两条描述
+把产物称作 npy，属**内容失真**（报告是用户/下游读的产物）：
+
+| key | 修正前 | 修正后 |
+| --- | --- | --- |
+| `theta_png` | `degrees(angle(exp(1j * npy))) in (-180, 180], twilight, vmin=-180, vmax=180` | `degrees(angle(exp(1j * theta))) of the 'theta' dataset of the per-q h5 product (<stem>_<label>.h5), twilight, vmin=-180, vmax=180` |
+| `invalid_pixels` | `drawn as NaN in the amplitude and theta PNGs (bad colour), kept finite in every npy` | `drawn as NaN in the amplitude and theta PNGs (bad colour), kept finite in the four datasets of the per-q h5 product <stem>_<label>.h5 (field, amplitude, theta, mask)` |
+
+`stm_local_q_map.py` 只改了这两条字符串（同一 commit 的 diff 里该文件再无其它 hunk）。
+
+### blast radius：报告 JSON 与 HEAD 运行的**完整**逐字段差异
+
+同一份合成输入（N=256、`--q 1,0 --q 1/3,1/3`）、同一 `-o` 路径，HEAD（f6ae270）与修正后各跑一次，
+逐叶子字段比较（`dict`/`list` 递归）：
+
+- 变化的叶子字段 **15 个**，全部属于三类，无第四类：
+  - 每 q 的 `artifacts`：4 个 `*_npy` 键消失、1 个 `h5` 键出现（5 × 2 q = 10）——迁移到 `.h5` 的产物路径；
+  - 上述两条 `conventions` 措辞（2 × 2 q = 4）；
+  - 顶层 `written`（1）——写出的文件清单，随产物路径一起指向 h5。
+- 其它一切逐字段相等：所有数值/统计量（幅度中位数、FWHM、圆均值/圆中位数、`resultant_R`、
+  恒等式误差、掩码覆盖率……）、阈值、`q_px`/`q_rad_px`/`q_nm_inv`、基矢与取向字段、
+  `basis_canvas_check`、`warnings`、`rings`、未改动的 `conventions` 字段、未移动的 PNG 路径。
+- `diff -u` 的 hunk 数：HEAD → 修正后共 4 个 hunk（每 q 一族）；修正前(t3) → 修正后共 2 个 hunk
+  （恰好这两条措辞），`.log` **逐字节相同**。
+
+### 不变性核对
+
+- **`.log`**：t3 → 修正后逐字节相同（`# written:` 行本来就只列文件名）；
+- **PNG**：6/6 sha256 与修正前完全相同；
+- **h5**：`field`/`amplitude`/`theta`/`mask` 的数据集 sha256（`tobytes()`）与修正前相同（两个 q，8/8）；
+  文件级 sha256 只差每次运行的 `creation_date`（把该字符串规范化后两次运行的文件 sha256 相等）;
+- **`--no-figures`**：文件集仍恰好是 `{<stem>_q0.h5, ..., local_q_map_report.json, local_q_map.log}`
+  （无 PNG）、报告 `artifacts` 仍是 `{'h5'}`、`figures` 仍为 `false`、h5 数据集 sha256 不变；
+  HEAD 版本同样只抑制 PNG（当时写 4 个 npy），压制语义与产物形态无关。
+
+### self-test
+
+- 新增 2 条断言（12 项不变，51 → **53 条**）：`conventions_problems()` 断言报告的
+  `theta_png`/`invalid_pixels` 不再出现 "npy"、两条措辞都点名 `<stem>_<label>.h5` 且四项数据集名齐全；
+  另一条是**负向对照**，把 t3 之前的旧措辞喂进同一个判定函数，要求违规列表非空——
+  `["theta_png: still describes the products as 'npy'", "invalid_pixels: ...", 'the PNG/mask notes do not
+  name the per-q h5 product', "the PNG/mask notes do not name the datasets ['field', 'mask']"]`——
+  即措辞一旦回退，前一条断言立刻变红。
+- 既有断言没有一条断言过这两条措辞（`grep -n 'conventions\|theta_png\|invalid_pixels' selftest.py`
+  在本轮之前无命中），因此没有任何断言需要修改，也没有断言被删除或放宽。
+- 文档：`SKILL.md` §5 第 12 行与断言条数、文末修改记录；`README.md` §1 与 §4 的条数与 check 列表同步。

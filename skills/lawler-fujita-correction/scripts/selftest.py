@@ -29,6 +29,8 @@ to the measured value, so a failure is quantified instead of announced.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import io
 import json
 import os
 import shutil
@@ -37,12 +39,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import h5io  # noqa: E402
 import lf_lib as lf  # noqa: E402
 
 A_NM = 0.246
@@ -93,6 +97,136 @@ def run_script(script, arguments, env):
         env=env,
         check=False,
     )
+
+
+# --------------------------------------------------------------------------- #
+# HDF5 product checks (the h5 acceptance of every array product of this skill)
+# --------------------------------------------------------------------------- #
+def h5_read(path, name):
+    """One dataset of an h5 product as a plain array (``None`` when missing)."""
+    if not path.is_file():
+        return None
+    with h5py.File(path, "r") as handle:
+        return None if name not in handle else handle[name][()]
+
+
+def bit_equal(left, right):
+    """Byte-exact equality of two arrays (dtype, shape and NaN payloads included).
+
+    ``np.array_equal`` reports ``False`` for two arrays that are equal except for
+    NaN entries (NaN != NaN), so the raw bytes are compared instead: that is the
+    strongest form of "the values moved from the .npy/.npz into the h5 unchanged".
+    """
+    return bool(
+        left is not None
+        and right is not None
+        and left.dtype == right.dtype
+        and left.shape == right.shape
+        and left.tobytes() == right.tobytes()
+    )
+
+
+def h5_object_times(path):
+    """``{dataset: (ctime, mtime)}`` of an h5 product, read from the object headers.
+
+    ``track_times=False`` (the repository convention) stores no time message, so
+    both stamps stay ``0``; with the default ``track_times=True`` the creation time
+    is recorded.  h5py's ``get_obj_track_times()`` does not reflect the flag of a
+    dataset read back from a file in this build (it reports True either way), so the
+    object header itself is inspected.
+    """
+    with h5py.File(path, "r") as handle:
+        return {
+            name: (
+                int(h5py.h5o.get_info(handle[name].id).ctime),
+                int(h5py.h5o.get_info(handle[name].id).mtime),
+            )
+            for name in handle
+        }
+
+
+def renders_like_csv(array, csv_path):
+    """Whether ``array`` re-rendered with the product format equals the CSV text.
+
+    The CSV is written with ``fmt="%.10e"``, so this is the exact statement
+    "the h5 dataset is the array that was written to the CSV".
+    """
+    if array is None or not csv_path.is_file():
+        return False
+    buffer = io.StringIO()
+    np.savetxt(buffer, array, delimiter=",", fmt="%.10e")
+    return buffer.getvalue() == csv_path.read_text()
+
+
+def check_h5_schema(path, datasets, generator, units):
+    """The h5 acceptance of one product; returns ``(ok, detail)``.
+
+    ``datasets`` lists the expected dataset names, ``generator`` is the name of
+    the script that must have produced the file and ``units`` maps every dataset
+    to its expected ``units`` attribute (``None``: dimensionless, so no attribute
+    is allowed).  Checks the three root attributes, the dataset names, and per
+    dataset: ``track_times=False`` (no time message in the object header),
+    ``gzip`` level 4, explicit chunks equal to the convention's
+    :func:`h5io.chunk_shape` output (and never above the 1 MiB budget), plus the
+    units attribute.
+    """
+    if not path.is_file():
+        return False, f"{path.name} missing"
+    problems = []
+    times = h5_object_times(path)
+    with h5py.File(path, "r") as handle:
+        attrs = dict(handle.attrs)
+        if attrs.get(h5io.SCHEMA_VERSION_ATTR) != int(h5io.SCHEMA_VERSION):
+            problems.append(
+                f"root schema_version {attrs.get(h5io.SCHEMA_VERSION_ATTR)!r}"
+            )
+        if attrs.get(h5io.GENERATOR_ATTR) != generator:
+            problems.append(f"root generator {attrs.get(h5io.GENERATOR_ATTR)!r}")
+        creation = attrs.get(h5io.CREATION_DATE_ATTR)
+        try:
+            stamp = dt.datetime.fromisoformat(str(creation))
+            if stamp.tzinfo is None:
+                problems.append(f"creation_date without UTC offset {creation!r}")
+        except ValueError:
+            problems.append(f"creation_date not ISO-8601 {creation!r}")
+        names = sorted(handle.keys())
+        if names != sorted(datasets):
+            problems.append(f"datasets {names} != {sorted(datasets)}")
+        for name in names:
+            dataset = handle[name]
+            if dataset.compression != h5io.COMPRESSION:
+                problems.append(f"{name}: compression {dataset.compression!r}")
+            if dataset.compression_opts != h5io.COMPRESSION_OPTS:
+                problems.append(
+                    f"{name}: compression_opts {dataset.compression_opts!r}"
+                )
+            expected_chunks = h5io.chunk_shape(dataset.shape, dataset.dtype.itemsize)
+            if expected_chunks is None or dataset.chunks != expected_chunks:
+                problems.append(f"{name}: chunks {dataset.chunks} != {expected_chunks}")
+            elif (
+                int(np.prod(dataset.chunks)) * dataset.dtype.itemsize
+                > h5io.CHUNK_TARGET_BYTES
+            ):
+                problems.append(f"{name}: chunk above the 1 MiB budget")
+            if any(times.get(name, (0, 0))):
+                problems.append(
+                    f"{name}: track_times is on (object header times {times.get(name)})"
+                )
+            expected_unit = units.get(name)
+            recorded = dataset.attrs.get(h5io.UNITS_ATTR)
+            if expected_unit is None and recorded is not None:
+                problems.append(f"{name}: dimensionless but units {recorded!r}")
+            elif expected_unit is not None and recorded != expected_unit:
+                problems.append(f"{name}: units {recorded!r} != {expected_unit!r}")
+    detail = (
+        f"{path.name}: schema_version = {h5io.SCHEMA_VERSION}, generator = "
+        f"{generator}, creation_date with offset, {len(datasets)} dataset(s) gzip/"
+        f"{h5io.COMPRESSION_OPTS} with the convention chunks and units "
+        f"{ {name: units.get(name) for name in sorted(datasets)} }"
+    )
+    if problems:
+        return False, f"{path.name}: " + "; ".join(problems)
+    return True, detail
 
 
 # --------------------------------------------------------------------------- #
@@ -375,6 +509,7 @@ def main(argv=None):
     )
 
     artifacts = report.get("lf_artifacts", {})
+    artifacts_h5 = fit_dir / f"{csv_path.stem}_lf.h5"
     wanted = [
         "theta_a",
         "theta_b",
@@ -386,37 +521,62 @@ def main(argv=None):
         "u_y",
         "mask",
     ]
+    # The LF maps are now the datasets of ONE h5 file (repo h5 convention); every
+    # dataset keeps its preview png.  The check is at least as strong as the former
+    # per-map "npy + png exist" check: it demands the datasets themselves, their
+    # units, and that the report registers the h5 file and the dataset name.
+    lf_units = {
+        "theta_a": "rad",
+        "theta_b": "rad",
+        "theta_c": "rad",
+        "amplitude_a": None,
+        "amplitude_b": None,
+        "amplitude_c": None,
+        "u_x": "nm",
+        "u_y": "nm",
+        "mask": None,
+    }
+    lf_h5_ok, lf_h5_detail = check_h5_schema(
+        artifacts_h5, wanted, "stm_lf_correct.py", lf_units
+    )
     absent = [
         name
         for name in wanted
         if name not in artifacts
-        or not Path(artifacts[name]["npy"]).is_file()
-        or not Path(artifacts[name]["png"]).is_file()
+        or Path(artifacts[name].get("h5", "")) != artifacts_h5
+        or artifacts[name].get("dataset") != name
+        or not Path(artifacts[name].get("png", "")).is_file()
     ]
     check(
-        "LF artifacts (theta / amplitude / u / mask, npy + png) written",
-        not absent,
-        ("missing: " + ", ".join(absent))
-        if absent
-        else f"{len(wanted)} maps, npy + png",
-        "every map has both files",
+        "LF artifacts (theta / amplitude / u / mask, one h5 + png each) written",
+        not absent and lf_h5_ok,
+        (("missing or misregistered: " + ", ".join(absent)) if absent else "")
+        + f" | {lf_h5_detail}",
+        "every map is a dataset of <stem>_lf.h5 and has its png",
     )
     # The names are pinned down literally, not only through the report: the SKILL.md
-    # and README tables promise <stem>_lf_<map>.{npy,png}, and a doc-name drift has to
-    # fail here instead of only showing up on a real run.
-    documented = [
-        f"{csv_path.stem}_lf_{name}{suffix}"
-        for name in wanted
-        for suffix in (".npy", ".png")
+    # and README tables promise the h5 plus <stem>_lf_<map>.png, and a doc-name drift
+    # (or a leftover per-map npy) has to fail here instead of only showing up on a
+    # real run.
+    documented = [f"{csv_path.stem}_lf_{name}.png" for name in wanted] + [
+        f"{csv_path.stem}_lf.h5"
     ]
     missing_files = [name for name in documented if not (fit_dir / name).is_file()]
+    replaced = [
+        f"{csv_path.stem}_lf_{name}.npy"
+        for name in wanted
+        if (fit_dir / f"{csv_path.stem}_lf_{name}.npy").is_file()
+    ]
     check(
         "LF artifacts carry the documented _lf_ filenames on disk",
-        not missing_files,
-        ("missing: " + ", ".join(missing_files))
-        if missing_files
-        else f"{len(documented)}/{len(documented)} documented names exist in {fit_dir}",
-        "every documented <stem>_lf_<map>.{npy,png} exists",
+        not missing_files and not replaced,
+        (
+            f"{len(documented)}/{len(documented)} documented names exist in {fit_dir}, "
+            f"per-map npy files left over: {replaced or 'none'}"
+        )
+        if not missing_files
+        else ("missing: " + ", ".join(missing_files)),
+        "the one <stem>_lf.h5 and every <stem>_lf_<map>.png exist, no per-map npy left",
     )
 
     products = (
@@ -436,13 +596,44 @@ def main(argv=None):
         f"{None if fft2 is None else fft2.dtype}{None if fft2 is None else fft2.shape}",
         "four products, complex128 fft2 on the corrected canvas",
     )
+    # The h5 product of the generated corrected canvas: the repo h5 convention plus
+    # the two arrays bit-exactly (fft2 versus the kept .npy, dtype included, and
+    # `corrected` re-rendered with the CSV format versus the CSV text).
+    corrected_h5 = fit_dir / f"{csv_path.stem}_corrected.h5"
+    corrected_h5_ok, corrected_h5_detail = check_h5_schema(
+        corrected_h5, ["corrected", "fft2"], "stm_lf_correct.py", {}
+    )
+    corrected_from_h5 = h5_read(corrected_h5, "corrected")
+    fft2_from_h5 = h5_read(corrected_h5, "fft2")
+    fft2_exact = bool(
+        fft2_from_h5 is not None
+        and fft2 is not None
+        and fft2_from_h5.dtype == np.complex128
+        and bit_equal(fft2_from_h5, fft2)
+    )
+    corrected_exact = bool(
+        corrected_from_h5 is not None
+        and corrected_from_h5.dtype == np.float64
+        and renders_like_csv(corrected_from_h5, products[0])
+    )
+    check(
+        "corrected h5 product (h5 convention, bit-exact arrays)",
+        corrected_h5_ok and fft2_exact and corrected_exact,
+        (
+            f"{corrected_h5_detail}; fft2 == .npy exactly {fft2_exact} "
+            f"(dtype {None if fft2_from_h5 is None else fft2_from_h5.dtype}), "
+            f"corrected is the array written to the CSV {corrected_exact} "
+            f"(dtype {None if corrected_from_h5 is None else corrected_from_h5.dtype})"
+        )
+        if corrected_h5_ok
+        else corrected_h5_detail,
+        "root attrs + gzip/4 + convention chunks + units, arrays bit-exact",
+    )
 
     # ------------------------------------------------------------ recovery  #
     section("known displacement recovery")
-    mask = np.load(artifacts["mask"]["npy"]).astype(bool)
-    u_fit = np.stack(
-        [np.load(artifacts["u_x"]["npy"]), np.load(artifacts["u_y"]["npy"])]
-    )
+    mask = np.asarray(h5_read(artifacts_h5, "mask")).astype(bool)
+    u_fit = np.stack([h5_read(artifacts_h5, "u_x"), h5_read(artifacts_h5, "u_y")])
     comparison = compare_recovered_field(u_fit, mask, u_injected, FIELD_NM)
     reference_rms = comparison["reference_rms_nm"]
     tolerance = max(RECOVERY_RELATIVE_TOL * reference_rms, RECOVERY_ABSOLUTE_TOL_NM)
@@ -523,18 +714,74 @@ def main(argv=None):
 
     # --------------------------------------------------------- transfer     #
     section("transfer bundle")
-    u_field = bundle.with_suffix(".npz")
+    u_field = bundle.with_suffix(".h5")
+    stale_npz = bundle.with_suffix(".npz")
     bundle_payload = json.loads(bundle.read_text()) if bundle.is_file() else {}
+    # The bundle's u field moved from npz to h5 (repo h5 convention) and the JSON has
+    # to point at it: the check demands the h5 members, their units and the
+    # u_field_file value, and that no npz is written any more.
+    #
+    # The units are pinned one by one against the quantity each dataset holds: u_x/u_y
+    # are displacements in nm, field_of_view_nm_reference is a length in nm, and
+    # nm_per_px is a scale factor (a ratio of two lengths) in nm/px -- pinning it to
+    # 'nm' would silently mis-scale a consumer that trusts attrs['units'].  `valid` is
+    # a dimensionless 0/1 mask and n_px_reference is a pixel count, i.e. not a physical
+    # quantity, so both must carry NO units attribute at all (None below means exactly
+    # that: check_h5_schema() fails when such a dataset has one).
+    bundle_units = {
+        "u_x": "nm",
+        "u_y": "nm",
+        "valid": None,
+        "n_px_reference": None,
+        "field_of_view_nm_reference": "nm",
+        "nm_per_px": "nm/px",
+    }
+    bundle_h5_ok, bundle_h5_detail = check_h5_schema(
+        u_field,
+        [
+            "u_x",
+            "u_y",
+            "valid",
+            "n_px_reference",
+            "field_of_view_nm_reference",
+            "nm_per_px",
+        ],
+        "stm_lf_correct.py",
+        bundle_units,
+    )
     check(
-        "bundle JSON + u-field npz written",
+        "bundle JSON + u-field h5 written",
         bundle.is_file()
         and u_field.is_file()
+        and not stale_npz.is_file()
         and bundle_payload.get("schema") == "lawler-fujita-correction-transform"
-        and bundle_payload.get("schema_version") == 1,
+        and bundle_payload.get("schema_version") == 1
+        and bundle_payload.get("u_field_file") == str(u_field)
+        and bundle_h5_ok,
         f"schema {bundle_payload.get('schema')!r} v{bundle_payload.get('schema_version')}, "
         f"u field {u_field.name} "
-        f"{'present' if u_field.is_file() else 'missing'}",
-        "schema + npz",
+        f"{'present' if u_field.is_file() else 'missing'}, u_field_file "
+        f"{bundle_payload.get('u_field_file')!r}, leftover npz "
+        f"{stale_npz.is_file()} | {bundle_h5_detail}",
+        "schema + h5 members with units + u_field_file pointing at the h5",
+    )
+    # Both h5 files of a run carry the same displacement field and mask: the very same
+    # values moved out of the per-map npy files into <stem>_lf.h5, so they must be
+    # bit-identical to the copies in the bundle that the apply stage consumes.
+    same_field = bool(
+        bit_equal(h5_read(artifacts_h5, "u_x"), h5_read(u_field, "u_x"))
+        and bit_equal(h5_read(artifacts_h5, "u_y"), h5_read(u_field, "u_y"))
+        and bit_equal(
+            h5_read(artifacts_h5, "mask"),
+            np.asarray(h5_read(u_field, "valid")).astype(float),
+        )
+    )
+    check(
+        "the map h5 and the bundle h5 carry the same u_x, u_y and mask exactly",
+        same_field,
+        "u_x, u_y and mask of <stem>_lf.h5 equal the bundle copies bit for bit "
+        f"{same_field}",
+        "byte-exact equality on all three arrays",
     )
 
     same_dir = workdir / "apply_same"
@@ -572,6 +819,39 @@ def main(argv=None):
         bool(ok_same and exact),
         detail,
         "allclose rtol=atol=1e-10 and the same NaN mask",
+    )
+
+    # The apply stage now reads the u field out of the bundle h5 and writes the same
+    # corrected h5 as the fit stage; on the identical grid its two arrays must be
+    # bit-identical to the fit stage's (dtype included), which is the strongest form
+    # of "the transfer reproduces the fit".
+    apply_h5 = same_dir / f"{csv_path.stem}_corrected.h5"
+    apply_h5_ok, apply_h5_detail = check_h5_schema(
+        apply_h5, ["corrected", "fft2"], "stm_lf_apply.py", {}
+    )
+    apply_corrected = h5_read(apply_h5, "corrected")
+    apply_fft2 = h5_read(apply_h5, "fft2")
+    fit_corrected = h5_read(corrected_h5, "corrected")
+    fit_fft2 = h5_read(corrected_h5, "fft2")
+    apply_bit_equal = bool(
+        apply_corrected is not None
+        and fit_corrected is not None
+        and apply_fft2 is not None
+        and fit_fft2 is not None
+        and bit_equal(apply_corrected, fit_corrected)
+        and bit_equal(apply_fft2, fit_fft2)
+    )
+    check(
+        "apply h5 product is bit-identical to the fit stage (u read from the h5)",
+        apply_h5_ok and apply_bit_equal,
+        (
+            f"{apply_h5_detail}; corrected byte-identical "
+            f"{bit_equal(apply_corrected, fit_corrected)}, fft2 byte-identical "
+            f"{bit_equal(apply_fft2, fit_fft2)}"
+        )
+        if apply_h5_ok
+        else apply_h5_detail,
+        "h5 convention + bit-identical corrected and fft2",
     )
 
     target_csv = workdir / f"target_{TARGET_SIZE}.csv"
@@ -685,12 +965,12 @@ def main(argv=None):
     default_report = read_report(default_dir)
     detail = f"fit exit code {default.returncode}"
     if default_report is not None and default_report.get("fallback") is False:
-        artifacts_default = default_report["lf_artifacts"]
-        mask_default = np.load(artifacts_default["mask"]["npy"]).astype(bool)
+        default_h5 = default_dir / f"{csv_path.stem}_lf.h5"
+        mask_default = np.asarray(h5_read(default_h5, "mask")).astype(bool)
         u_default = np.stack(
             [
-                np.load(artifacts_default["u_x"]["npy"]),
-                np.load(artifacts_default["u_y"]["npy"]),
+                h5_read(default_h5, "u_x"),
+                h5_read(default_h5, "u_y"),
             ]
         )
         rms_default = float(np.sqrt(np.mean(u_default[:, mask_default] ** 2)))

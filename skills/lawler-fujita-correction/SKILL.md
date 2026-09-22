@@ -1,6 +1,6 @@
 ---
 name: lawler-fujita-correction
-description: Lawler–Fujita 晶格相位矫正（Fujita et al., PNAS 2014, SI §4）：正方形 STM 拓扑 CSV + 视场 L（nm）→ 在 1x1 环上做双（三）方向 lock-in 得到局域晶格相位，解出逐点位移场 u(r)（nm）并按 u 重采样整张图；输出矫正 CSV/复数 FFT2/预览图/报告 + 相位·幅度·位移·掩码全套 npy/png 产物，并可导出「可迁移矫正包」（变换 JSON + u 场 npz）套用到同一扫描的其它图（含不同像素数）。当用户给出拓扑图 CSV 与图像边长（nm）并要求 Lawler–Fujita / 位移场 / 局域相位矫正、或要求把某张图的位移场矫正套用到另一张图时使用。
+description: Lawler–Fujita 晶格相位矫正（Fujita et al., PNAS 2014, SI §4）：正方形 STM 拓扑 CSV + 视场 L（nm）→ 在 1x1 环上做双（三）方向 lock-in 得到局域晶格相位，解出逐点位移场 u(r)（nm）并按 u 重采样整张图；输出矫正 CSV/HDF5 数组（corrected + fft2）/复数 FFT2 npy/预览图/报告 + 相位·幅度·位移·掩码的单一 `<stem>_lf.h5`（每张图另有 png 预览），并可导出「可迁移矫正包」（变换 JSON + u 场 h5）套用到同一扫描的其它图（含不同像素数）。当用户给出拓扑图 CSV 与图像边长（nm）并要求 Lawler–Fujita / 位移场 / 局域相位矫正、或要求把某张图的位移场矫正套用到另一张图时使用。
 ---
 
 # lawler-fujita-correction（Lawler–Fujita 晶格相位矫正，v1.0）
@@ -127,7 +127,8 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 | 产物 | 说明 |
 | --- | --- |
 | `<stem>_corrected.csv` | 矫正后拓扑（正方形，`%.10e` 逗号分隔，NaN 填充） |
-| `<stem>_corrected_fft2.npy` | 复数 FFT2（`complex128`，fftshift，Hanning 窗 + NaN 平面填充，与 affine skill 同口径） |
+| `<stem>_corrected.h5` | HDF5 数组产物：`corrected`（`float64`，与 CSV 同一数组）+ `fft2`（`complex128`，与 `.npy` 同一数组）；本 skill 自包含的 `scripts/h5io.py` 按仓库 h5 约定写出（`schema_version = 1`、`generator`、`creation_date`，显式 chunk ≤ 1 MiB + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`） |
+| `<stem>_corrected_fft2.npy` | 复数 FFT2（`complex128`，fftshift，Hanning 窗 + NaN 平面填充，与 affine skill 同口径）。**保留**：`skills/phase-analysis/` 通过 `--fft2` 读它，phase-analysis 不在本次迁移范围 |
 | `<stem>_corrected.png` / `<stem>_corrected_fft.png` | gwyddion 拓扑图 / inferno 对数 FFT 图 |
 | `correction.log` | 控制台报告（含下面两条契约行） |
 | `correction_report.json` | 机器可读报告（见下） |
@@ -141,17 +142,19 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 
 `X = L · n_out / n`（nm/px 不变）；下游 `phase-analysis --size-nm-from-log` 解析第二条。
 
-**Lawler–Fujita 附加产物**（每个都是 `.npy` + 预览 `.png`，**文件名一律带 `_lf_` 标记**）：
+**Lawler–Fujita 附加产物**：相位/幅度/位移/掩码全部是**一个 HDF5 文件** `<stem>_lf.h5` 的
+数据集（**文件名一律带 `_lf_` 标记**），每张图另有 `<stem>_lf_<name>.png` 预览；
+不再写 per-map `.npy`。
 
-| 名称 | npy 内容 | png |
-| --- | --- | --- |
-| `<stem>_lf_theta_a/b/c.npy` | 解缠后的局域相位（弧度，θ̄ = 0 规范） | 同一相位折叠到 (−180, 180] 度（twilight 循环色标） |
-| `<stem>_lf_amplitude_a/b/c.npy` | lock-in 幅度 `|psi_i|` | inferno |
-| `<stem>_lf_u_x.npy` / `_lf_u_y.npy` | 位移场分量（**nm**；像素轴 x = 列、y = 行） | RdBu_r（对称色标） |
-| `<stem>_lf_mask.npy` | 有效掩码（0/1，float） | gray |
+| 数据集（`<stem>_lf.h5`） | 内容 | `units` | png 预览 |
+| --- | --- | --- | --- |
+| `theta_a` / `theta_b` / `theta_c` | 解缠后的局域相位（弧度，θ̄ = 0 规范） | `rad` | 同一相位折叠到 (−180, 180] 度（twilight 循环色标） |
+| `amplitude_a` / `amplitude_b` / `amplitude_c` | lock-in 幅度 `|psi_i|` | 无（与输入拓扑同单位，非物理单位） | inferno |
+| `u_x` / `u_y` | 位移场分量（**nm**；像素轴 x = 列、y = 行） | `nm` | RdBu_r（对称色标） |
+| `mask` | 有效掩码（0/1，`float64`） | 无（无量纲） | gray |
 
-三方向模式（默认 `--pair-angle 120`）写全 9 张图（18 个文件）；`--pair-angle 60` 时只有两个方向，
-因此**不写** `_lf_theta_c` / `_lf_amplitude_c`（7 张图、14 个文件），log 与报告也会写明只有两个
+三方向模式（默认 `--pair-angle 120`）写全 9 个数据集（9 张 png）；`--pair-angle 60` 时只有两个方向，
+因此**不写** `theta_c` / `amplitude_c`（7 个数据集、7 张 png），log 与报告也会写明只有两个
 lock-in 方向、间距 60°、不存在第三方向。核心产物 `_corrected.*`、`correction.log`、
 `correction_report.json`、包文件名不受影响。
 
@@ -171,16 +174,17 @@ lock-in 方向、间距 60°、不存在第三方向。核心产物 `_corrected.
 | `residual_self_check.before/after` | 矫正前后重检测的 1x1 环各向异性（min/max 半径）与 1x1/r3 环对比值 |
 | `canvas_growth_px` / `max_displacement_px` / `n_out` / `corrected_field_of_view_nm` / `corrected_nm_per_px` / `nan_fraction` | 画布与产物 |
 | `method` / `fallback` / `fallback_reason` | `lawler_fujita`，或 `identity_fallback` + 原因 |
-| `lf_artifacts` / `written` / `transfer_constraints` | 产物路径与迁移约束说明 |
+| `lf_artifacts` | 每张 LF 图的登记项：`h5`（`<stem>_lf.h5` 路径）+ `dataset`（数据集名）+ `png`（预览路径） |
+| `written` / `transfer_constraints` | 核心产物路径与迁移约束说明 |
 
 **回退语义**：找不到可用 1x1 环、或有效掩码占比低于 `--min-coverage`（默认 0.50）时，
 `method = "identity_fallback"`、`fallback = true`：**不做任何矫正**，把输入原样（在其自身画布与
-视场上、不补 NaN）复制输出，并在 log 打 WARNING。此时不写相位/位移产物，也不写 u 场 npz。
+视场上、不补 NaN）复制输出，并在 log 打 WARNING。此时不写相位/位移产物，也不写 u 场 h5。
 
 ## 4 可迁移矫正包（`--save-transform FILE`）
 
 Lawler–Fujita 矫正**是可以迁移的**，但迁移的是**稠密位移场**而不是全局矩阵——论文 SI 本身就把
-同一张形貌图得到的矫正套用到同步测量的谱学数据上。包 = 一个 JSON + 一个 npz（同名、换后缀）：
+同一张形貌图得到的矫正套用到同步测量的谱学数据上。包 = 一个 JSON + 一个 h5（同名、换后缀）：
 
 ```json
 {
@@ -194,12 +198,15 @@ Lawler–Fujita 矫正**是可以迁移的**，但迁移的是**稠密位移场*
   "field_of_view_nm_reference": 50.0, "nm_per_px_reference": 0.048828,
   "pad": 10, "order": 3, "method": "lawler_fujita", "fallback": false,
   "mask_coverage_fraction": 0.999, "u_stats_nm": {...},
-  "u_field_file": "bundle.npz", "transfer_constraints": {...}, "usage": "apply with: ..."
+  "u_field_file": "bundle.h5", "transfer_constraints": {...}, "usage": "apply with: ..."
 }
 ```
 
-npz 内容：`u_x`、`u_y`（nm，参考网格）、`valid`（bool 掩码），以及 `n_px_reference`、
-`field_of_view_nm_reference`、`nm_per_px` 标量。
+h5 内容（`scripts/h5io.py`，仓库 h5 约定）：`u_x`、`u_y`（nm，参考网格，`units = "nm"`）、
+`valid`（bool 掩码，无量纲，**无** `units` 属性）、以及 `field_of_view_nm_reference`（`units = "nm"`）、
+`n_px_reference`（像素数，不是物理量，**无** `units` 属性）、`nm_per_px`（像素尺度，nm/px，
+`units = "nm/px"`）。HDF5 的标量不能分块/过滤，因此这三个数存成**单元素数据集**（名字与 npz
+时代一致），`u_field_file` 指向该 `.h5`，`stm_lf_apply.py` 从这里读场（不再是 `np.load` 的 npz）。
 
 **迁移约束（`stm_lf_apply.py` 编码并写进报告）**：
 
@@ -211,7 +218,7 @@ npz 内容：`u_x`、`u_y`（nm，参考网格）、`valid`（bool 掩码），�
 | 掩码传递 | `valid` 随场一起重采样；无效像素不施加位移 |
 | 回退包 | `method = "identity_fallback"` 时目标图原样复制 + log WARNING |
 
-## 5 一键 self-test（17 项）
+## 5 一键 self-test（20 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -226,7 +233,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差是半径的 2–3 %，因此 `|∇u|` 必须 ≲ 2 %；
 在 50 nm 视场内 1.0 nm 变化已经接近该上限（实测 `|∇u|` 到 0.025 仍可检出、0.03 起环碎裂）。
 
-覆盖与验收阈值（实测 **17/17** 通过，约 70 s）：
+覆盖与验收阈值（实测 **20/20** 通过）：
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -234,17 +241,20 @@ Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差
 | 2 | 拟合跑通并写出 `correction_report.json` | 退出码 0 + 报告写出 |
 | 3 | 报告含全部 Lawler–Fujita 字段 | 必填字段齐全 |
 | 4 | log 含两条契约行 | `# canvas ...` 与 `# corrected canvas: ...` |
-| 5 | 相位/幅度/位移/掩码 9 张图 npy + png 齐全 | 每张两种格式都在 |
+| 5 | 相位/幅度/位移/掩码 = **一个** `<stem>_lf.h5` 的 9 个数据集（含 `units`）+ 每张一张 png，且报告 `lf_artifacts` 登记 `h5`/`dataset`/`png` | h5 约定完全符合（root 三属性、`gzip`/4、约定 chunk、`track_times=False`、units 正确）+ 登记项齐全 |
 | 6 | 矫正 CSV + 复数 FFT2 + 两张预览图 | 形状 = 矫正画布、`complex128` |
-| 6b | LF 产物**字面文件名**（`<stem>_lf_<map>.{npy,png}`，18 个）在磁盘上存在 | 18/18 存在（不依赖报告 JSON 里的路径） |
+| 6b | LF 产物**字面文件名**在磁盘上存在：`<stem>_lf.h5` + 9 个 `<stem>_lf_<map>.png`，且**不留任何 per-map `.npy`** | 10 个名字全在 + 0 个遗留 npy |
+| 6c | `<stem>_corrected.h5` 的 h5 约定 + 数组逐位一致 | `fft2` 与 `.npy` **逐字节**相同（`tobytes()`，含 dtype）、`corrected` 以 `%.10e` 重渲染后与 CSV 文本逐字符相同（`float64`） |
 | 7 | 恢复位移场与注入场一致 | 误差 rms < max(10 % × 注入 rms, 0.1 nm)（实测 0.054 nm） |
 | 8 | 去掉参考仿射规范后一致 | 同上阈值（实测 0.0031 nm，即 1.7 %） |
 | 9 | 该检查非平凡 | 注入 rms > 阈值（实测 0.184 nm > 0.10 nm） |
 | 10 | 矫正后 1x1 环各向异性不劣于输入 | after ≤ 1.05 × before（实测 1.72 % → 0.012 %） |
 | 11 | 1x1/r3 环对比值回到理想 √3 | 偏差 ≤ 1 %（实测 −0.0009 %） |
 | 12 | 第三方向一致性（θ_a+θ_b+θ_c mod 2π） | 边界带（0.65λ）以内 wrapped rms < 2°（实测 0.18°；全掩码 7.41°，由边界污染主导） |
-| 13 | 可迁移包 JSON + u 场 npz 写出 | schema/schema_version 正确 + npz 存在 |
+| 13 | 可迁移包 JSON + u 场 **h5** 写出 | schema/schema_version 正确 + h5 约定合规 + `u_field_file` 指向 `.h5` + 无 `.npz` 遗留 |
+| 13b | `<stem>_lf.h5` 与包 h5 的 `u_x`/`u_y`/`mask` 逐位相同 | 三组 `np.array_equal` 全真 |
 | 14 | 同网格 apply 复现拟合段 | `allclose(rtol=atol=1e-10)` 且 NaN 掩码相同（实测 max|Δ| = 0） |
+| 14b | apply 段自身写出的 `<stem>_corrected.h5` 约定合规，且 `corrected`/`fft2` 与拟合段**逐字节**相同 | h5 约定 + `tobytes()` 字节比较（dtype 相同） |
 | 15 | 不同像素数（800）apply 重采样位移场 | 退出码 0、`n_px = 800`、`u_field_rescaled = true`、契约行在 |
 | 16 | 无晶格输入 → 回退 | `fallback = true`、`method = identity_fallback`、log 含 WARNING、输入原样复制 |
 
@@ -262,6 +272,19 @@ Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差
 
 ## 7 修改记录
 
+2026-09（HDF5 数组产物，本版）：全部数组侧产物改为 **HDF5 优先**——新增自包含模块
+`scripts/h5io.py`（仓库 h5 约定：`SCHEMA_VERSION = 1`、`gzip`/4、显式 chunk ≤ 1 MiB、
+root `schema_version`/`generator`/`creation_date`、`units` 属性；skill **不** import
+`stm_data_processing`）；`<stem>_corrected.h5`（`corrected` + `fft2`）；9 张 per-map
+`<stem>_lf_<name>.npy`（theta_a/b/c、amplitude_a/b/c、u_x、u_y、mask）**合并为一个**
+`<stem>_lf.h5`（同名数据集，相位 `units = "rad"`、位移 `units = "nm"`、掩码无量纲），
+每张图的 png 预览保留；`--save-transform` 的 u 场由 `<bundle>.npz` 改为 `<bundle>.h5`
+（同样 6 个成员），bundle JSON 的 `u_field_file` 指向 `.h5`，`stm_lf_apply.py` 改为从 h5 读场。
+**`<stem>_corrected_fft2.npy` 保留**：`skills/phase-analysis/` 用它做 `--fft2` 输入。
+CSV/PNG 名称与字节不变；`correction_report.json` 只有 `lf_artifacts` 的登记项随产物改名
+（`npy` 键 → `h5` + `dataset` 键），log 只有 `# LF artifacts:` 一行把过时的 `(npy+png)` 改成
+`(h5+png) ... in <stem>_lf.h5`（其余字段、图、契约行与逐行数值都逐字节不变）。
+self-test 17 → 20 项。见 `CHANGES.md`。
 2026-09（v1.0）：首个版本。Fujita et al., PNAS 2014 SI §4 的双（三）方向 lock-in 位移场矫正：
 最小二乘相位解缠、理想半径 + 数据取向的参考六方、`θ̄ = 0` 规范、按 u 重采样（画布 `n + 2(⌈max|u|⌉ + pad)`、
 矫正后视场 `L·n_out/n`）、相位/幅度/位移/掩码 9 张 npy+png 产物、边界带内第三方向一致性诊断、

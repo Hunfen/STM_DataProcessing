@@ -1,6 +1,6 @@
 ---
 name: affine-correction
-description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 NaN）+ 视场 L（nm）→ 数据锚定峰检测、显式六方参考晶格与可指定锚定环（1x1 或 r3）、对称正定拉伸矫正（纯拉伸、零旋转）与锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale），输出矫正 CSV/复数 FFT2/预览图/报告，可接任意后处理；并支持把拟合出的变换导出为独立 JSON（--save-transform）后应用到另一张拓扑图（stm_apply_transform.py）。当用户给出拓扑图 CSV 与图像边长（nm）并要求仿射矫正、或要求把某张图的矫正变换套用到另一张图时使用。
+description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 NaN）+ 视场 L（nm）→ 数据锚定峰检测、显式六方参考晶格与可指定锚定环（1x1 或 r3）、对称正定拉伸矫正（纯拉伸、零旋转）与锚定自检（1:√3 环对 + 全局拉伸尺度双 tell-tale），输出矫正 CSV/HDF5 数组（corrected + fft2）/复数 FFT2 npy/预览图/报告，可接任意后处理；并支持把拟合出的变换导出为独立 JSON（--save-transform）后应用到另一张拓扑图（stm_apply_transform.py）。当用户给出拓扑图 CSV 与图像边长（nm）并要求仿射矫正、或要求把某张图的矫正变换套用到另一张图时使用。
 ---
 
 # affine-correction（STM 拓扑图几何矫正，v2.2）
@@ -91,9 +91,23 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 
 ## 3 输出与下游接口契约
 
-输出（`-o OUT`）：`<stem>_corrected.csv`、`<stem>_corrected_fft2.npy`（复数 FFT2，含 Hanning 窗与
-NaN 平面填充）、`<stem>_corrected.png`（gwyddion）、`<stem>_corrected_fft.png`（inferno 对数）、
-`correction.log`、`correction_report.json`。
+输出（`-o OUT`）：`<stem>_corrected.csv`、`<stem>_corrected.h5`、`<stem>_corrected_fft2.npy`
+（复数 FFT2，含 Hanning 窗与 NaN 平面填充）、`<stem>_corrected.png`（gwyddion）、
+`<stem>_corrected_fft.png`（inferno 对数）、`correction.log`、`correction_report.json`。
+
+**HDF5 数组产物**（`<stem>_corrected.h5`，仓库统一 h5 约定，见 `docs/hdf5_convention.md`）：
+
+| 数据集 | 内容 | `units` |
+| --- | --- | --- |
+| `corrected` | `float64`，**与写进 CSV 的是同一个数组** | 无（输入拓扑是无量纲/任意单位，仓库约定无量纲量不写 `units`） |
+| `fft2` | `complex128`，**与 `<stem>_corrected_fft2.npy` 是同一个数组** | 无（同上） |
+
+文件根部属性：`schema_version = 1`、`generator = "stm_topo_correct.py"`（apply 段为
+`"stm_apply_transform.py"`）、`creation_date`（ISO-8601 带时区偏移）。每个数据集用显式 chunk
+（从末维起填满 ≤ 1 MiB 未压缩字节）且 `compression = "gzip"`、`compression_opts = 4`、
+`track_times = False`。写入脚本是本 skill 自包含的 `scripts/h5io.py`（skill **不** import
+`stm_data_processing`）。**`.npy` FFT2 保留**：`skills/phase-analysis/` 通过它的 `--fft2` 选项
+读这个文件，phase-analysis 不在本次产物迁移范围内。
 
 **下游接口契约（跨 skill，勿改）**：
 
@@ -140,7 +154,7 @@ apply 段只做**重采样**：与拟合段同样的读入/分隔符自动识别
 `written`（六个产物路径）。注意 `anchor_verdict` 是**参考图**的结论：apply 段不做自检，
 是否可信取决于参考图与目标图是否可比。
 
-## 4 一键 self-test（6 项）
+## 4 一键 self-test（8 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -149,7 +163,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 # 可选：--workdir DIR、--keep
 ```
 
-覆盖与验收阈值（实测 **6/6** 通过，约 1.5 min）：
+覆盖与验收阈值（实测 **8/8** 通过，约 1.5 min）：
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -159,11 +173,21 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 | 4 | 正确锚定（r3）通过自检 | `anchor_self_check.verdict == consistent`（实测比值 1.734029，偏 0.1142 %） |
 | 5 | 错误锚定（1x1）被同一自检抓住 | `verdict != consistent`（实测比值 1.871416，偏 8.05 %） |
 | 6 | 两段式变换（单条检查，内部 (a)–(e) 子步骤）：(a) `--save-transform` 导出的 JSON 20 个字段齐全、`affine_q` 与 `correction_report.json` 逐位一致；(b) 同一参考图 apply → `_corrected.csv` 与拟合段一致（`np.allclose rtol=atol=1e-10`，NaN 掩码相同且实测逐字节相同）；(c) 换尺寸目标（生成器 160 → 画布 183 px）的 `n_out` 按**目标 n** 重算（期望 205，与参考图 435 不同）、log 契约行视场 = `L·n_out/n`、`apply_report.json` 写出；(d) 本地 `_image_transform` 镜像与包内 `bragg_peak.correct._image_transform` 在矩阵 / `n_out` / offset 上逐位一致；(e) `identity_fallback` 变换 → 目标原样复制且 log 含 WARNING | (a)–(e) 全部通过 |
+| 7 | 矫正 stage 的 `<stem>_corrected.h5`：root 三属性、`generator = "stm_topo_correct.py"`、`gzip`/4、显式 chunk = 约定 chunk、`track_times=False` | 约定完全符合；`fft2` 与 `.npy` `np.array_equal`（`complex128`）、`corrected` 用 `%.10e` 重渲染后与 CSV 文本逐字符相同（`float64`） |
+| 8 | 两段式两个 stage 的 h5 产物：拟合段同上；同网格 apply 段的 `corrected`/`fft2` 与拟合段**逐位相同**（dtype 相同）；换尺寸与 `identity_fallback` 两段也写出合规 h5（`generator = "stm_apply_transform.py"`） | 两个 stage 的 h5 都合规 + 同网格逐位相同 |
 
-包不可导入时检查 1 与检查 6 各自以 informational 跳过（同原 self-test 的分支）。
+包不可导入时检查 1、6、7、8 各自以 informational 跳过（同原 self-test 的分支）。
 
 ## 5 修改记录
 
+2026-09（HDF5 数组产物，本版）：矫正数组改为 **HDF5 优先**——`stm_topo_correct.py` 与
+`stm_apply_transform.py` 额外写出 `<stem>_corrected.h5`（数据集 `corrected` = 写进 CSV 的数组、
+`fft2` = 写进 `.npy` 的数组），由本 skill **自包含**的新模块 `scripts/h5io.py` 按仓库 h5 约定写出
+（`schema_version = 1`、`generator`、`creation_date`、显式 chunk ≤ 1 MiB + `gzip`/4、
+`track_times=False`；两个数组无物理单位故不写 `units`）。**CSV/PNG/JSON/log 的名称与字节全部不变**
+（跨 skill 契约与 `affine_q` 等字段不受影响），**`.npy` FFT2 保留**供
+`skills/phase-analysis/` 的 `--fft2` 使用（phase-analysis 不在本次迁移范围）。self-test 6 → 8 项
+（新增两条 h5 检查：约定合规 + 数组逐位一致）。见 `CHANGES.md`。
 2026-09（改名，本版）：skill 由 `topo-correction` 改名为 `affine-correction`——目录、frontmatter
 `name:`、文档与用法示例脚本路径同步改名；**运行时行为零变化**：产物 schema id
 `topo-correction-transform`、报告 `skill` 字段值 `"topo-correction"`、log/stdout 行与 CLI help

@@ -411,7 +411,3 @@ def save_map(path, data, cmap="inferno", vmin=None, vmax=None, dpi=150, size=4.0
     ax.axis("off")
     fig.savefig(path, dpi=dpi, bbox_inches="tight", pad_inches=0)
     plt.close(fig)
-
-
-def save_npy(path, array):
-    np.save(path, np.asarray(array))

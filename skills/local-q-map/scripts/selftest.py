@@ -38,6 +38,7 @@ to the measured value, so a failure is quantified instead of announced.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import shutil
@@ -46,12 +47,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import h5io  # noqa: E402
 import localqmap as lq  # noqa: E402
 
 STM_LIB_DEFAULT = "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"
@@ -124,6 +127,126 @@ def run_script(script, arguments, env):
         env=env,
         check=False,
     )
+
+
+# --------------------------------------------------------------------------- #
+# the per-q h5 product: reading it and checking its frozen schema
+# --------------------------------------------------------------------------- #
+def product_path(outdir, prefix):
+    """Path of the per-q HDF5 product ``<prefix>.h5``."""
+    return Path(outdir) / f"{prefix}.h5"
+
+
+def load_products(outdir, prefix):
+    """The four datasets of one per-q h5 product, keyed by dataset name.
+
+    Raises ``FileNotFoundError`` when the product file is missing and ``KeyError``
+    when one of the four datasets is missing, so every assertion built on this
+    reader goes red instead of silently comparing nothing.
+    """
+    path = product_path(outdir, prefix)
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: per-q h5 product missing")
+    with h5py.File(path, "r") as handle:
+        absent = [name for name in h5io.PRODUCT_DATASETS if name not in handle]
+        if absent:
+            raise KeyError(f"{path}: missing dataset(s) {absent}")
+        return {name: handle[name][()] for name in h5io.PRODUCT_DATASETS}
+
+
+def products_load_error(outdir, prefix):
+    """The error ``load_products`` raises for ``prefix``, or ``None`` if it loads."""
+    try:
+        load_products(outdir, prefix)
+    except (OSError, KeyError) as error:
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def h5_root_attrs(path):
+    """The root attributes of one product file."""
+    with h5py.File(path, "r") as handle:
+        return dict(handle.attrs)
+
+
+def conventions_problems(conventions):
+    """Problems of one q's report ``conventions`` notes about the artifacts.
+
+    The notes describe the products of one q, which are now the four datasets of
+    ``<stem>_<label>.h5``: a note that still calls them ``npy`` is factually wrong,
+    and the PNG/mask notes must name the h5 product and its datasets.  Returns the
+    list of violations (empty when the wording is current).
+    """
+    problems = []
+    for key, text in conventions.items():
+        if "npy" in str(text).lower():
+            problems.append(f"{key}: still describes the products as 'npy'")
+    product_notes = " ".join(
+        str(conventions.get(key, "")) for key in ("theta_png", "invalid_pixels")
+    )
+    if "h5" not in product_notes:
+        problems.append("the PNG/mask notes do not name the per-q h5 product")
+    absent = [name for name in h5io.PRODUCT_DATASETS if name not in product_notes]
+    if absent:
+        problems.append(f"the PNG/mask notes do not name the datasets {absent}")
+    return problems
+
+
+def h5_schema_problems(path):
+    """List every violation of the frozen h5 schema found in one product file.
+
+    The schema is the repository one (mirrored in ``h5io``): root attributes
+    ``schema_version`` / ``generator`` / ``creation_date``, the four datasets,
+    ``track_times=False`` (observable as zero object-header timestamps: HDF5 2.0
+    reports ``get_obj_track_times() == 1`` even when the flag was set to false),
+    gzip level 4, explicit chunks from ``h5io.chunk_shape`` and ``units='rad'`` on
+    ``theta``.
+    """
+    problems = []
+    with h5py.File(path, "r") as handle:
+        attrs = dict(handle.attrs)
+        version = attrs.get(h5io.SCHEMA_VERSION_ATTR)
+        try:
+            version_ok = int(version) == int(h5io.SCHEMA_VERSION)
+        except TypeError, ValueError:
+            version_ok = False
+        if not version_ok:
+            problems.append(f"schema_version {version!r}")
+        generator = attrs.get(h5io.GENERATOR_ATTR)
+        if generator != "stm_local_q_map.py":
+            problems.append(f"generator {generator!r}")
+        creation = attrs.get(h5io.CREATION_DATE_ATTR)
+        if (
+            not isinstance(creation, str)
+            or dt.datetime.fromisoformat(creation).utcoffset() is None
+        ):
+            problems.append(f"creation_date {creation!r}")
+        names = set(handle)
+        if names != set(h5io.PRODUCT_DATASETS):
+            problems.append(f"datasets {sorted(names)}")
+        for name in h5io.PRODUCT_DATASETS:
+            if name not in handle:
+                continue
+            dataset = handle[name]
+            tags = []
+            if dataset.compression != h5io.COMPRESSION:
+                tags.append(f"compression {dataset.compression!r}")
+            if dataset.compression_opts != h5io.COMPRESSION_OPTS:
+                tags.append(f"compression_opts {dataset.compression_opts!r}")
+            expected = h5io.chunk_shape(dataset.shape, dataset.dtype.itemsize)
+            if dataset.chunks != expected:
+                tags.append(f"chunks {dataset.chunks!r} != {expected!r}")
+            info = h5py.h5o.get_info(dataset.id)
+            if info.ctime != 0 or info.mtime != 0:
+                tags.append("object timestamps tracked")
+            units = dataset.attrs.get(h5io.UNITS_ATTR)
+            if name == "theta" and units != "rad":
+                tags.append(f"theta units {units!r}")
+            if name != "theta" and units is not None:
+                tags.append(f"{name} units {units!r}")
+            if tags:
+                problems.append(f"{name}: " + ", ".join(tags))
+    return problems
 
 
 # --------------------------------------------------------------------------- #
@@ -484,9 +607,9 @@ def check_basis_px_equivalence(env, workdir, csv_path, report_path, size_nm):
             f"{completed_px.stderr.strip()[-300:]}",
         )
         return
-    name = f"{csv_path.stem}_q0_field.npy"
-    field_a = np.load(first / name)
-    field_b = np.load(second / name)
+    prefix = f"{csv_path.stem}_q0"
+    field_a = load_products(first, prefix)["field"]
+    field_b = load_products(second, prefix)["field"]
     scale = float(np.median(np.abs(field_a)))
     difference = float(np.max(np.abs(field_a - field_b))) / scale
     check(
@@ -814,7 +937,7 @@ def check_basis_sources(env, workdir, csv_path, size_nm, basis_rad_px, n_px):
         folded = float(lq.fold_deg(source["b1_angle_deg"]))
         canvas_angle = float(source["canvas_orientation"]["member_angles_deg"][0])
         median = float(
-            np.median(np.load(out_rotated / f"{csv_path.stem}_q0_amplitude.npy"))
+            np.median(load_products(out_rotated, f"{csv_path.stem}_q0")["amplitude"])
         )
         check(
             "a rotated affine report is re-framed on the corrected canvas",
@@ -847,7 +970,7 @@ def check_basis_sources(env, workdir, csv_path, size_nm, basis_rad_px, n_px):
             log = (out_report_frame / "local_q_map.log").read_text()
             forced_median = float(
                 np.median(
-                    np.load(out_report_frame / f"{csv_path.stem}_q0_amplitude.npy")
+                    load_products(out_report_frame, f"{csv_path.stem}_q0")["amplitude"]
                 )
             )
             ratio = float(warnings["basis_ring_strength_ratio"])
@@ -858,9 +981,11 @@ def check_basis_sources(env, workdir, csv_path, size_nm, basis_rad_px, n_px):
                 and "basis-vs-canvas check: MISMATCH" in log
                 and ratio < lq.BASIS_RING_STRENGTH_FRACTION
                 and completed_strict.returncode == 3
+                and not list(out_strict.glob("*.h5"))
                 and not list(out_strict.glob("*.npy"))
                 and completed_report_frame.returncode == 0
-                and len(list(out_report_frame.glob("*.npy"))) == 4
+                and len(list(out_report_frame.glob("*.h5"))) == 1
+                and not list(out_report_frame.glob("*.npy"))
                 and median > 1e6 * forced_median,
                 f"report frame (--no-strict): the members reach {100.0 * ratio:.4f} % of "
                 f"the annulus peak (threshold "
@@ -869,14 +994,14 @@ def check_basis_sources(env, workdir, csv_path, size_nm, basis_rad_px, n_px):
                 f"{float(warnings['basis_ring_offset_tolerance_px']):.3f} px), mismatch "
                 f"flag {warnings['basis_ring_mismatch']}, exit "
                 f"{completed_report_frame.returncode} with "
-                f"{len(list(out_report_frame.glob('*.npy')))} npy; |psi| median "
+                f"{len(list(out_report_frame.glob('*.h5')))} h5 product; |psi| median "
                 f"{forced_median:.3e} there against {median:.6f} on the canvas-derived "
                 f"basis (factor {median / max(forced_median, 1e-300):.3e}); default "
                 f"strict exit {completed_strict.returncode} with "
-                f"{len(list(out_strict.glob('*.npy')))} npy file(s)",
+                f"{len(list(out_strict.glob('*.h5')))} h5 product(s)",
                 "mismatch true, the log line present, ratio < 0.2, |psi| factor > 1e6, "
-                "--no-strict exit 0 and the default strict mode exit 3 without per-q "
-                "artifacts",
+                "--no-strict exit 0 with exactly one h5 product and the default strict "
+                "mode exit 3 without any per-q artifact (no h5, no npy)",
             )
 
     broken_path = workdir / "report_broken.json"
@@ -1143,10 +1268,7 @@ def check_nan_handling(env, workdir, basis, n_px, nm_per_px, columns, rows, size
         return
     payload = read_json(outdir / "local_q_map_report.json")
     stem = nan_csv.stem
-    products = {
-        name: np.load(outdir / f"{stem}_q0_{name}.npy")
-        for name in ("field", "amplitude", "theta", "mask")
-    }
+    products = load_products(outdir, f"{stem}_q0")
     nan_region = ~np.isfinite(border)
     flagged = bool(np.all(products["mask"][nan_region] == 0.0))
     finite = all(bool(np.all(np.isfinite(array))) for array in products.values())
@@ -1154,12 +1276,12 @@ def check_nan_handling(env, workdir, basis, n_px, nm_per_px, columns, rows, size
     entry = payload["q"][0]
     nan_fraction = float(np.mean(nan_region))
     check(
-        "every NaN pixel of the input is flagged and every npy stays finite",
+        "every NaN pixel of the input is flagged and every h5 dataset stays finite",
         flagged
         and finite
         and dtype_ok
         and abs(entry["nan_fraction"] - nan_fraction) <= 1e-12,
-        f"NaN pixels flagged: {flagged}; all npy finite: {finite}; field dtype "
+        f"NaN pixels flagged: {flagged}; all h5 datasets finite: {finite}; field dtype "
         f"complex128: {dtype_ok}; reported nan_fraction {entry['nan_fraction']:.6f} "
         f"vs measured {nan_fraction:.6f}; mask coverage "
         f"{entry['mask_coverage_fraction']:.6f}",
@@ -1199,17 +1321,43 @@ def check_determinism(env, workdir, csv_path, report_path, size_nm):
     for path in sorted(first.iterdir()):
         if path.name in ("local_q_map_report.json", "local_q_map.log"):
             continue  # they carry the output directory path
+        if path.suffix == ".h5":
+            continue  # the h5 carries the creation_date root attribute: compared
+            # dataset by dataset below, which is the part that must be identical
         other = second / path.name
         compared += 1
         if not other.is_file() or path.read_bytes() != other.read_bytes():
             differences.append(path.name)
+    prefixes = [f"{csv_path.stem}_q0", f"{csv_path.stem}_q1"]
+    products = {
+        outdir: {p: load_products(outdir, p) for p in prefixes}
+        for outdir in (first, second)
+    }
+    product_differences = [
+        f"{prefix}/{name}"
+        for prefix in prefixes
+        for name in h5io.PRODUCT_DATASETS
+        if not np.array_equal(
+            products[first][prefix][name], products[second][prefix][name]
+        )
+    ]
     check(
-        "two runs produce byte-identical npy and png artifacts",
-        not differences and compared == 14,
-        f"{compared - len(differences)}/{compared} artifacts byte-identical "
-        f"(2 q x [field/amplitude/theta/mask npy + amplitude/theta/mask png])"
-        + (f"; differing: {differences}" if differences else ""),
-        "14/14 byte-identical",
+        "two runs produce byte-identical PNG artifacts and bit-identical h5 datasets",
+        not differences
+        and compared == 6
+        and not product_differences
+        and len(prefixes) == 2,
+        f"{compared - len(differences)}/{compared} PNG artifacts byte-identical, "
+        f"{len(prefixes)} h5 products with {len(h5io.PRODUCT_DATASETS)} datasets each "
+        f"bit-identical ({len(prefixes) * len(h5io.PRODUCT_DATASETS)}/"
+        f"{len(prefixes) * len(h5io.PRODUCT_DATASETS)} exactly equal; the h5 file bytes "
+        f"differ only in the per-run creation_date root attribute)"
+        + (
+            f"; differing: {differences + product_differences}"
+            if differences or product_differences
+            else ""
+        ),
+        "6/6 PNG byte-identical and every h5 dataset exactly equal",
     )
 
 
@@ -1410,7 +1558,7 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
             False,
             f"exit code {completed.returncode}: {completed.stderr.strip()[-300:]}",
         )
-        return
+        return None, None
     multi_q = ["1,0", "0,1", "1/3,1/3"]
     q_flags = [item for spec in multi_q for item in ("--q", spec)]
     completed_multi = run_script(
@@ -1434,61 +1582,58 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
             f"exit code {completed_multi.returncode}: "
             f"{completed_multi.stderr.strip()[-300:]}",
         )
-        return
+        return None, None
 
     stem = csv_path.stem
-    expected_files = []
-    for index in range(1):
-        for suffix in (
-            "field.npy",
-            "amplitude.npy",
-            "theta.npy",
-            "mask.npy",
-            "amplitude.png",
-            "theta.png",
-            "mask.png",
-        ):
-            expected_files.append((single, f"{stem}_q{index}_{suffix}"))
-    for index in range(3):
-        for suffix in (
-            "field.npy",
-            "amplitude.npy",
-            "theta.npy",
-            "mask.npy",
-            "amplitude.png",
-            "theta.png",
-            "mask.png",
-        ):
-            expected_files.append((multi, f"{stem}_q{index}_{suffix}"))
+    png_suffixes = ("amplitude.png", "theta.png", "mask.png")
+    expected_files = {
+        single: {f"{stem}_q0.h5"} | {f"{stem}_q0_{suffix}" for suffix in png_suffixes},
+        multi: {f"{stem}_q{index}.h5" for index in range(3)}
+        | {
+            f"{stem}_q{index}_{suffix}" for index in range(3) for suffix in png_suffixes
+        },
+    }
     missing = [
         f"{outdir.name}/{name}"
-        for outdir, name in expected_files
+        for outdir, names in expected_files.items()
+        for name in sorted(names)
         if not (outdir / name).is_file()
     ]
+    unexpected = [
+        f"{outdir.name}/{path.name}"
+        for outdir, names in expected_files.items()
+        for path in sorted(outdir.iterdir())
+        if path.name not in names
+        and path.name not in ("local_q_map_report.json", "local_q_map.log")
+    ]
     check(
-        "every per-q artifact of both runs exists on disk",
-        not missing,
-        f"single-q run 7 artifacts (4 npy + 3 png), multi-q run 3 x 7 artifacts; "
-        f"missing: {missing if missing else 'none'}",
-        "21/21 files present",
+        "every per-q artifact of both runs exists on disk and nothing else is written",
+        not missing and not unexpected,
+        f"single-q run 4 artifacts (1 h5 + 3 png), multi-q run 3 x 4 artifacts; "
+        f"missing: {missing if missing else 'none'}; unexpected: "
+        f"{unexpected if unexpected else 'none'}",
+        "16/16 files present and no extra file (in particular no .npy left behind)",
     )
 
-    field = np.load(single / f"{stem}_q0_field.npy")
-    theta_npy = np.load(single / f"{stem}_q0_theta.npy")
-    amplitude_npy = np.load(single / f"{stem}_q0_amplitude.npy")
-    mask_npy = np.load(single / f"{stem}_q0_mask.npy")
+    products = load_products(single, f"{stem}_q0")
+    field = products["field"]
+    theta_product = products["theta"]
+    amplitude_product = products["amplitude"]
+    mask_product = products["mask"]
+    mask_values = sorted(set(np.unique(mask_product).tolist()))
     check(
-        "the npy contract holds (complex128 field, radians, 0/1 mask)",
+        "the h5 product contract holds (complex128 field, radians, 0/1 mask)",
         field.dtype == np.complex128
         and field.shape == (n_px, n_px)
-        and theta_npy.dtype == np.float64
-        and amplitude_npy.dtype == np.float64
-        and set(np.unique(mask_npy).tolist()) <= {0.0, 1.0}
-        and bool(np.all(np.isfinite(theta_npy)))
-        and bool(np.all(np.isfinite(amplitude_npy))),
-        f"field {field.dtype} {field.shape}, theta {theta_npy.dtype}, amplitude "
-        f"{amplitude_npy.dtype}, mask values {sorted(set(np.unique(mask_npy).tolist()))}",
-        "complex128, float64 radians, mask {0, 1}, all finite",
+        and theta_product.dtype == np.float64
+        and amplitude_product.dtype == np.float64
+        and mask_product.dtype == np.float64
+        and set(mask_values) <= {0.0, 1.0}
+        and bool(np.all(np.isfinite(theta_product)))
+        and bool(np.all(np.isfinite(amplitude_product))),
+        f"field {field.dtype} {field.shape}, theta {theta_product.dtype}, amplitude "
+        f"{amplitude_product.dtype}, mask {mask_product.dtype} values {mask_values}",
+        "complex128, float64 radians, float64 mask {0, 1}, all finite",
     )
 
     payload = read_json(multi / "local_q_map_report.json")
@@ -1820,6 +1965,144 @@ def check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
             f"exit codes {completed_cross.returncode} and "
             f"{completed_boundary.returncode}",
         )
+    return single, stem
+
+
+# --------------------------------------------------------------------------- #
+# 12. the per-q h5 product: frozen schema, file set and negative controls
+# --------------------------------------------------------------------------- #
+def check_product_contract(env, workdir, single, stem, csv_path, lf_path, size_nm):
+    """The h5 product against the frozen schema, plus the reader's red cases.
+
+    The negative controls matter as much as the positive ones: they delete the
+    product file and one dataset of a copy and require the reader every edited
+    assertion now goes through to raise, so a missing h5 file or a missing dataset
+    turns those assertions red instead of passing vacuously.
+    """
+    section(
+        "12. per-q h5 product: frozen schema, reported artifact map and the "
+        "reader's negative controls"
+    )
+    if single is None:
+        check(
+            "the end-to-end run of section 11 produced an h5 product to inspect",
+            False,
+            "section 11 did not complete, so no product exists",
+        )
+        return
+    prefix = f"{stem}_q0"
+    path = product_path(single, prefix)
+
+    check(
+        "the h5 product replaces the four npy files with one file of four datasets",
+        path.is_file()
+        and not list(single.glob("*.npy"))
+        and path.name == f"{stem}_q0.h5",
+        f"{path.name} exists: {path.is_file()}, npy files in the directory: "
+        f"{sorted(p.name for p in single.glob('*.npy'))}",
+        "one <stem>_q0.h5 and no .npy",
+    )
+
+    problems = h5_schema_problems(path)
+    check(
+        "every dataset carries the frozen schema (attrs, gzip/4, 1 MiB chunks, "
+        "track_times=False, theta in rad)",
+        not problems,
+        f"root attrs {h5_root_attrs(path)} with datasets "
+        f"{sorted(h5io.PRODUCT_DATASETS)}; schema violations: {problems or 'none'}",
+        "no violation of the h5io convention",
+    )
+
+    payload = read_json(single / "local_q_map_report.json")
+    artifacts = payload["q"][0]["artifacts"]
+    check(
+        "the report's artifact map points at the h5 product",
+        artifacts.get("h5") == str(path)
+        and set(artifacts) == {"h5", "amplitude_png", "theta_png", "mask_png"}
+        and set(artifacts.values()) <= set(payload["written"])
+        and not [name for name in artifacts if name.endswith("_npy")],
+        f"artifact keys {sorted(artifacts)}, h5 entry {artifacts.get('h5')}",
+        "h5 plus the three PNGs, no npy key",
+    )
+
+    notes = payload["q"][0]["conventions"]
+    check(
+        "the report's conventions describe the h5 product, not the removed .npy "
+        "files (theta_png, invalid_pixels)",
+        not conventions_problems(notes),
+        f"theta_png {notes['theta_png']!r}; invalid_pixels {notes['invalid_pixels']!r}; "
+        f"violations {conventions_problems(notes) or 'none'}",
+        "no note says 'npy' and both notes name the per-q h5 product and its "
+        "four datasets (field, amplitude, theta, mask)",
+    )
+    pre_h5_notes = {
+        "theta_png": "degrees(angle(exp(1j * npy))) in (-180, 180], twilight, "
+        "vmin=-180, vmax=180",
+        "invalid_pixels": "drawn as NaN in the amplitude and theta PNGs "
+        "(bad colour), kept finite in every npy",
+    }
+    check(
+        "the conventions check goes red on the pre-HDF5 wording it replaced",
+        conventions_problems(pre_h5_notes),
+        f"the wording this task replaced is flagged: {conventions_problems(pre_h5_notes)}",
+        "a non-empty violation list for notes that still name .npy, so a "
+        "regression turns the assertion above red",
+    )
+
+    no_figures = workdir / "h5_no_figures"
+    completed = run_script(
+        "stm_local_q_map.py",
+        [
+            str(csv_path),
+            "-o",
+            str(no_figures),
+            "--basis-from",
+            str(lf_path),
+            "--q",
+            "1,0",
+            "--no-figures",
+            "-L",
+            f"{size_nm:g}",
+        ],
+        env,
+    )
+    written_names = sorted(item.name for item in no_figures.iterdir())
+    expected_names = sorted(
+        [f"{stem}_q0.h5", "local_q_map_report.json", "local_q_map.log"]
+    )
+    bare_payload = read_json(no_figures / "local_q_map_report.json")
+    check(
+        "--no-figures writes the h5 product and suppresses exactly the PNGs",
+        completed.returncode == 0
+        and written_names == expected_names
+        and load_products(no_figures, prefix)["field"].dtype == np.complex128
+        and set(bare_payload["q"][0]["artifacts"]) == {"h5"}
+        and bare_payload["figures"] is False,
+        f"exit {completed.returncode}, files {written_names} against expected "
+        f"{expected_names}; artifact keys {sorted(bare_payload['q'][0]['artifacts'])}",
+        "exit 0, exactly the h5 + report + log, and no figure entry in the report",
+    )
+
+    missing_dataset = workdir / "negative_missing_dataset"
+    missing_dataset.mkdir(parents=True, exist_ok=True)
+    tampered = product_path(missing_dataset, prefix)
+    shutil.copyfile(path, tampered)
+    with h5py.File(tampered, "a") as handle:
+        del handle["theta"]
+    missing_file_error = products_load_error(workdir / "negative_missing_file", prefix)
+    missing_dataset_error = products_load_error(missing_dataset, prefix)
+    check(
+        "the product reader goes red when the h5 file or one dataset is missing",
+        missing_file_error is not None
+        and "FileNotFoundError" in missing_file_error
+        and missing_dataset_error is not None
+        and "theta" in missing_dataset_error,
+        f"missing file -> {missing_file_error}; missing 'theta' dataset -> "
+        f"{missing_dataset_error}",
+        "FileNotFoundError for the absent product and a KeyError naming 'theta' for "
+        "the stripped one, so every assertion reading through the loader fails "
+        "instead of passing vacuously",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1897,7 +2180,10 @@ def main(argv=None):
         check_size_nm_from_log(
             env, workdir, csv_path, basis_px_spec, n_px, lf_path, size_nm
         )
-        check_end_to_end(env, workdir, csv_path, lf_path, affine_path, n_px, size_nm)
+        single, stem = check_end_to_end(
+            env, workdir, csv_path, lf_path, affine_path, n_px, size_nm
+        )
+        check_product_contract(env, workdir, single, stem, csv_path, lf_path, size_nm)
     finally:
         shutil.rmtree(workdir / "mpl", ignore_errors=True)
 

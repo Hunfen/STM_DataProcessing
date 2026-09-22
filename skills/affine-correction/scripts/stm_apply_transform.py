@@ -24,11 +24,16 @@ Preprocessing and geometry:
 
 Outputs (same naming and plot style as the fit stage):
     <outdir>/<stem>_corrected.csv       corrected topography (square, NaN padded)
+    <outdir>/<stem>_corrected.h5        corrected + FFT2 (HDF5, repo h5 convention)
     <outdir>/<stem>_corrected_fft2.npy  complex FFT2 (complex128, fftshifted)
     <outdir>/<stem>_corrected.png       topography plot (gwyddion colormap)
     <outdir>/<stem>_corrected_fft.png   FFT plot (inferno, log, percentile norm)
     <outdir>/correction.log             the console report (contract line included)
     <outdir>/apply_report.json          the same numbers, machine readable
+
+The h5 file holds the datasets ``corrected`` (float64, exactly the array written
+to the CSV) and ``fft2`` (complex128, exactly the array written to the .npy); the
+.npy FFT2 stays for the phase-analysis hand-off as in the fit stage.
 
 Usage:
     cd /path/to/STM_DataProcessing
@@ -55,6 +60,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import correction_lib as cl  # noqa: E402
+import h5io  # noqa: E402
 
 # Maps physical (x, y) order to array (row, col) order and back.
 AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
@@ -305,6 +311,23 @@ def main(argv=None):
     fft2_corrected = compute_fft2(corrected, size_out, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"
     np.save(out_fft2, fft2_corrected)
+    # Same h5 product as the fit stage (repo h5 convention): the CSV stays the
+    # primary product and the .npy FFT2 stays for the phase-analysis hand-off.
+    out_h5 = outdir / f"{stem}_corrected.h5"
+    h5io.write_file(
+        out_h5,
+        {
+            "corrected": (corrected, None),
+            "fft2": (fft2_corrected, None),
+        },
+        generator=Path(__file__).name,
+        extra={
+            "input": str(csv_path),
+            "transform_file": str(transform_path),
+            "field_of_view_nm": float(size_out),
+            "nm_per_px": float(size_out / n_out),
+        },
+    )
 
     cl.setup_style()
     cmap, cmap_source = cl.load_colormap(args.stm_lib)

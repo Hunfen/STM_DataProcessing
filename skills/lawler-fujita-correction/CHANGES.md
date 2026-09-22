@@ -1,5 +1,97 @@
 # CHANGES — lawler-fujita-correction
 
+## 2026-09（修正）：bundle h5 的 `nm_per_px` units 由 `'nm'` 改为 `'nm/px'`
+
+`t2` 的独立验证（`var/verify_skills_h5/report.md` §14.2.1）指出：`--save-transform` 的 bundle
+h5 里 `nm_per_px` 被写成 `units = "nm"`，而它是**像素尺度**（nm per pixel，两个长度的比值），
+属性与数据集名字互相矛盾——信任 `attrs["units"]` 的消费者会按错比例换算。迁移前的 `.npz`
+没有任何 units 属性，这个属性是本次 h5 化新引入的，因此由本次修正负责。
+
+- `stm_lf_correct.py`：bundle 的 `nm_per_px` 数据集写 `units = "nm/px"`；同一处的注释把六个成员的
+  units 一一讲清（见下）。**只改这一个字符串**：数据集名、dtype（`u_x`/`u_y`/`field_of_view_nm_reference`/
+  `nm_per_px` float64、`valid` bool、`n_px_reference` int64）、值、chunking 与其余属性都没动。
+- **同一次通检本 skill 写出的全部 units 属性**（结论：除 `nm_per_px` 外都正确，未改动）：
+
+  | 数据集 | 量 | 属性 | 依据 |
+  | --- | --- | --- | --- |
+  | `<bundle>.h5: u_x` / `u_y` | 位移分量 | `"nm"` | 物理长度；数据集名与报告 `displacement.component_order` 都写明 nm |
+  | `<bundle>.h5: field_of_view_nm_reference` | 参考图视场（长度） | `"nm"` | 物理长度 |
+  | `<bundle>.h5: nm_per_px` | 像素尺度 | `"nm/px"`（**本次修正**，原为 `"nm"`） | 比值量；名字已写明，属性必须与名字一致 |
+  | `<bundle>.h5: n_px_reference` | 像素数（计数） | **无** | 计数不是物理量，按仓库约定（无量纲量不写 `units`）不写属性；修正前已如此，保持 |
+  | `<bundle>.h5: valid` | 有效掩码 0/1 | **无** | 无量纲 |
+  | `<stem>_lf.h5: theta_a/b/c` | 局域相位 | `"rad"` | 解缠相位，弧度 |
+  | `<stem>_lf.h5: u_x` / `u_y` | 位移分量 | `"nm"` | 物理长度 |
+  | `<stem>_lf.h5: amplitude_a/b/c` | lock-in 幅度 | **无** | 与输入拓扑同单位（任意单位，不是物理单位），不写属性 |
+  | `<stem>_lf.h5: mask` | 有效掩码 0/1 | **无** | 无量纲 |
+  | `<stem>_corrected.h5: corrected` | 矫正后拓扑 | **无** | 输入拓扑是任意单位（CSV 无单位），不写属性 |
+  | `<stem>_corrected.h5: fft2` | 复数 FFT2 | **无** | 原始 FFT，任意单位，不写属性 |
+
+- **selftest 的 gate**：`bundle_units`（`check_h5_schema` 的期望表）把 `nm_per_px` 钉成 `"nm/px"`
+  （`valid`、`n_px_reference` 钉成 `None` = 必须**没有** units 属性）；把脚本里的字符串改回
+  `"nm"`，`bundle JSON + u-field h5 written` 立即变红
+  （`nm_per_px: units 'nm' != 'nm/px'`），self-test 退出码非零。断言数量不变（**20 项**），
+  没有删除或削弱任何断言；PASS 行现在也照出每个数据集的 units，便于人工核对这条元数据。
+- 验收：同一输入、同一输出目录下，修正前后两版脚本的全部 CSV / PNG / JSON / `.log` 产物
+  **sha256 逐字节相同**；三个 h5 产物的数据集名、dtype、值（逐字节）、chunking、compression 与
+  其它属性全部相同，差异**只有** `<bundle>.h5` 的 `nm_per_px` 的 `units`（`'nm'` → `'nm/px'`）；
+  `creation_date` 每次运行本就不同（已文档化），不构成差异。详见修正证据。
+
+## 2026-09：数组侧产物改为 HDF5（`<stem>_corrected.h5` / `<stem>_lf.h5` / `<bundle>.h5`）
+
+目标：仓库的数据产物 **HDF5 优先**——LF 的相位/幅度/位移/掩码此前是 9 个 per-map `.npy`，
+可迁移包的 u 场此前是 `.npz`，现在分别是**一个** `<stem>_lf.h5` 与 `<bundle>.h5`；
+矫正数组另外写 `<stem>_corrected.h5`。inter-skill 的 CSV 契约、图、报告与 log 一个字节不动。
+
+- **新增自包含模块 `scripts/h5io.py`**（镜像 `src/stm_data_processing/io/h5_convention.py` 的约定，
+  skill **不** import `stm_data_processing`）：`SCHEMA_VERSION = 1`、`COMPRESSION = "gzip"`、
+  `COMPRESSION_OPTS = 4`、`CHUNK_TARGET_BYTES = 1 << 20`、`chunk_shape()`（从末维起填满 ≤ 1 MiB）、
+  `create_dataset()`（`track_times=False` + gzip/4 + 显式 chunks + 可选 `units`）、
+  `write_file_metadata()`（root `schema_version`/`generator`/`creation_date`）、`write_file()`。
+- **`<stem>_corrected.h5`**（`stm_lf_correct.py` 与 `stm_lf_apply.py` 都写）：数据集 `corrected`
+  （`float64`，与 CSV 同一个数组）与 `fft2`（`complex128`，与保留的 `.npy` 同一个数组）；
+  root `generator` = 产生脚本名，附 `input`（apply 段另加 `transform_file`）、`field_of_view_nm`、
+  `nm_per_px`。两个数组无物理单位 → 不写 `units`。
+- **`<stem>_corrected_fft2.npy` 保留**：`skills/phase-analysis/` 通过 `--fft2` 读它。
+- **9 个 per-map `.npy` → 一个 `<stem>_lf.h5`**：数据集名与原来一一对应（`theta_a/b[/c]`、
+  `amplitude_a/b[/c]`、`u_x`、`u_y`、`mask`），文件名保留文档化的 `_lf_` 标记；
+  `units`：相位 `"rad"`、`u_x`/`u_y` `"nm"`、幅度与掩码无量纲（不写）。每张图的
+  `<stem>_lf_<name>.png` 预览**照旧**。`correction_report.json` 的 `lf_artifacts` 登记项随之从
+  `{"npy", "png"}` 变为 `{"h5", "dataset", "png"}`（这是本次唯一改动的报告字段，其余字段与数值逐字节不变）。
+- **`--save-transform` 的 u 场 `.npz` → `.h5`**：同样 6 个成员（`u_x`、`u_y`（`nm`）、`valid`
+  （bool，无量纲）、`n_px_reference`、`field_of_view_nm_reference`（`nm`）、`nm_per_px`（`nm`）；
+  HDF5 的标量不能分块/过滤，因此后三个存成**单元素数据集**（名字与 npz 时代一致）。
+  bundle JSON 的 `u_field_file` 指向 `.h5`（这是 JSON 里唯一改动的字段），schema 与其余字段不变。
+- **`stm_lf_apply.py`**：`load_bundle()` 由 `np.load(u_path)` 改为用 `h5py` 读该 `.h5`
+  （缺文件/缺数据集/不是 HDF5 都转成带原因的 `ValueError` → 退出码 2），并写出自己的
+  `<stem>_corrected.h5`；`apply_report.json`、`correction.log` 与 `<stem>_corrected_fft2.npy` 不变。
+- **未改动的产物**：`<stem>_corrected.csv`、全部 png、`correction.log` 的其余所有行（含两条
+  跨 skill 契约行与 `# written:` 行——它只列仍在写出的产物，无过时描述）、
+  `correction_report.json` 除 `lf_artifacts` 外的全部内容。
+- `lf_lib.save_npy()` 随 per-map npy 一起消失（本次改动产生的孤儿函数，已删除）。
+- **self-test 17 → 20 项**（原有 17 项的意图与阈值不变）：
+  第 5 项（原「9 张 npy + png 齐全」）改为「一个 `<stem>_lf.h5` 的 9 个数据集 + 每张 png +
+  报告登记项 `h5`/`dataset`/`png`」，并核 h5 约定（root 三属性、gzip/4、约定 chunk、
+  `track_times=False`、`units`）；第 6b 项（原「18 个文档名字面存在」）改为「`<stem>_lf.h5`
+  + 9 个 `<stem>_lf_<map>.png` 存在，且**不留任何 per-map npy**」；第 13 项（原「包 JSON + u 场
+  npz」）改为「包 h5 约定 + `u_field_file` 指向 `.h5` + 无 `.npz` 遗留」；新增 6c（`<stem>_corrected.h5`
+  约定 + `fft2` 与 `.npy`、`corrected` 与 CSV 逐位一致）、13b（`<stem>_lf.h5` 与包 h5 的 `u_x`/`u_y`/`mask`
+  逐字节相同）、14b（apply 段 h5 约定且与拟合段逐字节相同）。等值判定用 `tobytes()` 字节比较而非
+  `np.array_equal`（后者会把只差 NaN 的数组判为不等）。
+- `track_times=False` 的验证方式：本环境 h5py 3.16 的 `get_obj_track_times()` 对读回的数据集一律
+  返回 True，因此 self-test 改看对象头的时间消息（`h5py.h5o.get_info(...).ctime/mtime` 恒为 0）。
+- **log 措辞同步（唯一的 log 改动）**：`correction.log` 里原本的
+  `# LF artifacts: <name> (npy+png), ...` 描述的是已被替换掉的 per-map npy，属于过时的产物
+  描述，因此改为 `# LF artifacts: <name> (h5+png), ... in <stem>_lf.h5`；同一行里出现的
+  map 名字与顺序一字未动，其余全部 log 行（含两条跨 skill 契约行）逐字节不变。
+  `# written:` 行只列仍在写出的产物（csv / fft2 npy / png / report / log），因此没有过时描述、
+  保持原样；新 h5 产物写在 `SKILL.md` / `README.md` 与本文件里。
+- 验收：self-test **20/20** 通过；同一输入、同一输出目录下与迁移前脚本逐文件比对：CSV / png
+  全部 sha256 相同，`.npy` FFT2 字节相同，per-map `.npy` 与 `.npz` 的每个成员都**逐字节**
+  等于新 h5 里同名数据集；差异集恰好是：新增 `<stem>_corrected.h5` / `<stem>_lf.h5` /
+  `<bundle>.h5`，消失 9 个 per-map `.npy` 与 `<bundle>.npz`，JSON 只有 `lf_artifacts` 登记项
+  （`npy` → `h5` + `dataset`）与 `u_field_file`（`.npz` → `.h5`）两处是「描述已移动产物的字段」，
+  log 只有上面那一行措辞。详见 `SKILL.md` §3、§4、§5 与 迁移报告。
+
 ## 2026-09（v1.0 修复）：LF 产物文件名对齐文档 + 方向数措辞
 
 验证者 findings F1/F2 的修复（不改算法、不改数值结果）：

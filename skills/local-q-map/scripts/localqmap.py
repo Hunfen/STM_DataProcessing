@@ -53,6 +53,7 @@ import json
 import re
 from pathlib import Path
 
+import h5io
 import numpy as np
 
 SKILL_VERSION = "1.0"
@@ -108,7 +109,8 @@ FOV_FROM_LOG_HELP = (
 
 
 # --------------------------------------------------------------------------- #
-# style and artifact writing (mirrors lf_lib.save_map / lf_lib.save_npy)
+# style and product writing (the map preview mirrors lf_lib.save_map; the arrays
+# of one q go into ONE HDF5 file through the skill's own h5io convention)
 # --------------------------------------------------------------------------- #
 def setup_style():
     """Plot style of the skill (no usetex: broken with mpl 3.10 + TeX Live 2026)."""
@@ -143,8 +145,27 @@ def save_map(path, data, cmap="inferno", vmin=None, vmax=None, dpi=150, size=4.0
     plt.close(fig)
 
 
-def save_npy(path, array):
-    np.save(path, np.asarray(array))
+def save_products(
+    path, *, field, amplitude, theta, mask, generator=h5io.DEFAULT_GENERATOR
+):
+    """Write the four per-q maps of ONE q into one HDF5 file.
+
+    The datasets are ``field`` (complex128), ``amplitude`` (float64), ``theta``
+    (float64, radians, units attribute ``rad``) and ``mask`` (float64 1 = valid,
+    0 = invalid), written through the skill's :mod:`h5io` convention (gzip/4,
+    explicit 1 MiB chunks, ``schema_version`` / ``generator`` /
+    ``creation_date`` root attributes).
+    """
+    return h5io.write_product(
+        path,
+        (
+            ("field", np.asarray(field, dtype=np.complex128), None),
+            ("amplitude", np.asarray(amplitude, dtype=np.float64), None),
+            ("theta", np.asarray(theta, dtype=np.float64), "rad"),
+            ("mask", np.asarray(mask, dtype=np.float64), None),
+        ),
+        generator=generator,
+    )
 
 
 # --------------------------------------------------------------------------- #

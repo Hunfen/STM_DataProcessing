@@ -12,20 +12,22 @@ the convention table).
 
 Outputs (same conventions as the affine-correction skill):
     <outdir>/<stem>_corrected.csv       corrected topography (square, NaN padded)
+    <outdir>/<stem>_corrected.h5        corrected + FFT2 (HDF5, repo h5 convention)
     <outdir>/<stem>_corrected_fft2.npy  complex FFT2 (complex128, fftshifted)
     <outdir>/<stem>_corrected.png       topography plot (gwyddion colormap)
     <outdir>/<stem>_corrected_fft.png   FFT plot (inferno, log, percentile norm)
     <outdir>/correction.log             the console report (both contract lines)
     <outdir>/correction_report.json     the same numbers, machine readable
 
-Extra Lawler-Fujita artifacts (npy + preview png each): the local phase maps
-``theta_a``, ``theta_b`` and (when a third direction exists) ``theta_c`` [radians,
-unwrapped, in the npy; the png shows the same phase wrapped into (-180, 180]
+Extra Lawler-Fujita artifacts (one HDF5 file + a preview png per array): the local
+phase maps ``theta_a``, ``theta_b`` and (when a third direction exists) ``theta_c``
+[radians, unwrapped; the png shows the same phase wrapped into (-180, 180]
 degrees], the lock-in amplitude maps, the displacement components ``u_x`` and
-``u_y`` [nm] and the validity mask.
+``u_y`` [nm] and the validity mask are the datasets of ``<stem>_lf.h5``, each next
+to its ``<stem>_lf_<name>.png`` preview.
 
 ``--save-transform FILE`` writes the transferable bundle: the JSON above plus the
-u-field npz next to it, which ``stm_lf_apply.py`` applies to another dataset of the
+u-field h5 next to it, which ``stm_lf_apply.py`` applies to another dataset of the
 same scan.
 
 Usage:
@@ -51,6 +53,7 @@ import matplotlib.pyplot as plt
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import h5io  # noqa: E402
 import lf_lib as lf  # noqa: E402
 
 SKILL_VERSION = "1.0"
@@ -174,7 +177,7 @@ def parse_args(argv=None):
         default=None,
         metavar="FILE",
         help="also write the transferable bundle: this JSON plus the "
-        "u-field npz next to it (schema "
+        "u-field h5 next to it (schema "
         f"{BUNDLE_SCHEMA}, version {BUNDLE_SCHEMA_VERSION})",
     )
     return parser.parse_args(argv)
@@ -342,11 +345,17 @@ def u_statistics(u_nm, valid):
 
 
 def write_artifacts(prefix, theta, amplitude, u_nm, valid):
-    """Write the LF artifact set (npy + preview png) and return the path dict.
+    """Write the LF artifact set (one h5 + preview png per map) and return the paths.
 
-    Every file carries the documented ``_lf_`` marker: ``<stem>_lf_theta_a.npy``,
-    ``<stem>_lf_u_x.npy``, ``<stem>_lf_mask.npy`` and so on, so the LF maps cannot be
-    confused with the core correction products (``<stem>_corrected.*``).
+    Every name carries the documented ``_lf_`` marker: the arrays are the datasets
+    of the single file ``<stem>_lf.h5`` -- ``theta_a``, ``theta_b`` [, ``theta_c``],
+    ``amplitude_a``, ``amplitude_b`` [, ``amplitude_c``], ``u_x``, ``u_y``,
+    ``mask`` -- and each dataset keeps its preview ``<stem>_lf_<name>.png``, so the
+    LF maps cannot be confused with the core correction products
+    (``<stem>_corrected.*``).  The h5 file follows the repository convention
+    (gzip/4, explicit chunks, root ``schema_version``/``generator``/
+    ``creation_date``); phases carry ``units`` "rad", the displacement "nm" and the
+    mask no units at all (dimensionless).
     """
     written = {}
     entries = [
@@ -361,12 +370,17 @@ def write_artifacts(prefix, theta, amplitude, u_nm, valid):
     if theta.shape[0] > 2:
         entries.append(("theta_c", theta[2], "phase"))
         entries.append(("amplitude_c", amplitude[2], "amplitude"))
+    units_of = {"phase": "rad", "displacement": "nm", "amplitude": None, "mask": None}
+    h5_path = prefix.parent / f"{prefix.name}_lf.h5"
+    h5io.write_file(
+        h5_path,
+        {name: (np.asarray(data), units_of[kind]) for name, data, kind in entries},
+        generator=Path(__file__).name,
+    )
     for name, data, kind in entries:
-        npy_path = prefix.parent / f"{prefix.name}_lf_{name}.npy"
         png_path = prefix.parent / f"{prefix.name}_lf_{name}.png"
-        lf.save_npy(npy_path, data)
         if kind == "phase":
-            # The png shows the phase wrapped into (-180, 180] degrees: the npy keeps
+            # The png shows the phase wrapped into (-180, 180] degrees: the h5 keeps
             # the unwrapped phase in radians, whose absolute values are not a colour scale.
             wrapped = np.degrees(np.angle(np.exp(1j * np.asarray(data, dtype=float))))
             lf.save_map(png_path, wrapped, cmap="twilight", vmin=-180.0, vmax=180.0)
@@ -377,7 +391,11 @@ def write_artifacts(prefix, theta, amplitude, u_nm, valid):
         else:
             limit = float(np.max(np.abs(data))) if np.any(data) else 1.0
             lf.save_map(png_path, data, cmap="RdBu_r", vmin=-limit, vmax=limit)
-        written[name] = {"npy": str(npy_path), "png": str(png_path)}
+        written[name] = {
+            "h5": str(h5_path),
+            "dataset": name,
+            "png": str(png_path),
+        }
     return written
 
 
@@ -763,6 +781,23 @@ def main(argv=None):
     fft2_corrected = compute_fft2(corrected, size_out, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"
     np.save(out_fft2, fft2_corrected)
+    # The same two arrays as an HDF5 product (repo h5 convention); the CSV stays the
+    # primary, inter-skill product and the .npy FFT2 stays for the phase-analysis
+    # hand-off (skills/phase-analysis reads it through its --fft2 option).
+    out_h5 = outdir / f"{stem}_corrected.h5"
+    h5io.write_file(
+        out_h5,
+        {
+            "corrected": (corrected, None),
+            "fft2": (fft2_corrected, None),
+        },
+        generator=Path(__file__).name,
+        extra={
+            "input": str(csv_path),
+            "field_of_view_nm": float(size_out),
+            "nm_per_px": float(size_out / n_out),
+        },
+    )
 
     lf.setup_style()
     cmap, cmap_source = lf.load_colormap(args.stm_lib)
@@ -800,7 +835,12 @@ def main(argv=None):
         artifacts = write_artifacts(
             outdir / stem, theta_maps, amplitude_maps, u_nm, valid
         )
-        emit("# LF artifacts: " + ", ".join(f"{name} (npy+png)" for name in artifacts))
+        artifacts_h5 = Path(artifacts["u_x"]["h5"])
+        emit(
+            "# LF artifacts: "
+            + ", ".join(f"{name} (h5+png)" for name in artifacts)
+            + f" in {artifacts_h5.name}"
+        )
 
     report = {
         "skill": "lawler-fujita-correction",
@@ -945,16 +985,34 @@ def main(argv=None):
     if args.save_transform:
         bundle_path = Path(args.save_transform)
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
-        u_path = bundle_path.with_suffix(".npz")
+        u_path = bundle_path.with_suffix(".h5")
         if u_nm is not None:
-            np.savez(
+            # Scalars cannot be chunked or filtered in HDF5, so the three numbers are
+            # stored as one-element datasets (the documented member names stay).
+            #
+            # units: every dataset carries the unit of the quantity it holds -- u in nm,
+            # the reference field of view in nm, and the pixel scale in nm/px (it is a
+            # ratio of two lengths, so 'nm' would contradict the dataset name); the mask
+            # is dimensionless and n_px_reference is a pixel count, i.e. not a physical
+            # quantity, so neither carries a units attribute.
+            h5io.write_file(
                 u_path,
-                u_x=u_nm[0],
-                u_y=u_nm[1],
-                valid=valid,
-                n_px_reference=n,
-                field_of_view_nm_reference=float(args.size_nm),
-                nm_per_px=float(args.size_nm / n),
+                {
+                    "u_x": (np.asarray(u_nm[0], dtype=float), "nm"),
+                    "u_y": (np.asarray(u_nm[1], dtype=float), "nm"),
+                    "valid": (np.asarray(valid), None),
+                    "n_px_reference": (np.asarray([n], dtype=np.int64), None),
+                    "field_of_view_nm_reference": (
+                        np.asarray([float(args.size_nm)], dtype=float),
+                        "nm",
+                    ),
+                    "nm_per_px": (np.asarray([float(args.size_nm / n)]), "nm/px"),
+                },
+                generator=Path(__file__).name,
+                extra={
+                    "input": str(csv_path),
+                    "source_report": str(report_path),
+                },
             )
             payload = bundle_payload(
                 report_path, csv_path, args, q_pair, report, n_out, u_path, u_stats

@@ -23,6 +23,7 @@ to the measured value, so a failure is quantified instead of announced.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import io
 import json
 import os
@@ -33,11 +34,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+import h5io  # noqa: E402
 
 SQRT3 = float(np.sqrt(3.0))
 # Maps physical (x, y) order to array (row, col) order and back (same constant as
@@ -180,6 +184,136 @@ def ratio_text(check_result):
 
 
 # --------------------------------------------------------------------------- #
+# HDF5 product checks (the h5 acceptance of every array product of this skill)
+# --------------------------------------------------------------------------- #
+def h5_read(path, name):
+    """One dataset of an h5 product as a plain array (``None`` when missing)."""
+    if not path.is_file():
+        return None
+    with h5py.File(path, "r") as handle:
+        return None if name not in handle else handle[name][()]
+
+
+def bit_equal(left, right):
+    """Byte-exact equality of two arrays (dtype, shape and NaN payloads included).
+
+    ``np.array_equal`` reports ``False`` for two arrays that are equal except for
+    NaN entries (NaN != NaN), so the raw bytes are compared instead: that is the
+    strongest form of "the values moved from the .npy/.npz into the h5 unchanged".
+    """
+    return bool(
+        left is not None
+        and right is not None
+        and left.dtype == right.dtype
+        and left.shape == right.shape
+        and left.tobytes() == right.tobytes()
+    )
+
+
+def h5_object_times(path):
+    """``{dataset: (ctime, mtime)}`` of an h5 product, read from the object headers.
+
+    ``track_times=False`` (the repository convention) stores no time message, so
+    both stamps stay ``0``; with the default ``track_times=True`` the creation time
+    is recorded.  h5py's ``get_obj_track_times()`` does not reflect the flag of a
+    dataset read back from a file in this build (it reports True either way), so the
+    object header itself is inspected.
+    """
+    with h5py.File(path, "r") as handle:
+        return {
+            name: (
+                int(h5py.h5o.get_info(handle[name].id).ctime),
+                int(h5py.h5o.get_info(handle[name].id).mtime),
+            )
+            for name in handle
+        }
+
+
+def renders_like_csv(array, csv_path):
+    """Whether ``array`` re-rendered with the product format equals the CSV text.
+
+    The CSV is written with ``fmt="%.10e"``, so this is the exact statement
+    "the h5 dataset is the array that was written to the CSV".
+    """
+    if array is None or not csv_path.is_file():
+        return False
+    buffer = io.StringIO()
+    np.savetxt(buffer, array, delimiter=",", fmt="%.10e")
+    return buffer.getvalue() == csv_path.read_text()
+
+
+def check_h5_schema(path, datasets, generator, units):
+    """The h5 acceptance of one product; returns ``(ok, detail)``.
+
+    ``datasets`` lists the expected dataset names, ``generator`` is the name of
+    the script that must have produced the file and ``units`` maps every dataset
+    to its expected ``units`` attribute (``None``: dimensionless, so no attribute
+    is allowed).  Checks the three root attributes, the dataset names, and per
+    dataset: ``track_times=False`` (no time message in the object header),
+    ``gzip`` level 4, explicit chunks equal to the convention's
+    :func:`h5io.chunk_shape` output (and never above the 1 MiB budget), plus the
+    units attribute.
+    """
+    if not path.is_file():
+        return False, f"{path.name} missing"
+    problems = []
+    times = h5_object_times(path)
+    with h5py.File(path, "r") as handle:
+        attrs = dict(handle.attrs)
+        if attrs.get(h5io.SCHEMA_VERSION_ATTR) != int(h5io.SCHEMA_VERSION):
+            problems.append(
+                f"root schema_version {attrs.get(h5io.SCHEMA_VERSION_ATTR)!r}"
+            )
+        if attrs.get(h5io.GENERATOR_ATTR) != generator:
+            problems.append(f"root generator {attrs.get(h5io.GENERATOR_ATTR)!r}")
+        creation = attrs.get(h5io.CREATION_DATE_ATTR)
+        try:
+            stamp = dt.datetime.fromisoformat(str(creation))
+            if stamp.tzinfo is None:
+                problems.append(f"creation_date without UTC offset {creation!r}")
+        except ValueError:
+            problems.append(f"creation_date not ISO-8601 {creation!r}")
+        names = sorted(handle.keys())
+        if names != sorted(datasets):
+            problems.append(f"datasets {names} != {sorted(datasets)}")
+        for name in names:
+            dataset = handle[name]
+            if dataset.compression != h5io.COMPRESSION:
+                problems.append(f"{name}: compression {dataset.compression!r}")
+            if dataset.compression_opts != h5io.COMPRESSION_OPTS:
+                problems.append(
+                    f"{name}: compression_opts {dataset.compression_opts!r}"
+                )
+            expected_chunks = h5io.chunk_shape(dataset.shape, dataset.dtype.itemsize)
+            if expected_chunks is None or dataset.chunks != expected_chunks:
+                problems.append(f"{name}: chunks {dataset.chunks} != {expected_chunks}")
+            elif (
+                int(np.prod(dataset.chunks)) * dataset.dtype.itemsize
+                > h5io.CHUNK_TARGET_BYTES
+            ):
+                problems.append(f"{name}: chunk above the 1 MiB budget")
+            if any(times.get(name, (0, 0))):
+                problems.append(
+                    f"{name}: track_times is on (object header times {times.get(name)})"
+                )
+            expected_unit = units.get(name)
+            recorded = dataset.attrs.get(h5io.UNITS_ATTR)
+            if expected_unit is None and recorded is not None:
+                problems.append(f"{name}: dimensionless but units {recorded!r}")
+            elif expected_unit is not None and recorded != expected_unit:
+                problems.append(f"{name}: units {recorded!r} != {expected_unit!r}")
+    detail = (
+        f"{path.name}: schema_version = {h5io.SCHEMA_VERSION}, generator = "
+        f"{generator}, creation_date with offset, {len(datasets)} dataset(s) gzip/"
+        f"{h5io.COMPRESSION_OPTS} with the convention chunks and units "
+        f"{ {name: units.get(name) for name in sorted(datasets)} }"
+    )
+    if problems:
+        return False, f"{path.name}: " + "; ".join(problems)
+    return True, detail
+
+
+# --------------------------------------------------------------------------- #
 # the correction stage
 # --------------------------------------------------------------------------- #
 def test_correction_stage(n, workdir):
@@ -290,6 +424,44 @@ def test_correction_stage(n, workdir):
         f"anchor verdict = {bad['anchor_self_check']['verdict']}, corrected ring "
         f"ratio = {ratio_text(bad['anchor_self_check'])}",
         "not consistent",
+    )
+
+    # The h5 product of the corrected canvas: the repository h5 convention plus the
+    # two arrays bit-exactly (fft2 versus the kept .npy, dtype included, and
+    # `corrected` re-rendered with the CSV format versus the CSV text).
+    good_dir = base / "correction_r3"
+    good_csv = good_dir / f"{csv_path.stem}_corrected.csv"
+    good_fft2 = good_dir / f"{csv_path.stem}_corrected_fft2.npy"
+    good_h5 = good_dir / f"{csv_path.stem}_corrected.h5"
+    good_h5_ok, good_h5_detail = check_h5_schema(
+        good_h5, ["corrected", "fft2"], "stm_topo_correct.py", {}
+    )
+    corrected_from_h5 = h5_read(good_h5, "corrected")
+    fft2_from_h5 = h5_read(good_h5, "fft2")
+    fft2_npy = np.load(good_fft2) if good_fft2.is_file() else None
+    fft2_exact = bool(
+        fft2_from_h5 is not None
+        and fft2_npy is not None
+        and fft2_from_h5.dtype == np.complex128
+        and bit_equal(fft2_from_h5, fft2_npy)
+    )
+    corrected_exact = bool(
+        corrected_from_h5 is not None
+        and corrected_from_h5.dtype == np.float64
+        and renders_like_csv(corrected_from_h5, good_csv)
+    )
+    check(
+        "correction stage h5 product (h5 convention, bit-exact arrays)",
+        good_h5_ok and fft2_exact and corrected_exact,
+        (
+            f"{good_h5_detail}; fft2 == .npy exactly {fft2_exact} "
+            f"(dtype {None if fft2_from_h5 is None else fft2_from_h5.dtype}), "
+            f"corrected is the array written to the CSV {corrected_exact} "
+            f"(dtype {None if corrected_from_h5 is None else corrected_from_h5.dtype})"
+        )
+        if good_h5_ok
+        else good_h5_detail,
+        "root attrs + gzip/4 + convention chunks, arrays bit-exact",
     )
 
 
@@ -622,6 +794,67 @@ def test_transform_stage(n, workdir):
             )
         ),
         "every sub-step passes",
+    )
+
+    # The h5 products of the two stages: both stages write <stem>_corrected.h5 with
+    # the repository h5 convention, the fit stage's copies are bit-exact against the
+    # CSV and the kept .npy, and the apply stage on the identical grid is bit-exact
+    # against the fit stage (dtype included).
+    fit_h5 = fit_dir / f"{ref_csv.stem}_corrected.h5"
+    apply_h5 = apply_ref_dir / f"{ref_csv.stem}_corrected.h5"
+    fit_h5_ok, fit_h5_detail = check_h5_schema(
+        fit_h5, ["corrected", "fft2"], "stm_topo_correct.py", {}
+    )
+    apply_h5_ok, apply_h5_detail = check_h5_schema(
+        apply_h5, ["corrected", "fft2"], "stm_apply_transform.py", {}
+    )
+    fit_corrected, fit_h5_fft2 = h5_read(fit_h5, "corrected"), h5_read(fit_h5, "fft2")
+    apply_corrected = h5_read(apply_h5, "corrected")
+    apply_fft2 = h5_read(apply_h5, "fft2")
+    fit_fft2_npy = (
+        np.load(fit_dir / f"{ref_csv.stem}_corrected_fft2.npy")
+        if (fit_dir / f"{ref_csv.stem}_corrected_fft2.npy").is_file()
+        else None
+    )
+    h5_fit_exact = bool(
+        fit_corrected is not None
+        and fit_corrected.dtype == np.float64
+        and renders_like_csv(fit_corrected, fit_dir / f"{ref_csv.stem}_corrected.csv")
+        and fit_h5_fft2 is not None
+        and fit_h5_fft2.dtype == np.complex128
+        and fit_fft2_npy is not None
+        and bit_equal(fit_h5_fft2, fit_fft2_npy)
+    )
+    h5_bit_equal = bool(
+        apply_corrected is not None
+        and apply_fft2 is not None
+        and fit_corrected is not None
+        and fit_h5_fft2 is not None
+        and apply_corrected.dtype == fit_corrected.dtype
+        and apply_fft2.dtype == fit_h5_fft2.dtype
+        and bit_equal(apply_corrected, fit_corrected)
+        and bit_equal(apply_fft2, fit_h5_fft2)
+    )
+    other_h5_ok = True
+    other_h5_detail = []
+    for label, directory, script, stem_name in (
+        ("target", apply_tgt_dir, "stm_apply_transform.py", tgt_csv.stem),
+        ("identity", apply_ident_dir, "stm_apply_transform.py", ref_csv.stem),
+    ):
+        candidate = directory / f"{stem_name}_corrected.h5"
+        ok, detail = check_h5_schema(candidate, ["corrected", "fft2"], script, {})
+        other_h5_ok = other_h5_ok and ok
+        other_h5_detail.append(f"({label}) {detail if not ok else 'ok'}")
+    check(
+        "two-stage transform h5 products (h5 convention, bit-exact arrays)",
+        fit_h5_ok and apply_h5_ok and other_h5_ok and h5_fit_exact and h5_bit_equal,
+        (
+            f"fit: {fit_h5_detail}, fft2 == .npy exactly and corrected == the CSV "
+            f"array {h5_fit_exact}; apply (identical grid): {apply_h5_detail}, "
+            f"corrected and fft2 bit-identical to the fit stage {h5_bit_equal}; "
+            + "; ".join(other_h5_detail)
+        ),
+        "h5 convention in both stages, fit arrays bit-exact, identical-grid apply bit-identical",
     )
 
 

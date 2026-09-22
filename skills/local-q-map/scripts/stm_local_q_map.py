@@ -5,10 +5,11 @@ demodulates the corrected canvas into one complex local field
 
     psi_q(r) = FFT^-1{ FFT[T(r) exp(-i q.r)] * exp(-Lambda^2 |k|^2 / 2) }
 
-and writes, per q, the complex field (the primary product), its amplitude, its
-demodulated phase ``theta_q = arg psi_q`` (radians, wrapped into ``(-pi, pi]``,
-no ``q.r`` ramp) and the validity mask.  Everything is geometry and signal
-processing: no physical statement is made anywhere.
+and writes, per q, ONE HDF5 file (``<prefix>.h5``) holding the complex field (the
+primary product), its amplitude, its demodulated phase ``theta_q = arg psi_q``
+(radians, wrapped into ``(-pi, pi]``, no ``q.r`` ramp) and the validity mask.
+Everything is geometry and signal processing: no physical statement is made
+anywhere.
 
 Usage:
     cd /path/to/STM_DataProcessing
@@ -56,6 +57,8 @@ sys.path.insert(0, str(HERE))
 import localqmap as lq  # noqa: E402
 
 SKILL_VERSION = lq.SKILL_VERSION
+#: producer stamped into every h5 product (``generator`` root attribute)
+GENERATOR = Path(__file__).name
 STM_LIB_DEFAULT = "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"
 
 LOG: list[str] = []
@@ -158,7 +161,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--no-figures",
         action="store_true",
-        help="write the npy products only, no PNG preview",
+        help="write the h5 product only, no PNG preview",
     )
     parser.add_argument(
         "--stm-lib",
@@ -430,12 +433,7 @@ def main(argv=None):
 
         stem = csv_path.stem
         prefix = f"{stem}_{label}"
-        artifacts = {
-            "field_npy": outdir / f"{prefix}_field.npy",
-            "amplitude_npy": outdir / f"{prefix}_amplitude.npy",
-            "theta_npy": outdir / f"{prefix}_theta.npy",
-            "mask_npy": outdir / f"{prefix}_mask.npy",
-        }
+        artifacts = {"h5": outdir / f"{prefix}.h5"}
         if not args.no_figures:
             artifacts.update(
                 amplitude_png=outdir / f"{prefix}_amplitude.png",
@@ -443,10 +441,14 @@ def main(argv=None):
                 mask_png=outdir / f"{prefix}_mask.png",
             )
 
-        lq.save_npy(artifacts["field_npy"], np.asarray(field, dtype=np.complex128))
-        lq.save_npy(artifacts["amplitude_npy"], np.asarray(amplitude, dtype=np.float64))
-        lq.save_npy(artifacts["theta_npy"], np.asarray(theta, dtype=np.float64))
-        lq.save_npy(artifacts["mask_npy"], np.asarray(valid, dtype=np.float64))
+        lq.save_products(
+            artifacts["h5"],
+            field=np.asarray(field, dtype=np.complex128),
+            amplitude=np.asarray(amplitude, dtype=np.float64),
+            theta=np.asarray(theta, dtype=np.float64),
+            mask=np.asarray(valid, dtype=np.float64),
+            generator=GENERATOR,
+        )
         if not args.no_figures:
             shown = np.where(valid, amplitude, np.nan)
             lq.save_map(artifacts["amplitude_png"], shown, cmap="inferno")
@@ -527,12 +529,14 @@ def main(argv=None):
                     "(carrier removed): theta ~ +phi_q, no q.r ramp; the "
                     "reported circular median is amplitude weighted (it "
                     "minimises sum_i |psi_i| |wrap(t - theta_i)|)",
-                    "theta_png": "degrees(angle(exp(1j * npy))) in (-180, 180], twilight, "
+                    "theta_png": "degrees(angle(exp(1j * theta))) of the 'theta' dataset of "
+                    "the per-q h5 product (<stem>_<label>.h5), twilight, "
                     "vmin=-180, vmax=180",
                     "mask": "float 1 = valid, 0 = invalid; invalid = input NaN region "
                     "UNION |psi_q| < amplitude_fraction * median(|psi_q|)",
                     "invalid_pixels": "drawn as NaN in the amplitude and theta PNGs "
-                    "(bad colour), kept finite in every npy",
+                    "(bad colour), kept finite in the four datasets of the per-q h5 "
+                    "product <stem>_<label>.h5 (field, amplitude, theta, mask)",
                 },
             }
         )

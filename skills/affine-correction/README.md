@@ -12,13 +12,15 @@
 | `scripts/stm_topo_correct.py` | 几何矫正 CLI：读入 → 预处理 → 数据锚定检测 → 显式 `LatticeSpec` → 对称正定拉伸 → 重采样；**锚定环可显式指定**（`--anchor-ring 1x1|r3`）；`--save-transform FILE` 额外导出独立变换 JSON（不加开关时既有输出逐字节不变） |
 | `scripts/stm_apply_transform.py` | **两段式第二段**：把变换 JSON 应用到另一张拓扑图（`INPUT.csv --transform T.json -L SIZE -o OUT`）；按目标图自己的像素数重算画布与 offset，只做重采样（不重新检测峰、不重跑自检） |
 | `scripts/correction_lib.py` | 自包含辅助模块：环半径聚类 `group_rings`、绘图样式 `setup_style`、gwyddion 色图 `load_colormap`（含 builtin 回退）与 `BAD_COLOR`（**不 import phase-analysis skill**） |
-| `scripts/selftest.py` | **一键自我验证**（**6 项**：stage 跑通、M 回收、隐含晶格常数、正确/错误锚定自检、两段式变换导出与套用） |
-| `SKILL.md` | 完整方法学、锚定自检双 tell-tale、变换 JSON 契约、下游接口契约与限制 |
+| `scripts/h5io.py` | 自包含 HDF5 writer：仓库统一 h5 约定（`SCHEMA_VERSION = 1`、`gzip`/4、显式 chunk ≤ 1 MiB、root `schema_version`/`generator`/`creation_date`、`units` 属性），**不 import `stm_data_processing`** |
+| `scripts/selftest.py` | **一键自我验证**（**8 项**：stage 跑通、M 回收、隐含晶格常数、正确/错误锚定自检、两段式变换导出与套用、两段 h5 产物与逐位一致性） |
+| `SKILL.md` | 完整方法学、锚定自检双 tell-tale、变换 JSON 契约、h5 数据集契约、下游接口契约与限制 |
 
 ## 依赖
 
 - 仓库 `STM_DataProcessing` 源码（`src/`）：`utils.bragg_peak`（峰检测/亚像素定位/对称正定拉伸/重采样/FFT2）、
   `stm.preview_plot.gwyddion`（色标，缺省 builtin 锚点回退）、`utils.plot_funcs.subtractMeanPlane`
+- `h5py`（HDF5 产物；仓库 `pyproject.toml` 已含）
 - 执行环境（系统 Python 无 numpy；不要用 `uv run`——它会写仓库 `.venv`）：
 
 ```bash
@@ -29,7 +31,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 .venv/bin/python skills/affine-correction/scripts/stm_topo_correct.py \
     INPUT.csv -L 50 --anchor-ring r3 -o OUT --list-rings
 
-# 一键 self-test（6 项）
+# 一键 self-test（8 项）
 .venv/bin/python skills/affine-correction/scripts/selftest.py --workdir var/corr_selftest --keep
 ```
 
@@ -51,9 +53,15 @@ apply 段不做峰检测与锚定自检——`apply_report.json` / log 里的 `a
 
 ## 输出
 
-`<stem>_corrected.csv` / `<stem>_corrected_fft2.npy` / `<stem>_corrected.png` /
-`<stem>_corrected_fft.png` / `correction.log` / `correction_report.json`
+`<stem>_corrected.csv` / `<stem>_corrected.h5` / `<stem>_corrected_fft2.npy` /
+`<stem>_corrected.png` / `<stem>_corrected_fft.png` / `correction.log` / `correction_report.json`
 （apply 段同名，但报告为 `apply_report.json`）。
+
+`<stem>_corrected.h5` 是仓库 h5 约定的数组产物（数据集 `corrected` = 写进 CSV 的 `float64` 数组、
+`fft2` = 写进 `.npy` 的 `complex128` 数组；root `schema_version = 1` / `generator` /
+`creation_date`，显式 chunk + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`）。
+**`.npy` FFT2 同时保留**：`skills/phase-analysis/` 用它做 `--fft2` 输入（phase-analysis
+不在本次产物迁移范围）。CSV/PNG/JSON/log 的名称与内容不变。
 下游接口契约（`corrected canvas ... field of view X nm` 行、`affine_q` 等）见 `SKILL.md` §3。
 
 ## 修改记录

@@ -1,5 +1,41 @@
 # CHANGES — affine-correction
 
+## 2026-09：数组侧产物改为 HDF5（`<stem>_corrected.h5`），CSV/PNG/JSON/log 逐字节不变
+
+目标：仓库的数据产物 **HDF5 优先**——本 skill 的矫正数组此前只以 CSV（`%.10e`，有精度损失）和
+`<stem>_corrected_fft2.npy` 为容器，现在两个数组同时写进一个 h5；inter-skill 的 CSV 契约、
+图、报告与 log 一个字节都不动。
+
+- **新增自包含模块 `scripts/h5io.py`**（镜像 `src/stm_data_processing/io/h5_convention.py` 的约定，
+  skill **不** import `stm_data_processing`）：`SCHEMA_VERSION = 1`、`COMPRESSION = "gzip"`、
+  `COMPRESSION_OPTS = 4`、`CHUNK_TARGET_BYTES = 1 << 20`、`chunk_shape()`（从末维起填满 ≤ 1 MiB，
+  预算用完后前导维取 1）、`create_dataset()`（`track_times=False` + gzip/4 + 显式 chunks + 可选
+  `units`）、`write_file_metadata()`（root `schema_version`/`generator`/`creation_date`）、
+  `write_file()`（一次写多数据集）。
+- **`stm_topo_correct.py` / `stm_apply_transform.py`**：在写 CSV 与 `.npy` 之后额外写
+  `<stem>_corrected.h5`，数据集 `corrected`（`float64`，**与写进 CSV 的是同一个数组**）与
+  `fft2`（`complex128`，**与 `.npy` 是同一个数组**）；root `generator` 分别是
+  `stm_topo_correct.py` / `stm_apply_transform.py`，并附 `input`（apply 段另加 `transform_file`）、
+  `field_of_view_nm`、`nm_per_px` 溯源属性。两个数组都是输入拓扑的任意单位（无物理单位），
+  按仓库约定**不写** `units`。
+- **`<stem>_corrected_fft2.npy` 保留**：`skills/phase-analysis/scripts/stm_phase_analysis.py`
+  通过 `--fft2` 读它，phase-analysis 明确不在本次迁移范围。
+- **未改动的产物**：`<stem>_corrected.csv`、两张 png、`correction.log`、`correction_report.json`、
+  `apply_report.json`、`--save-transform` 的 transform JSON（含 stdout 的 `# written:` 行）
+  名称与字节全部不变；h5 不进报告/log 的登记列表（那些列表里没有过时的条目要修）。
+- **self-test 6 → 8 项**（原 6 项的意图、阈值与子步骤一个不少）：新增第 7 项（矫正段的
+  `<stem>_corrected.h5`：root 三属性 + `generator` + gzip/4 + 约定 chunk + `track_times`，
+  且 `fft2` 与 `.npy`、`corrected` 与 CSV 逐位一致）与第 8 项（两段式两个 stage 的 h5：拟合段同上，
+  同网格 apply 的 `corrected`/`fft2` 与拟合段**逐字节**相同，换尺寸与 `identity_fallback` 段的 h5
+  也合规）。等值判定用 `tobytes()` 字节比较而非 `np.array_equal`：后者会把「只差 NaN」的两个数组
+  判为不等（apply 段画布边缘正是 NaN）。
+- `track_times=False` 的验证方式：本环境 h5py 3.16 的 `get_obj_track_times()` 对从文件读回的
+  数据集一律返回 True（不反映创建标志），因此 self-test 改看**对象头的时间消息**——
+  `track_times=False` 时对象头不存时间，`h5py.h5o.get_info(...).ctime/mtime` 恒为 0。
+- 验收：self-test **8/8** 通过；同一输入、同一输出目录下与迁移前脚本逐文件比对：CSV / png /
+  log / JSON 全部 sha256 相同，`.npy` FFT2 字节相同，新增文件恰好只有 `<stem>_corrected.h5`。
+  详见 `SKILL.md` §3、§4 与 迁移报告。
+
 ## 2026-09：skill 改名 topo-correction → affine-correction（零行为变化）
 
 用户要求把几何矫正 skill 由 `topo-correction` 改名为 `affine-correction`（目录名 + frontmatter

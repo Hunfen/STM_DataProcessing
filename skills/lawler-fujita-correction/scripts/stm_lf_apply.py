@@ -1,7 +1,7 @@
 """Apply a fitted Lawler-Fujita correction bundle to another topography dataset.
 
 Stage 2 of the two-stage workflow: ``stm_lf_correct.py --save-transform`` writes the
-bundle -- the JSON with the lock-in geometry and the npz with the dense displacement
+bundle -- the JSON with the lock-in geometry and the h5 with the dense displacement
 field ``u`` in nm on the reference grid -- and this script re-runs **only the warp**
 on an arbitrary target dataset.  It does **not** re-detect peaks and does **not**
 re-run any self-check: the field is taken as given and its provenance is copied into
@@ -28,11 +28,18 @@ is copied verbatim (``n_out = n``, field of view unchanged, no NaN added).
 
 Outputs (same naming and plot style as the fit stage):
     <outdir>/<stem>_corrected.csv       corrected topography (square, NaN padded)
+    <outdir>/<stem>_corrected.h5        corrected + FFT2 (HDF5, repo h5 convention)
     <outdir>/<stem>_corrected_fft2.npy  complex FFT2 (complex128, fftshifted)
     <outdir>/<stem>_corrected.png       topography plot (gwyddion colormap)
     <outdir>/<stem>_corrected_fft.png   FFT plot (inferno, log, percentile norm)
     <outdir>/correction.log             the console report (both contract lines)
     <outdir>/apply_report.json          the same numbers, machine readable
+
+The bundle's displacement field is read from the h5 file the fit stage wrote
+(``u_field_file`` in the bundle JSON); the h5 product written here holds the
+datasets ``corrected`` (float64, exactly the array written to the CSV) and
+``fft2`` (complex128, exactly the array written to the .npy), and the .npy FFT2
+stays for the phase-analysis hand-off.
 
 Usage:
     cd /path/to/STM_DataProcessing
@@ -48,6 +55,7 @@ import json
 import sys
 from pathlib import Path
 
+import h5py
 import matplotlib
 import numpy as np
 
@@ -57,6 +65,7 @@ import matplotlib.pyplot as plt
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import h5io  # noqa: E402
 import lf_lib as lf  # noqa: E402
 
 BUNDLE_SCHEMA = "lawler-fujita-correction-transform"
@@ -156,13 +165,24 @@ def load_bundle(path):
     field = None
     if not fallback:
         if not u_path or not Path(u_path).is_file():
-            raise ValueError(f"{path}: the u-field npz is missing ({u_path!r})")
-        with np.load(u_path) as handle:
-            field = {
-                "u_x": handle["u_x"],
-                "u_y": handle["u_y"],
-                "valid": handle["valid"].astype(bool),
-            }
+            raise ValueError(f"{path}: the u-field h5 file is missing ({u_path!r})")
+        try:
+            with h5py.File(u_path, "r") as handle:
+                absent = [key for key in ("u_x", "u_y", "valid") if key not in handle]
+                if absent:
+                    raise ValueError(
+                        f"{u_path}: missing dataset(s) {', '.join(absent)}"
+                    )
+                field = {
+                    "u_x": np.asarray(handle["u_x"]),
+                    "u_y": np.asarray(handle["u_y"]),
+                    "valid": np.asarray(handle["valid"]).astype(bool),
+                }
+        except OSError as exc:
+            raise ValueError(
+                f"{u_path}: not a readable HDF5 file ({exc}); the bundle needs the "
+                "u-field h5 written by stm_lf_correct.py --save-transform"
+            ) from exc
         if (
             field["u_x"].shape != field["u_y"].shape
             or field["valid"].shape != field["u_x"].shape
@@ -303,6 +323,23 @@ def main(argv=None):
     fft2_corrected = compute_fft2(corrected, size_out, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"
     np.save(out_fft2, fft2_corrected)
+    # Same h5 product as the fit stage (repo h5 convention): the CSV stays the
+    # primary product and the .npy FFT2 stays for the phase-analysis hand-off.
+    out_h5 = outdir / f"{stem}_corrected.h5"
+    h5io.write_file(
+        out_h5,
+        {
+            "corrected": (corrected, None),
+            "fft2": (fft2_corrected, None),
+        },
+        generator=Path(__file__).name,
+        extra={
+            "input": str(csv_path),
+            "transform_file": str(bundle_path),
+            "field_of_view_nm": float(size_out),
+            "nm_per_px": float(size_out / n_out),
+        },
+    )
 
     lf.setup_style()
     cmap, cmap_source = lf.load_colormap(args.stm_lib)

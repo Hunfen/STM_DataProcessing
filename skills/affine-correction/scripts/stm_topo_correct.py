@@ -25,11 +25,19 @@ ring.
 
 Outputs:
     <outdir>/<stem>_corrected.csv       corrected topography (square, NaN padded)
+    <outdir>/<stem>_corrected.h5        corrected + FFT2 (HDF5, repo h5 convention)
     <outdir>/<stem>_corrected_fft2.npy  complex FFT2 (complex128, fftshifted)
     <outdir>/<stem>_corrected.png       topography plot (gwyddion colormap)
     <outdir>/<stem>_corrected_fft.png   FFT plot (inferno, log, percentile norm)
     <outdir>/correction.log             the console report
     <outdir>/correction_report.json     the same numbers, machine readable
+
+The h5 file holds the two arrays of the correction as the datasets ``corrected``
+(float64, exactly the array written to the CSV) and ``fft2`` (complex128,
+exactly the array written to the .npy); neither has a physical unit, so no
+``units`` attribute is written (the repository convention omits it for
+dimensionless quantities).  The .npy FFT2 stays: the phase-analysis skill reads
+it through its ``--fft2`` option and is out of scope here.
 
 ``--save-transform FILE`` (default: off) additionally writes the fitted stretch as a
 standalone transform JSON (schema ``topo-correction-transform``) that the sibling
@@ -62,6 +70,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import correction_lib as cl  # noqa: E402
+import h5io  # noqa: E402
 
 SKILL_VERSION = "2.0"  # the three v2.1 fixes change no number of the existing report
 PATCH_HALF = 8  # sub-pixel Gaussian patch half width: 8 -> 17x17 pixels
@@ -619,6 +628,23 @@ def main(argv=None):
     fft2_corrected = compute_fft2(corrected, correction.size_nm, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"
     np.save(out_fft2, fft2_corrected)
+    # The same two arrays as an HDF5 product (repo h5 convention); the CSV stays the
+    # primary, inter-skill product and the .npy FFT2 stays for the phase-analysis
+    # hand-off, so a run without h5 readers is unaffected.
+    out_h5 = outdir / f"{stem}_corrected.h5"
+    h5io.write_file(
+        out_h5,
+        {
+            "corrected": (corrected, None),
+            "fft2": (fft2_corrected, None),
+        },
+        generator=Path(__file__).name,
+        extra={
+            "input": str(csv_path),
+            "field_of_view_nm": float(correction.size_nm),
+            "nm_per_px": float(correction.size_nm / correction.n_out),
+        },
+    )
 
     cl.setup_style()
     cmap, cmap_source = cl.load_colormap(args.stm_lib)

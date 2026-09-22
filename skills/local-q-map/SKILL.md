@@ -1,6 +1,6 @@
 ---
 name: local-q-map
-description: STM 矫正后拓扑 CSV 的局域 q 图（Gaussian 窗局域傅里叶滤波）：由矫正产物给出的 1×1 六方倒格基矢 {b1,b2} 表达任意 q(h,k)（h,k 可为分数），对每个 q 输出复数局域场 psi_q(r) 及其幅度 |psi_q|、解调相位 theta_q = arg psi_q（弧度，(-pi,pi]，无 q.r 斜坡）与有效掩码的 npy/png 全套产物与机器可读报告；含基矢来源自动识别（lawler-fujita / affine 报告、显式 --basis-px）、NaN 规则与跨环串扰/边界警告，并附一键数学 self-test。当用户给出矫正后拓扑 CSV 且要求「任意 q 的局域复数场/幅度/相位图」「局域傅里叶滤波」「(h,k) 表达 q」时使用。
+description: STM 矫正后拓扑 CSV 的局域 q 图（Gaussian 窗局域傅里叶滤波）：由矫正产物给出的 1×1 六方倒格基矢 {b1,b2} 表达任意 q(h,k)（h,k 可为分数），对每个 q 输出复数局域场 psi_q(r) 及其幅度 |psi_q|、解调相位 theta_q = arg psi_q（弧度，(-pi,pi]，无 q.r 斜坡）与有效掩码——每 q 一个 HDF5 文件（datasets field/amplitude/theta/mask，gzip+显式分块+units/provenance 属性）加三张 PNG 与机器可读报告；含基矢来源自动识别（lawler-fujita / affine 报告、显式 --basis-px）、NaN 规则与跨环串扰/边界警告，并附一键数学 self-test。当用户给出矫正后拓扑 CSV 且要求「任意 q 的局域复数场/幅度/相位图」「局域傅里叶滤波」「(h,k) 表达 q」时使用。
 ---
 
 # local-q-map（局域 q 图，v1.0）
@@ -170,7 +170,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 | `--basis-orientation-from` | `canvas` | 报告基矢的**取向**来源：`canvas` 用矫正画布自身测（见 §3）；`report` 强制用报告自身框架（对照用；旋转的 affine 报告会因此取错取向） |
 | `--strict` / `--no-strict` | `--strict` **开** | 基矢-画布校验失配时**不写逐 q 产物**并以退出码 **3** 结束；`--no-strict` 降级为「只 WARNING + 报告标志」（仍出产物、退出 0） |
 | `--delimiter` | `,` | CSV 分隔符 |
-| `--no-figures` | 关 | 只写 npy，不写 PNG |
+| `--no-figures` | 关 | 只写逐 q 的 h5 产物，不写 PNG |
 | `--stm-lib` | 仓库 `src` | `bragg_peak` 约定与 `rotate_basis` 的来源 |
 
 **视场优先级（与 `phase-analysis` 一致并多一级）**：
@@ -180,21 +180,22 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 
 ### 4.2 产物（`-o OUT`，`stem` = 输入 CSV 的文件名主体）
 
-每个 q（`j = 0, 1, ...`）：
+每个 q（`j = 0, 1, ...`）**一个 HDF5 文件**，四个数据集 + 三张 PNG：
 
 | 产物 | 内容 | PNG |
 | --- | --- | --- |
-| `<stem>_q{j}_field.npy` | **主产物**：`complex128` 的 `psi_q(r)` | — |
-| `<stem>_q{j}_amplitude.npy` / `.png` | `|psi_q|`（float64，全有限） | inferno |
-| `<stem>_q{j}_theta.npy` / `.png` | 弧度、折叠在 `(-pi, pi]` | twilight，`vmin=-180, vmax=180`，值 = `np.degrees(np.angle(np.exp(1j*data)))` |
-| `<stem>_q{j}_mask.npy` / `.png` | **有效掩码**（float 0/1，**1 = 有效**） | gray，vmin=0，vmax=1 |
+| `<stem>_q{j}.h5` | **主产物**：一个 q 的全部数组（四个数据集见下表），见 §4.6 | — |
+| ├ `field` | `complex128` 的 `psi_q(r)`（主数据集） | — |
+| ├ `amplitude` | `float64` 的 `|psi_q|`（全有限） | `<stem>_q{j}_amplitude.png`（inferno） |
+| ├ `theta` | `float64`、弧度、折叠在 `(-pi, pi]`、数据集属性 `units = 'rad'` | `<stem>_q{j}_theta.png`（twilight，`vmin=-180, vmax=180`，值 = `np.degrees(np.angle(np.exp(1j*theta)))`） |
+| └ `mask` | `float64` 的**有效掩码**（**1 = 有效**） | `<stem>_q{j}_mask.png`（gray，vmin=0，vmax=1） |
 
-共享：`local_q_map.log`、`local_q_map_report.json`。
+共享：`local_q_map.log`、`local_q_map_report.json`。`--no-figures` 只少写三张 PNG，h5 产物照写。
 
 **NaN 规则**：引擎把输入 NaN 像素填 **0** 后再做 FFT；掩码 =
 `（输入 NaN 区域）∪（|psi_q| < amplitude_fraction × median(|psi_q|)）`，报告里 `mask_coverage_fraction`
 是**有效像素占比**（与 `lawler-fujita-correction` 的 `lockin.mask_coverage_fraction` 同义），
-`masked_fraction = 1 - 它`。幅度/相位 PNG 里无效像素画成 NaN（bad 灰），但**所有 npy 都保持有限**。
+`masked_fraction = 1 - 它`。幅度/相位 PNG 里无效像素画成 NaN（bad 灰），但**h5 的四个数据集都保持有限**。
 
 ### 4.3 报告 JSON
 
@@ -231,6 +232,8 @@ circular_median_span_deg, n_median_minimisers, resultant_R}`、`artifacts{...}`�
 - `circular_median_deg` 是加权圆中位数（最小化 `Σ w_i |wrap(t - θ_i)|`）；`amplitude.fwhm` 是幅度分布
   直方图的半峰宽（无下降沿时记 NaN，属正常结果）。
 - `conventions` 内写明 theta 的符号/单位/PNG 口径与掩码语义。
+- `artifacts` 给出该 q 的产物路径：`h5`（单个 HDF5 文件）与 `amplitude_png` / `theta_png` / `mask_png`；
+  顶层 `written` 是本次运行写出的全部文件。没有任何 `.npy` 产物。
 
 ### 4.4 log 关键行（契约行）
 
@@ -271,7 +274,25 @@ circular_median_span_deg, n_median_minimisers, resultant_R}`、`artifacts{...}`�
 | 画布上测不到 1×1 成员（或检测器不可用） | 取向保留报告值，`basis_source.orientation_source` 与 log 写明 `no_members` / `no_detector`；基矢-画布校验仍照常执行（无证据时不误报） |
 | 边界污染 | **不作硬性剔除**：log 与报告给出边界带 `0.65 λ` px（周期性 FFT 把对边数据混入解调场），用户自行裁边 |
 
-## 5 一键 self-test（11 项）
+### 4.6 逐 q HDF5 产物的约定（冻结 schema）
+
+仓库的 `.h5` 规范在 `src/stm_data_processing/io/h5_convention.py`（`docs/hdf5_convention.md`）。
+skill 必须自包含、不得 import `stm_data_processing`，因此本 skill 在 `scripts/h5io.py` 里**逐条镜像**同一套
+约定（`SCHEMA_VERSION = 1`、`COMPRESSION = 'gzip'`、`COMPRESSION_OPTS = 4`、
+`CHUNK_TARGET_BYTES = 1 MiB`），`localqmap.save_products()` 是唯一的写出入口：
+
+| 层 | 内容 |
+| --- | --- |
+| 文件根属性 | `schema_version = 1`（int）、`generator = 'stm_local_q_map.py'`（产生该文件的脚本名）、`creation_date`（ISO-8601 带时区偏移，如 `2026-09-22T22:50:20+08:00`） |
+| 数据集 | `field`（complex128）、`amplitude`（float64）、`theta`（float64，属性 `units = 'rad'`）、`mask`（float64，1 = 有效） |
+| 每个数据集 | `track_times=False`（不记录对象时间戳）、`compression='gzip'`、`compression_opts=4`、**显式** `chunks`：按 `h5io.chunk_shape()` 从**最后一维（变化最快）开始**填满 ~1 MiB 未压缩字节预算，预算用完后其余维每块 1 个元素；小于预算的数据集 `chunks == shape`（仍是显式分块，压缩始终生效） |
+| 掩码 | 无量纲，**不写** `units`（与 `h5_convention` 的 `mask` 同口径） |
+
+一个 q 一个文件（与 `h5_convention` 的「一个文件 = 一次计算的一个产物」一致），文件名 `<stem>_q{j}.h5`。
+写出是每次运行重新创建（不沿用旧 `creation_date`），因此 h5 的**数据**内容两次运行逐位相同，
+文件字节只在 `creation_date` 上不同；PNG 与其它产物逐字节相同。self-test §5 检查 9、12 分别断言这两点。
+
+## 5 一键 self-test（12 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -294,19 +315,20 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 | 5 | 规范律：常数 φ0 使 theta 图整体平移 φ0；平移图像使各图平移 δ（含精确规范常数 `exp(-i q.δ)`） | ≤ 0.01°（8.4e-12°）；相对 ≤ 1e-9（6.0e-14） |
 | 6 | Friedel 恒等式 `theta_q + theta_-q = 0 mod 2π` | ≤ 1e-6°（2.5e-14°） |
 | 7 | 均值恒等式 `arg sum psi_q = arg sum T e^{-i q.r}` | ≤ 1e-9°（0） |
-| 8 | NaN：fill-0 与 fill-plane 的谱只差缺口本身；fill 值扰动 < 缺口占比；NaN 区全部被掩码标记，npy 全有限 | 谱相对 ≤ 1e-7（2.3e-16）；扰动 < 缺失占比（2.2e-5 < 6.1e-3） |
-| 9 | 确定性：两次运行产物**逐字节相同** | 14/14 文件 |
+| 8 | NaN：fill-0 与 fill-plane 的谱只差缺口本身；fill 值扰动 < 缺口占比；NaN 区全部被掩码标记，h5 的四个数据集全有限 | 谱相对 ≤ 1e-7（2.3e-16）；扰动 < 缺失占比（2.2e-5 < 6.1e-3） |
+| 9 | 确定性：两次运行 **6 张 PNG 逐字节相同**、**2 个 h5 各 4 个数据集逐位相同**（h5 文件字节只差每次运行的 `creation_date`） | 6/6 PNG、8/8 数据集 |
 | 10 | 视场来源：`--size-nm-from-log` 三支 + `--basis-from` 报告的 `corrected_nm_per_px` × 画布（不给 -L） | 103.3691 nm / 42.5 nm / 退出码 ≠ 0；报告支：视场 = `per_px × N`、`nm/px = per_px`、`λ_px = λ/per_px`、无边界警告 |
-| 11 | 端到端：单 q 与多 q 两次完整运行 + 产物/报告/log 字段断言（含基矢来源的取向字段与 `basis_canvas_check`）+ 警告支（串扰、边界、nm/px 不一致、以及一致时不告警）+ **基矢-画布校验通过** + 加权圆中位数 | 21/21 文件、字段齐全、log 契约行齐全；`-L` 差 2 倍时 `nm_per_px_mismatch = true`；基矢-画布成员幅度比 100 %（阈值 20 %）、成员偏移 0 px（容差 4.75 px）、`basis_ring_mismatch = false`；双峰幅度样本上报告值 = 幅度加权中位数（两种定义差 60.5°） |
+| 11 | 端到端：单 q 与多 q 两次完整运行 + 产物/报告/log 字段断言（含基矢来源的取向字段与 `basis_canvas_check`）+ 警告支（串扰、边界、nm/px 不一致、以及一致时不告警）+ **基矢-画布校验通过** + 加权圆中位数 | 16/16 文件（单 q：1 h5 + 3 png；多 q：3×4）且目录内**没有多余文件**（无 `.npy`）、字段齐全、log 契约行齐全；`-L` 差 2 倍时 `nm_per_px_mismatch = true`；基矢-画布成员幅度比 100 %（阈值 20 %）、成员偏移 0 px（容差 4.75 px）、`basis_ring_mismatch = false`；双峰幅度样本上报告值 = 幅度加权中位数（两种定义差 60.5°） |
+| 12 | 逐 q h5 产物契约：四个 npy 被一个 h5 取代；根属性 / gzip-4 / 显式分块 / `track_times=False` / `theta` 的 `units='rad'` 全符合 §4.6；报告的 `artifacts` 指向 h5、`conventions` 的 `theta_png`/`invalid_pixels` 描述的是 h5 产物与其四个数据集（不再写 "npy"）；`--no-figures` 仍写 h5 且只少 PNG；**负向对照**：文件缺失 → `FileNotFoundError`、数据集缺失 → `KeyError`、`conventions` 退回旧 npy 措辞 → 违规列表非空（读产物/读措辞的断言因此会变红，不会静默通过） | 0 条 schema 违约、0 条措辞违约；缺失文件/数据集与旧措辞都被读到即报错 |
 
-退出码 0 = 11 项全过（本版 46 条断言）；每项都打印实测值与其阈值。
+退出码 0 = 12 项全过（本版 53 条断言）；每项都打印实测值与其阈值。
 
 ## 6 已知限制
 
 1. **相位折叠**：theta 保持 `(-pi, pi]`，本 skill 不解缠（与 `lawler-fujita-correction` 的 theta 产物同口径）。
 2. **边界**：周期 FFT 使边界 `0.65 λ` 带内的解调场混入对侧数据；λ 越接近视场，可信区越小（`λ > L/4` 报警告）。
 3. **有限画布采样项**：q 与画布不可约时存在 `~1/N` 的残差（见 §2.5 第 4 条），不是窗串扰。
-4. **掩码语义**：`_mask.npy` 是**有效掩码**（1 = 有效）；`Σq=0` 之类的组合量必须只在有效像素上算。
+4. **掩码语义**：`mask` 数据集是**有效掩码**（1 = 有效）；`Σq=0` 之类的组合量必须只在有效像素上算。
 5. **基矢：半径来自矫正产物，取向来自矫正画布**。本 skill 不重测环半径——报告给错半径，q 就错
    （log 会打印解析出的 b1/b2 与半径来源供核对）；报告锚定在 r3 环时半径键不是 1×1 半径，代码按
    `anchor_ring` 换算并用 `rings_after` 交叉核对；画布 nm/px 与报告 nm/px 不一致时打 `nm/px mismatch` 警告
@@ -347,3 +369,22 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 并写明落盘时排除 `scripts/__pycache__/`（`py_compile` 验证步骤的副产物，非 skill 内容）。
 self-test check 4 新增「旋转 affine 报告」fixture（默认重新取向 + 强制报告框架的失配：`--no-strict` 出产物且带标志、默认 `--strict` 退出 3 不写产物），
 check 11 新增基矢-画布校验通过的断言。
+
+2026-09（v1.0，产物改为 HDF5 优先）：每 q 的四个 `.npy` 产物（`field` / `amplitude` / `theta` / `mask`）
+合并为**一个** `<stem>_q{j}.h5`（数据集名 `field` / `amplitude` / `theta` / `mask`），新增
+`scripts/h5io.py`（**自包含镜像** `src/stm_data_processing/io/h5_convention.py` 的 chunk/压缩/属性约定，
+该模块不 import `stm_data_processing`；skill 其余部分对包的依赖仍只有 §3/§4.1 的 `--stm-lib`
+`bragg_peak` 可选导入），`localqmap.save_npy()` 换成 `localqmap.save_products()`。
+PNG、`local_q_map.log`、`local_q_map_report.json` 与 CSV 读入口径不变（报告只有 `artifacts` 与 `written`
+改指 h5，其余字段逐字保留，含 `conventions` 里两处字面写 "npy" 的说明）；`--no-figures` 仍只少写三张 PNG。约定见 §4.6，
+self-test 新增 check 12（schema + `--no-figures` 文件集 + 读产物的负向对照），
+断言由 46 条扩到 **51 条**（12 项，全部通过）。
+
+2026-09（v1.0，报告 `conventions` 措辞修正）：t3 之后的报告仍在
+`conventions.theta_png`（`degrees(angle(exp(1j * npy))) ...`）与
+`conventions.invalid_pixels`（"kept finite in every npy"）里把逐 q 产物称作 npy——那两处描述的是已被
+h5 取代的产物，内容已失真。现改为指向 h5 产物与其数据集：`theta_png` 写明取 `'theta'` 数据集
+（`<stem>_<label>.h5`），`invalid_pixels` 写明在 h5 的四个数据集（field/amplitude/theta/mask）里保持有限。
+blast radius 已逐字段核对：与 HEAD 运行的报告相比只有 15 个叶子字段改变（每 q 的 `artifacts`
+4 个 npy 键 → 1 个 h5 键 = 10、这两条措辞 × 2 q = 4、`written` 列表 = 1），log、PNG 与 h5 数据集
+一个字节都没变。self-test 新增措辞断言与旧措辞负向对照（51 → **53 条**，仍 12 项）。

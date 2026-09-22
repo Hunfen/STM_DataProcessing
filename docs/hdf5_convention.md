@@ -11,6 +11,14 @@ src/stm_data_processing/io/h5_convention.py:159:    dataset = parent.create_data
 其余命中都是各 writer 对本模块 `create_dataset` / `write_file_metadata` 的调用。
 新增结果类型时**不要**直接调用 `h5py` 的 `create_dataset`。
 
+**技能（`skills/`）的例外**：技能是自包含的分发单元，不允许 import `stm_data_processing`，
+所以 `skills/affine-correction`、`skills/lawler-fujita-correction`、`skills/local-q-map`
+各自在 `scripts/h5io.py` 里**逐值镜像**同一套规则（同样的 `gzip`/4、显式分块
+`chunk_shape()`、`track_times=False`、按量给 `units`，以及根属性
+`schema_version` / `generator` / `creation_date`），并把它作为该技能内**唯一**的
+`create_dataset` 入口。上面那句「唯一」只约束 `src/stm_data_processing` 内部。改动本模块的
+常量或 `chunk_shape()` 时必须同步这三个镜像——同样输入下它们必须给出相同的分块。
+
 ## 1. 文件与数据集命名
 
 * 一个文件 = 一个结果对象（一次计算的一次产物），不把多类结果塞进同一文件。
