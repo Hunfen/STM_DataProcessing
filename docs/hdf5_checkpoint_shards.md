@@ -85,10 +85,10 @@ recomputed`），然后重算该片。`orbital_select=None`（全部轨道）在
   `--max-mem-gb` 判定：估算总量超出预算就拒绝启动（退出码 3），
   `--dry-run` 只打印计划与估算值。
 
-## 6. 尚未完成（本轮交付的边界）
+## 6. 复用
 
-本轮只把**分片格式**迁到 HDF5 并保持既有语义；把「切片规划 + worker 派发 + 合并」
-抽成**独立可复用模块**（`parallel/shard_driver.py` 之类，带 `ShardSpec` 合约与
-`docs/` 用法走查）**尚未做**，仍留在 `lindhard_re_chi_parallel.py` 内。抽取时必须保持
-本文件描述的格式与上表语义：分片键=行区间、每片 compute 函数、按键升序合并、
-签名身份校验、内存预算。
+分片-合并机制（分片键规划、worker 派发、恢复过滤、内存预算、按序合并与分片文件生命周期）
+已抽成独立模块 `src/stm_data_processing/parallel/shard_driver.py`，接入方式见
+[`docs/parallel_shard_driver.md`](parallel_shard_driver.md)；`lindhard_re_chi_parallel.run_parallel`
+现在只是**声明物理**的薄适配层（构造一个 `ShardSpec` 并调用 `run_shards`），本文件描述的
+格式与生命周期语义由驱动保证。

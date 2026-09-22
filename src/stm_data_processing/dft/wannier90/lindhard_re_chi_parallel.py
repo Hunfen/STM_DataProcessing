@@ -31,14 +31,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import logging
-import multiprocessing as mp
 import os
-import queue as queue_module
-import signal
 import sys
-import tempfile
 import time
 import traceback
 from collections.abc import Mapping, Sequence
@@ -56,18 +51,29 @@ from stm_data_processing.dft.wannier90.lindhard_re_chi import (
     RealLindhardCalculator,
     array_digest,
     format_bytes,
-    format_hms,
     peak_rss_bytes,
 )
 from stm_data_processing.dft.wannier90.mlwf_hamiltonian import MLWFHamiltonian
 from stm_data_processing.io.h5_convention import (
     CREATION_DATE_ATTR,
-    create_dataset,
     read_creation_date,
-    write_file_metadata,
 )
 from stm_data_processing.io.susceptibility_io import save_susceptibility_to_h5
 from stm_data_processing.io.w90hr_loader import Wannier90HRLoader
+from stm_data_processing.parallel.shard_driver import (
+    RunStats,
+    ShardSpec,
+    ShardStore,
+    available_memory_bytes,
+    log_aggregate_progress,
+    log_plan,
+    memory_guard,
+    plan_slices,
+    run_shards,
+)
+from stm_data_processing.parallel.shard_driver import (
+    scan_shards as scan_checkpoints,
+)
 from stm_data_processing.utils.miscellaneous import extend_qpi, frac_to_real_2d
 
 logger = logging.getLogger(__name__)
@@ -233,20 +239,9 @@ def plan_row_slices(
     """
     if nk < 1:
         raise ValueError(f"nk must be positive, got {nk}")
-    if n_workers < 1:
-        raise ValueError(f"n_workers must be positive, got {n_workers}")
 
     n_rows = nk // 2 + 1 if mirror else nk
-    n_slices = min(int(n_workers), n_rows)
-    base, remainder = divmod(n_rows, n_slices)
-
-    slices: list[tuple[int, int]] = []
-    start = 0
-    for index in range(n_slices):
-        stop = start + base + (1 if index < remainder else 0)
-        slices.append((start, stop))
-        start = stop
-    return slices
+    return plan_slices(n_rows, n_workers)
 
 
 def _validate_row_slices(
@@ -355,185 +350,9 @@ def estimate_worker_rss_bytes(
     return int(evals + evecs + hk_block + working + model + _STATIC_OVERHEAD_BYTES)
 
 
-def available_memory_bytes() -> int | None:
-    """Memory the kernel reports as available, or ``None`` when unknown.
-
-    Linux parses ``MemAvailable`` from ``/proc/meminfo`` (the reclaimable
-    amount, which is the number the guard is specified against).  Other
-    platforms use ``sysconf``: the free page count when the platform exposes it
-    (not macOS) and otherwise the total physical memory, which is an upper
-    bound rather than the available amount.  ``None`` when neither is known, in
-    which case the guard only enforces an explicit ``max_mem_gb``.
-    """
-    meminfo = Path("/proc/meminfo")
-    if meminfo.exists():
-        try:
-            for line in meminfo.read_text(encoding="ascii").splitlines():
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-        except OSError, ValueError, IndexError:
-            return None
-        return None
-    page_size = None
-    for name in ("SC_PAGE_SIZE", "SC_AVPHYS_PAGES", "SC_PHYS_PAGES"):
-        try:
-            value = int(os.sysconf(name))
-        except ValueError, OSError, AttributeError:
-            value = None
-        if name == "SC_PAGE_SIZE":
-            page_size = value
-            continue
-        if value is not None and value > 0 and page_size:
-            return value * page_size
-    return None
-
-
 # ----------------------------------------------------------------------
 # Checkpoints
 # ----------------------------------------------------------------------
-def _shard_stem(row_range: tuple[int, int]) -> str:
-    return f"rows_{int(row_range[0])}_{int(row_range[1])}"
-
-
-def _shard_paths(ckpt_dir: Path, row_range: tuple[int, int]) -> tuple[Path, Path]:
-    """``(shard_file, done_marker)`` of one slice.
-
-    A shard is a single HDF5 file written through
-    :mod:`stm_data_processing.io.h5_convention` - one dataset per result array
-    plus the checkpoint metadata as file attributes - together with a ``.done``
-    marker that is only created once the shard is complete.
-    """
-    stem = _shard_stem(row_range)
-    return ckpt_dir / f"{stem}.h5", ckpt_dir / f"{stem}.done"
-
-
-def _shard_attrs(meta: Mapping[str, Any]) -> dict[str, Any]:
-    """Checkpoint metadata -> HDF5 attributes.
-
-    Scalars, strings and regular numeric arrays are stored as they are; nested
-    mappings (the per-array digests) and any ragged sequence become JSON text
-    under ``<key>_json``, because HDF5 attributes cannot hold them.
-    """
-    attrs: dict[str, Any] = {}
-    for key, value in meta.items():
-        if value is None:
-            continue
-        if isinstance(value, Mapping):
-            attrs[f"{key}{_SHARD_JSON_SUFFIX}"] = json.dumps(value, sort_keys=True)
-            continue
-        converted = _shard_attr_value(value)
-        if isinstance(converted, np.ndarray) and converted.dtype == object:
-            attrs[f"{key}{_SHARD_JSON_SUFFIX}"] = json.dumps(value, sort_keys=True)
-        else:
-            attrs[key] = converted
-    return attrs
-
-
-def _shard_meta(handle: h5py.File) -> dict[str, Any]:
-    """HDF5 attributes -> checkpoint metadata (the inverse of _shard_attrs)."""
-    meta: dict[str, Any] = {}
-    for key in handle.attrs:
-        if key.endswith(_SHARD_JSON_SUFFIX):
-            meta[key[: -len(_SHARD_JSON_SUFFIX)]] = json.loads(str(handle.attrs[key]))
-        else:
-            meta[key] = _shard_meta_value(handle.attrs[key])
-    return meta
-
-
-def _shard_attr_value(value: Any) -> Any:
-    """Checkpoint metadata -> something ``h5py`` can store as an attribute."""
-    if isinstance(value, np.ndarray):
-        return value
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (list, tuple)):
-        return np.asarray(value)
-    return value
-
-
-def _shard_meta_value(value: Any) -> Any:
-    """HDF5 attribute -> the JSON-equivalent Python value used before.
-
-    The metadata is compared entry by entry by :func:`_shard_is_compatible`, so
-    it has to come back exactly as the JSON sidecar delivered it: scalars as
-    Python scalars, arrays as nested lists.
-    """
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    return value
-
-
-def _write_shard(
-    ckpt_dir: Path,
-    row_range: tuple[int, int],
-    arrays: Mapping[str, np.ndarray],
-    meta: Mapping[str, Any],
-) -> Path:
-    """Atomically land the HDF5 shard plus the ``.done`` marker."""
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    h5_path, done_path = _shard_paths(ckpt_dir, row_range)
-
-    tmp_h5 = h5_path.with_name(h5_path.name + ".tmp")
-    with h5py.File(tmp_h5, "w") as handle:
-        for key in _ARRAY_KEYS:
-            create_dataset(handle, key, np.asarray(arrays[key], dtype=np.float64))
-        write_file_metadata(
-            handle,
-            generator=_SHARD_GENERATOR,
-            extra=_shard_attrs(meta),
-        )
-    tmp_h5.replace(h5_path)
-
-    tmp_done = done_path.with_name(done_path.name + ".tmp")
-    tmp_done.write_text("ok\n", encoding="utf-8")
-    tmp_done.replace(done_path)
-    return h5_path
-
-
-def _load_shard(ckpt_dir: Path, row_range: tuple[int, int]) -> dict[str, Any] | None:
-    """Load a complete checkpoint slice, or ``None`` when it is absent/broken.
-
-    Any failure to read the slice counts as "broken": a checkpoint left behind
-    by a killed worker can be empty, truncated, not an HDF5 file at all
-    (``OSError`` from the ``h5py`` opener) or carry mismatched shapes, and
-    ``resume=True`` has to discard and recompute it instead of aborting the
-    whole run.  The failure is logged at WARNING level, so a discarded shard is
-    never silent.
-    """
-    h5_path, done_path = _shard_paths(ckpt_dir, row_range)
-    if not (h5_path.exists() and done_path.exists()):
-        return None
-    try:
-        with h5py.File(h5_path, "r") as handle:
-            arrays = {
-                key: np.asarray(handle[key][:], dtype=np.float64) for key in _ARRAY_KEYS
-            }
-            meta = _shard_meta(handle)
-    except Exception as exc:  # every read failure means the shard is broken
-        logger.warning(
-            "[LindhardParallel] unreadable checkpoint %s (%s): %s",
-            h5_path,
-            type(exc).__name__,
-            exc,
-        )
-        return None
-    expected_rows = int(row_range[1]) - int(row_range[0])
-    for key in _ARRAY_KEYS:
-        if arrays[key].shape[0] != expected_rows:
-            logger.warning(
-                "[LindhardParallel] checkpoint %s has %d rows, expected %d",
-                h5_path,
-                arrays[key].shape[0],
-                expected_rows,
-            )
-            return None
-    return {"arrays": arrays, "meta": meta}
 
 
 def _array_sha256(values: np.ndarray) -> str:
@@ -543,65 +362,6 @@ def _array_sha256(values: np.ndarray) -> str:
 
 def _digest_arrays(arrays: Mapping[str, np.ndarray]) -> dict[str, dict[str, float]]:
     return {key: array_digest(arrays[key]) for key in _ARRAY_KEYS}
-
-
-def _shard_is_compatible(meta: Mapping[str, Any], signature: Mapping[str, Any]) -> bool:
-    """True when a stored slice was produced by the same physical problem.
-
-    The signature covers the physical settings *and* the model identity
-    (``num_wann``, ``bvecs``), so a shard from another model is recomputed
-    instead of being silently assembled into a mixed-model result.  An entry
-    that is ``None`` in the signature means "not readable in this run" and is
-    skipped; a shard that lacks an entry the signature does know counts as
-    incompatible.
-    """
-    for key in signature:
-        stored = meta.get(key)
-        wanted = signature[key]
-        if key == "orbital_select":
-            # The requested None ("every orbital") is stored expanded to
-            # arange(num_wann), so it matches any full orbital list.
-            if stored is None:
-                return False
-            stored_list = [int(value) for value in stored]
-            if wanted is None:
-                num_wann = meta.get("num_wann")
-                if num_wann is None or stored_list != list(range(int(num_wann))):
-                    return False
-            elif stored_list != [int(value) for value in wanted]:
-                return False
-        elif wanted is None:
-            continue
-        elif isinstance(wanted, (list, tuple)) or isinstance(stored, (list, tuple)):
-            if list(stored or []) != list(wanted or []):
-                return False
-        elif stored != wanted:
-            return False
-    return True
-
-
-def scan_checkpoints(checkpoint_dir: str | Path) -> list[tuple[int, int]]:
-    """Row ranges that have a complete checkpoint in ``checkpoint_dir``.
-
-    A slice counts as complete only when its ``.h5`` shard and its ``.done``
-    marker are both present; the result is sorted by start row.
-    """
-    ckpt_dir = Path(checkpoint_dir)
-    if not ckpt_dir.is_dir():
-        return []
-    found: list[tuple[int, int]] = []
-    for done_path in sorted(ckpt_dir.glob("rows_*_*.done")):
-        parts = done_path.stem.split("_")
-        if len(parts) != 3:
-            continue
-        try:
-            start, stop = int(parts[1]), int(parts[2])
-        except ValueError:
-            continue
-        h5_path, done_path = _shard_paths(ckpt_dir, (start, stop))
-        if h5_path.exists() and done_path.exists():
-            found.append((start, stop))
-    return sorted(found)
 
 
 def assemble_from_checkpoints(
@@ -627,10 +387,17 @@ def assemble_from_checkpoints(
     slices = scan_checkpoints(ckpt_dir)
     if not slices:
         raise ValueError(f"no complete checkpoint slices in {ckpt_dir}")
+    store = ShardStore(
+        ckpt_dir,
+        array_keys=_ARRAY_KEYS,
+        identity={},
+        label=_LABEL,
+        logger=logger,
+    )
     blocks = []
     metas = []
     for row_range in slices:
-        stored = _load_shard(ckpt_dir, row_range)
+        stored = store.load(row_range)
         if stored is None:
             raise ValueError(
                 f"checkpoint rows=[{row_range[0]}, {row_range[1]}) is incomplete"
@@ -656,15 +423,6 @@ def assemble_from_checkpoints(
     return result, slices
 
 
-def _tail(path: Path, lines: int = 12) -> str:
-    """Last ``lines`` lines of a text file (best effort)."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return "<no worker log>"
-    return "\n".join(text[-lines:]) if text else "<empty worker log>"
-
-
 # ----------------------------------------------------------------------
 # Worker
 # ----------------------------------------------------------------------
@@ -676,7 +434,7 @@ def _worker(
     eta: float,
     row_range: tuple[int, int],
     calc_kwargs: dict[str, Any],
-    ckpt_dir: str,
+    store: ShardStore,
     result_queue: Any,
     progress_queue: Any,
     log_config: dict[str, Any] | None,
@@ -755,7 +513,7 @@ def _worker(
             "rss_peak_bytes": rss_peak,
             "created_unix": time.time(),
         }
-        shard = _write_shard(Path(ckpt_dir), (start, stop), arrays, meta)
+        shard = store.write((start, stop), arrays, meta)
         result_queue.put(
             {
                 "status": "ok",
@@ -1048,170 +806,38 @@ def write_result_h5(
 # ----------------------------------------------------------------------
 # Parent
 # ----------------------------------------------------------------------
-def _log_plan(
-    slices: Sequence[tuple[int, int]],
-    nk: int,
-    mirror: bool,
-    per_worker_bytes: int,
-    available: int | None,
-    max_mem_gb: float | None,
-) -> None:
-    total_pixels = sum((stop - start) * nk for start, stop in slices)
-    logger.info(
-        "[LindhardParallel] plan nk=%d workers=%d mirror=%s rows=%d pixels=%d",
-        nk,
-        len(slices),
-        mirror,
-        sum(stop - start for start, stop in slices),
-        total_pixels,
-    )
-    for index, (start, stop) in enumerate(slices):
-        rows = stop - start
-        pixels = rows * nk
-        logger.info(
-            "[LindhardParallel]   worker=%d rows=[%d, %d) rows_n=%d pixels=%d "
-            "share=%.1f%%",
-            index,
-            start,
-            stop,
-            rows,
-            pixels,
-            100.0 * pixels / total_pixels,
-        )
-    total_bytes = per_worker_bytes * len(slices)
-    logger.info(
-        "[LindhardParallel] memory estimate per_worker=%s total=%s "
-        "available=%s limit=%s",
-        format_bytes(per_worker_bytes),
-        format_bytes(total_bytes),
-        "unknown" if available is None else format_bytes(available),
-        "none" if max_mem_gb is None else f"{max_mem_gb:.2f}GB",
-    )
 
 
+# ----------------------------------------------------------------------
+# Shard-and-merge driver wiring
+# ----------------------------------------------------------------------
 def _memory_guard(
-    per_worker_bytes: int, n_workers: int, max_mem_gb: float | None
+    per_worker_bytes: int, n_workers: int, max_mem_gb: float | None = None
 ) -> None:
-    """Refuse to start when the estimate exceeds the memory budget.
+    """Refuse a worker count whose estimated RSS exceeds the budget.
 
-    The default budget is 80% of the memory the kernel reports as available;
-    ``max_mem_gb`` overrides it.  When the available memory is unknown and no
-    explicit budget was given, the check is skipped with a warning.
+    Thin adapter over :func:`stm_data_processing.parallel.shard_driver.
+    memory_guard` that keeps this module's log label.
     """
-    estimated = per_worker_bytes * n_workers
-    available = available_memory_bytes()
-    if max_mem_gb is None:
-        if available is None:
-            logger.warning(
-                "[LindhardParallel] memory guard skipped: available memory is "
-                "unknown on this platform; estimated need %s",
-                format_bytes(estimated),
-            )
-            return
-        budget = 0.8 * available
-    else:
-        budget = float(max_mem_gb) * 1024**3
-    if estimated > budget:
-        raise MemoryError(
-            f"estimated peak memory {format_bytes(estimated)} "
-            f"({n_workers} workers x {format_bytes(per_worker_bytes)}) exceeds the "
-            f"budget {format_bytes(budget)}"
-            + (
-                f" (80% of the {format_bytes(available)} the kernel reports as "
-                "available)"
-                if max_mem_gb is None
-                else " (--max-mem-gb)"
-            )
-            + "; reduce --workers or raise --max-mem-gb explicitly"
-        )
+    memory_guard(per_worker_bytes, n_workers, max_mem_gb, label=_LABEL)
 
 
-class _CheckpointLock:
-    """Mutual exclusion for one checkpoint directory (``.lock`` + live pid).
-
-    The lock records the owning pid and is reclaimed when that pid is gone, so
-    a crashed run does not block the next one.
-    """
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.acquired = False
-
-    def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        for attempt in (0, 1):
-            try:
-                handle = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            except FileExistsError:
-                owner = self._read_owner()
-                if attempt == 0 and owner is not None and not _pid_alive(owner):
-                    logger.warning(
-                        "[LindhardParallel] reclaiming stale checkpoint lock %s "
-                        "of dead pid %d",
-                        self.path,
-                        owner,
-                    )
-                    self.path.unlink(missing_ok=True)
-                    continue
-                raise RuntimeError(
-                    f"the checkpoint directory is locked by another run: {self.path}"
-                    + (f" (pid {owner})" if owner is not None else "")
-                ) from None
-            with os.fdopen(handle, "w", encoding="ascii") as stream:
-                stream.write(f"{os.getpid()}\n")
-            self.acquired = True
-            return
-
-    def _read_owner(self) -> int | None:
-        try:
-            return int(self.path.read_text(encoding="ascii").split()[0])
-        except OSError, ValueError, IndexError:
-            return None
-
-    def release(self) -> None:
-        if self.acquired:
-            self.path.unlink(missing_ok=True)
-            self.acquired = False
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    return True
-
-
-def _log_aggregate_progress(
-    rows_done: int,
-    rows_total: int,
-    pixels_done: int,
-    pixels_total: int,
-    started: float,
-    active_workers: int,
-    rss_peak: int,
-) -> None:
-    elapsed = time.perf_counter() - started
-    rate = pixels_done / elapsed if elapsed > 0 else 0.0
-    remaining = (pixels_total - pixels_done) / rate if rate > 0 else float("inf")
-    logger.info(
-        "[LindhardParallel] progress rows=%d/%d (%.1f%%) px=%d/%d px/s=%.0f "
-        "elapsed=%.1fs eta=%s active_workers=%d rss_peak=%s",
-        rows_done,
-        rows_total,
-        100.0 * pixels_done / pixels_total,
-        pixels_done,
-        pixels_total,
-        rate,
-        elapsed,
-        format_hms(remaining),
-        active_workers,
-        format_bytes(rss_peak),
+def _load_shard(
+    ckpt_dir: str | Path, row_range: tuple[int, int]
+) -> dict[str, Any] | None:
+    """Load one shard through the driver's store (compatibility adapter)."""
+    store = ShardStore(
+        ckpt_dir,
+        array_keys=_ARRAY_KEYS,
+        identity={},
+        label=_LABEL,
+        logger=logger,
     )
+    return store.load(row_range)
+
+
+#: Everything the driver's own log records are labelled with.
+_LABEL = "LindhardParallel"
 
 
 def run_parallel(
@@ -1258,6 +884,14 @@ def run_parallel(
         ``0`` on success, ``130`` when interrupted by SIGINT, non-zero
         otherwise.  The HDF5 product is written only after every slice has been
         assembled and verified, so a failed run leaves no half-written file.
+
+    Notes
+    -----
+    The shard-and-merge mechanics (slice planning, dispatch, resume filter,
+    memory budget, merge ordering and the shard files) live in
+    :mod:`stm_data_processing.parallel.shard_driver`; this function only
+    declares the physics through a :class:`~stm_data_processing.parallel.
+    shard_driver.ShardSpec`.
     """
     if log_file is not None:
         _ensure_file_log(log_file)
@@ -1265,14 +899,6 @@ def run_parallel(
         raise ValueError(f"nk must be positive, got {nk}")
     if eta <= 0:
         raise ValueError(f"eta must be positive, got {eta}")
-    if n_workers < 1:
-        raise ValueError(f"n_workers must be positive, got {n_workers}")
-    if start_method not in ("spawn", "fork", "forkserver"):
-        raise ValueError(f"unsupported start method: {start_method!r}")
-
-    slices = plan_row_slices(nk, n_workers, mirror=mirror)
-    rows_total = sum(stop - start for start, stop in slices)
-    pixels_total = rows_total * nk
 
     # Real model size, read from the hr.h5 attributes or the three-line hr.dat
     # header: the parent never loads the hopping matrices itself, but it must
@@ -1282,9 +908,10 @@ def run_parallel(
     model_shape = read_model_shape(model_dir, seedname)
     if model_shape is None:
         logger.warning(
-            "[LindhardParallel] cannot read the size of %s/%s (no *_hr.h5 and no "
+            "[%s] cannot read the size of %s/%s (no *_hr.h5 and no "
             "*_hr.dat header); the memory estimate falls back to a 75-orbital "
             "placeholder and the checkpoint signature skips the model identity",
+            _LABEL,
             model_dir,
             seedname,
         )
@@ -1292,7 +919,8 @@ def run_parallel(
     else:
         estimate_num_wann, estimate_nrpts = model_shape
         logger.info(
-            "[LindhardParallel] model %s/%s: num_wann=%d nrpts=%d",
+            "[%s] model %s/%s: num_wann=%d nrpts=%d",
+            _LABEL,
             model_dir,
             seedname,
             estimate_num_wann,
@@ -1322,454 +950,278 @@ def run_parallel(
         nk, estimate_num_wann, estimate_n_orb, estimate_nrpts
     )
 
-    if dry_run:
-        _log_plan(slices, nk, mirror, per_worker, available_memory_bytes(), max_mem_gb)
-        print(
-            f"DRY-RUN workers={len(slices)} nk={nk} mirror={mirror} rows={rows_total} "
-            f"pixels={pixels_total} num_wann={estimate_num_wann} nrpts={estimate_nrpts} "
-            f"segments=" + ",".join(f"[{start},{stop})" for start, stop in slices)
+    worker_progress_interval = (
+        0.0 if progress_interval_s <= 0 else min(float(progress_interval_s), 5.0)
+    )
+    payload = {
+        "band_block": band_block,
+        "block_entries": block_entries,
+        "chemical_potential": float(chemical_potential),
+        "temperature": float(temperature),
+        "orbital_select": None
+        if orbital_select is None
+        else [int(o) for o in orbital_select],
+        "include_matrix_elements": bool(include_matrix_elements),
+        "degeneracy_tolerance": float(degeneracy_tolerance),
+        "mirror": bool(mirror),
+        "progress_interval_s": worker_progress_interval,
+        "model_dir": str(model_dir),
+        "seedname": str(seedname),
+        "nk": int(nk),
+        "eta": float(eta),
+        "worker_log_dir": None if worker_log_dir is None else str(worker_log_dir),
+    }
+
+    store = ShardStore(
+        Path() if checkpoint_dir is None else Path(checkpoint_dir),
+        array_keys=_ARRAY_KEYS,
+        identity=signature,
+        generator=_SHARD_GENERATOR,
+        label=_LABEL,
+        logger=logger,
+    )
+
+    def _plan() -> list[tuple[int, int]]:
+        return plan_row_slices(nk, n_workers, mirror=mirror)
+
+    def _progress_units(key: tuple[int, int]) -> tuple[int, int]:
+        rows = key[1] - key[0]
+        return rows, rows * nk
+
+    def _worker_process(
+        context: Any,
+        index: int,
+        key: tuple[int, int],
+        worker_payload: Mapping[str, Any],
+        result_queue: Any,
+        progress_queue: Any,
+    ) -> Any:
+        log_dir = Path(worker_payload["worker_log_dir"] or store.directory)
+        return context.Process(
+            target=_worker,
+            name=f"lindhard-worker-{index}",
+            args=(
+                index,
+                worker_payload["model_dir"],
+                worker_payload["seedname"],
+                worker_payload["nk"],
+                worker_payload["eta"],
+                (int(key[0]), int(key[1])),
+                worker_payload,
+                store,
+                result_queue,
+                progress_queue,
+                {
+                    "level": "INFO",
+                    "file": str(log_dir / f"worker_{index}.log"),
+                    "console": True,
+                },
+            ),
         )
-        return 0
+
+    def _log_plan(keys: Sequence[tuple[int, int]], per_worker_bytes: int) -> None:
+        log_plan(
+            keys,
+            nk,
+            mirror,
+            per_worker_bytes,
+            available_memory_bytes(),
+            max_mem_gb,
+            label=_LABEL,
+        )
 
     if n_workers > nk and not mirror:
         logger.warning(
-            "[LindhardParallel] %d workers requested for %d q1 rows: only %d "
-            "slices are dispatched",
+            "[%s] %d workers requested for %d q1 rows: only %d slices are dispatched",
+            _LABEL,
             n_workers,
             nk,
-            len(slices),
+            min(n_workers, nk),
         )
 
-    auto_checkpoint = checkpoint_dir is None
-    if auto_checkpoint:
-        ckpt_dir = Path(tempfile.mkdtemp(prefix="lindhard_rechi_ckpt_"))
-    else:
-        ckpt_dir = Path(checkpoint_dir)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    log_dir = Path(worker_log_dir) if worker_log_dir is not None else ckpt_dir
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(
-        "[LindhardParallel] checkpoint_dir=%s resume=%s mirror=%s workers=%d",
-        ckpt_dir,
-        resume,
-        mirror,
-        len(slices),
-    )
-
-    lock = _CheckpointLock(ckpt_dir / ".lock")
-    exit_code = 0
-    try:
-        try:
-            lock.acquire()
-        except RuntimeError as exc:
-            logger.error("[LindhardParallel] %s", exc)
-            return 2
-
-        pending: list[tuple[int, int]] = []
-        for row_range in slices:
-            if resume:
-                stored = _load_shard(ckpt_dir, row_range)
-                if stored is not None and _shard_is_compatible(
-                    stored["meta"], signature
-                ):
-                    logger.info(
-                        "[LindhardParallel] resume: rows=[%d, %d) already complete",
-                        row_range[0],
-                        row_range[1],
-                    )
-                    continue
-                if stored is not None:
-                    logger.warning(
-                        "[LindhardParallel] resume: checkpoint rows=[%d, %d) does "
-                        "not match the requested parameters and is recomputed",
-                        row_range[0],
-                        row_range[1],
-                    )
-            pending.append(row_range)
-
-        worker_per_worker_bytes = per_worker
-        _log_plan(
-            slices,
-            nk,
-            mirror,
-            worker_per_worker_bytes,
-            available_memory_bytes(),
-            max_mem_gb,
+    def _log_progress(stats: RunStats) -> None:
+        log_aggregate_progress(
+            stats.rows_done,
+            stats.rows_total,
+            stats.pixels_done,
+            stats.pixels_total,
+            stats.started,
+            stats.live_workers,
+            stats.rss_peak_bytes,
+            label=_LABEL,
         )
-        try:
-            _memory_guard(worker_per_worker_bytes, len(pending), max_mem_gb)
-        except MemoryError as exc:
-            logger.error("[LindhardParallel] refusing to start: %s", exc)
-            return 3
 
-        if not pending:
-            logger.info("[LindhardParallel] nothing to dispatch: all slices complete")
-
-        worker_progress_interval = (
-            0.0 if progress_interval_s <= 0 else min(float(progress_interval_s), 5.0)
+    def _describe_plan(keys: Sequence[tuple[int, int]]) -> str:
+        rows_total = sum(stop - start for start, stop in keys)
+        return (
+            f"DRY-RUN workers={len(keys)} nk={nk} mirror={mirror} rows={rows_total} "
+            f"pixels={rows_total * nk} num_wann={estimate_num_wann} "
+            f"nrpts={estimate_nrpts} segments="
+            + ",".join(f"[{start},{stop})" for start, stop in keys)
         )
-        calc_kwargs = {
-            "band_block": band_block,
-            "block_entries": block_entries,
-            "chemical_potential": float(chemical_potential),
-            "temperature": float(temperature),
-            "orbital_select": None
-            if orbital_select is None
-            else [int(o) for o in orbital_select],
-            "include_matrix_elements": bool(include_matrix_elements),
-            "degeneracy_tolerance": float(degeneracy_tolerance),
-            "mirror": bool(mirror),
-            "progress_interval_s": worker_progress_interval,
-        }
 
-        context = mp.get_context(start_method)
-        progress_queue = context.Queue()
-        result_queue = context.Queue()
-        processes: dict[int, Any] = {}
-        reports: dict[int, dict[str, Any]] = {}
-        worker_rows = dict.fromkeys(pending, 0)
-        worker_pixels = dict.fromkeys(pending, 0)
+    def _finalize(
+        loaded: list[dict[str, Any]],
+        reports: Mapping[int, Mapping[str, Any]],
+        stats: RunStats,
+    ) -> int:
+        bvecs_holder = loaded[0]["meta"].get("bvecs")
+        bvecs = None if bvecs_holder is None else np.asarray(bvecs_holder, dtype=float)
+        num_wann = int(loaded[0]["meta"]["num_wann"])
+        blocks = []
+        metas: list[dict[str, Any]] = []
+        blocks = [shard["arrays"] for shard in loaded]
+        metas = [shard["meta"] for shard in loaded]
 
-        started = time.perf_counter()
-        last_progress = started
-        rss_peak = peak_rss_bytes()
-
-        stop_requested = {"value": False}
-
-        def _request_stop(signum: int, frame: Any) -> None:  # pragma: no cover
-            stop_requested["value"] = True
-
-        previous_handler: Any = None
-        try:
-            previous_handler = signal.signal(signal.SIGINT, _request_stop)
-        except ValueError:
-            previous_handler = None
-
-        try:
-            for index, row_range in enumerate(pending):
-                process = context.Process(
-                    target=_worker,
-                    name=f"lindhard-worker-{index}",
-                    args=(
+        for index, report in reports.items():
+            row_range = (report["row_range"][0], report["row_range"][1])
+            stored = store.load(row_range)
+            if stored is None:
+                continue
+            for key in _ARRAY_KEYS:
+                if _array_sha256(stored["arrays"][key]) != report["sha256"][key]:
+                    logger.error(
+                        "[LindhardParallel] worker=%d digest mismatch for "
+                        "'%s' rows=[%d, %d): the checkpoint no longer "
+                        "matches what the worker computed",
                         index,
-                        str(model_dir),
-                        str(seedname),
-                        int(nk),
-                        float(eta),
-                        (int(row_range[0]), int(row_range[1])),
-                        calc_kwargs,
-                        str(ckpt_dir),
-                        result_queue,
-                        progress_queue,
-                        {
-                            "level": "INFO",
-                            "file": str(log_dir / f"worker_{index}.log"),
-                            "console": True,
-                        },
-                    ),
-                )
-                process.start()
-                processes[index] = process
-                logger.info(
-                    "[LindhardParallel] dispatched worker=%d pid=%d rows=[%d, %d)",
-                    index,
-                    process.pid,
-                    row_range[0],
-                    row_range[1],
-                )
-
-            while processes:
-                if stop_requested["value"]:
-                    logger.error(
-                        "[LindhardParallel] SIGINT received: terminating %d live "
-                        "worker(s); completed checkpoints are kept",
-                        len(processes),
-                    )
-                    _terminate_all(processes)
-                    exit_code = 130
-                    break
-
-                try:
-                    message = progress_queue.get(timeout=0.25)
-                except queue_module.Empty:
-                    message = None
-                while message is not None:
-                    _absorb_progress(message, pending, worker_rows, worker_pixels)
-                    try:
-                        message = progress_queue.get_nowait()
-                    except queue_module.Empty:
-                        message = None
-
-                while True:
-                    try:
-                        report = result_queue.get_nowait()
-                    except queue_module.Empty:
-                        break
-                    reports[int(report["worker_id"])] = report
-
-                failed = None
-                for index, process in list(processes.items()):
-                    if process.is_alive():
-                        continue
-                    process.join()
-                    del processes[index]
-                    row_range = pending[index]
-                    if process.exitcode != 0:
-                        failed = (index, process.exitcode, row_range)
-                        break
-                    worker_rows[row_range] = row_range[1] - row_range[0]
-                    worker_pixels[row_range] = (row_range[1] - row_range[0]) * nk
-                    rss_peak = max(
-                        rss_peak,
-                        int(reports.get(index, {}).get("rss_peak_bytes", 0) or 0),
-                    )
-
-                if failed is not None:
-                    index, exitcode, row_range = failed
-                    log_path = log_dir / f"worker_{index}.log"
-                    logger.error(
-                        "[LindhardParallel] worker=%d (rows=[%d, %d)) exited with "
-                        "code %s; aborting the remaining dispatch and keeping the "
-                        "completed checkpoints. Last lines of %s:\n%s",
-                        index,
+                        key,
                         row_range[0],
                         row_range[1],
-                        exitcode,
-                        log_path,
-                        _tail(log_path),
                     )
-                    error_report = reports.get(index)
-                    if (
-                        error_report is not None
-                        and error_report.get("status") == "error"
-                    ):
-                        logger.error(
-                            "[LindhardParallel] worker=%d traceback:\n%s",
-                            index,
-                            error_report.get("error"),
-                        )
-                    _terminate_all(processes)
-                    return 4
+                    return 6
 
-                now = time.perf_counter()
-                if (
-                    progress_interval_s > 0
-                    and now - last_progress >= progress_interval_s
-                ):
-                    rows_done = sum(worker_rows.values())
-                    pixels_done = sum(worker_pixels.values())
-                    _log_aggregate_progress(
-                        rows_done,
-                        rows_total,
-                        pixels_done,
-                        pixels_total,
-                        started,
-                        len(processes),
-                        rss_peak,
-                    )
-                    last_progress = now
+        # bvecs and the band count come from the checkpoints, so a
+        # fully resumed run (no worker dispatched) still writes the
+        # complete attribute set.
+        stored_bvecs = metas[0].get("bvecs")
+        bvecs = None if stored_bvecs is None else np.asarray(stored_bvecs, dtype=float)
+        num_wann = int(metas[0]["num_wann"])
 
-            if exit_code == 0:
-                rows_done = sum(worker_rows.values())
-                pixels_done = sum(worker_pixels.values())
-                if progress_interval_s > 0:
-                    _log_aggregate_progress(
-                        rows_done,
-                        rows_total,
-                        pixels_done,
-                        pixels_total,
-                        started,
-                        len(processes),
-                        rss_peak,
-                    )
+        # The primitive-BZ map is assembled first: it is what the worker
+        # digests are checked against and what the HDF5 product stores.
+        primitive = assemble_slices(
+            stats.slices,
+            blocks,
+            nk=nk,
+            mirror=mirror,
+            bvecs=None if bvecs is None else np.asarray(bvecs, dtype=float),
+            q_range=None,
+            eta=float(eta),
+            chemical_potential=float(chemical_potential),
+            temperature=float(temperature),
+            include_matrix_elements=bool(include_matrix_elements),
+            orbital_select=orbital_select,
+            num_wann=num_wann,
+            degeneracy_tolerance=float(degeneracy_tolerance),
+        )
 
-                if len(reports) != len(pending):
-                    logger.error(
-                        "[LindhardParallel] %d of %d workers reported a result; "
-                        "no output is written",
-                        len(reports),
-                        len(pending),
-                    )
-                    return 5
+        if not _verify_assembled_digests(reports, primitive, nk):
+            return 8
 
-                blocks = []
-                metas: list[dict[str, Any]] = []
-                for row_range in slices:
-                    stored = _load_shard(ckpt_dir, row_range)
-                    if stored is None:
-                        logger.error(
-                            "[LindhardParallel] missing checkpoint for rows=[%d, %d)",
-                            row_range[0],
-                            row_range[1],
-                        )
-                        return 5
-                    blocks.append(stored["arrays"])
-                    metas.append(stored["meta"])
+        if q_range is None:
+            result = primitive
+        else:
+            # Same crop as calculate(): the returned dict is extended to
+            # [q_range), the HDF5 product keeps the primitive mesh.
+            result = assemble_slices(
+                stats.slices,
+                blocks,
+                nk=nk,
+                mirror=mirror,
+                bvecs=None if bvecs is None else np.asarray(bvecs, dtype=float),
+                q_range=q_range,
+                eta=float(eta),
+                chemical_potential=float(chemical_potential),
+                temperature=float(temperature),
+                include_matrix_elements=bool(include_matrix_elements),
+                orbital_select=orbital_select,
+                num_wann=num_wann,
+                degeneracy_tolerance=float(degeneracy_tolerance),
+            )
 
-                for index, report in reports.items():
-                    row_range = (report["row_range"][0], report["row_range"][1])
-                    stored = _load_shard(ckpt_dir, row_range)
-                    if stored is None:
-                        continue
-                    for key in _ARRAY_KEYS:
-                        if (
-                            _array_sha256(stored["arrays"][key])
-                            != report["sha256"][key]
-                        ):
-                            logger.error(
-                                "[LindhardParallel] worker=%d digest mismatch for "
-                                "'%s' rows=[%d, %d): the checkpoint no longer "
-                                "matches what the worker computed",
-                                index,
-                                key,
-                                row_range[0],
-                                row_range[1],
-                            )
-                            return 6
-
-                # bvecs and the band count come from the checkpoints, so a
-                # fully resumed run (no worker dispatched) still writes the
-                # complete attribute set.
-                stored_bvecs = metas[0].get("bvecs")
-                bvecs = (
-                    None
-                    if stored_bvecs is None
-                    else np.asarray(stored_bvecs, dtype=float)
-                )
-                num_wann = int(metas[0]["num_wann"])
-
-                # The primitive-BZ map is assembled first: it is what the worker
-                # digests are checked against and what the HDF5 product stores.
-                primitive = assemble_slices(
-                    slices,
-                    blocks,
-                    nk=nk,
-                    mirror=mirror,
+        if output_path is not None:
+            label = projection
+            if label is None:
+                label = "full" if orbital_select is None else "custom"
+            try:
+                write_result_h5(
+                    primitive,
+                    output_path,
                     bvecs=None if bvecs is None else np.asarray(bvecs, dtype=float),
-                    q_range=None,
                     eta=float(eta),
+                    nq=nk,
                     chemical_potential=float(chemical_potential),
                     temperature=float(temperature),
-                    include_matrix_elements=bool(include_matrix_elements),
-                    orbital_select=orbital_select,
-                    num_wann=num_wann,
-                    degeneracy_tolerance=float(degeneracy_tolerance),
+                    orbital_select=result["metadata"]["orbital_select"],
+                    projection=label,
                 )
-
-                if not _verify_assembled_digests(reports, primitive, nk):
-                    return 8
-
-                if q_range is None:
-                    result = primitive
-                else:
-                    # Same crop as calculate(): the returned dict is extended to
-                    # [q_range), the HDF5 product keeps the primitive mesh.
-                    result = assemble_slices(
-                        slices,
-                        blocks,
-                        nk=nk,
-                        mirror=mirror,
-                        bvecs=None if bvecs is None else np.asarray(bvecs, dtype=float),
-                        q_range=q_range,
-                        eta=float(eta),
-                        chemical_potential=float(chemical_potential),
-                        temperature=float(temperature),
-                        include_matrix_elements=bool(include_matrix_elements),
-                        orbital_select=orbital_select,
-                        num_wann=num_wann,
-                        degeneracy_tolerance=float(degeneracy_tolerance),
-                    )
-
-                if output_path is not None:
-                    label = projection
-                    if label is None:
-                        label = "full" if orbital_select is None else "custom"
-                    try:
-                        write_result_h5(
-                            primitive,
-                            output_path,
-                            bvecs=None
-                            if bvecs is None
-                            else np.asarray(bvecs, dtype=float),
-                            eta=float(eta),
-                            nq=nk,
-                            chemical_potential=float(chemical_potential),
-                            temperature=float(temperature),
-                            orbital_select=result["metadata"]["orbital_select"],
-                            projection=label,
-                        )
-                    except Exception:
-                        logger.error(
-                            "[LindhardParallel] writing %s failed; the assembled "
-                            "result is discarded and no partial product is left "
-                            "behind",
-                            output_path,
-                            exc_info=True,
-                        )
-                        return 7
-                    logger.info(
-                        "[LindhardParallel] wrote %s (%.2f MB)",
-                        output_path,
-                        Path(output_path).stat().st_size / 1024**2,
-                    )
-
-                digest = _digest_arrays({key: result[key] for key in _ARRAY_KEYS})
-                logger.info(
-                    "[LindhardParallel] summary rows=%d pixels=%d workers=%d "
-                    "mirror=%s total_s=%.3f rss_peak=%s "
-                    "max|data-(intra+inter)|=%.3e",
-                    rows_total,
-                    pixels_total,
-                    len(pending),
-                    mirror,
-                    time.perf_counter() - started,
-                    format_bytes(rss_peak),
-                    float(
-                        np.max(
-                            np.abs(
-                                result["data"]
-                                - (result["intraband"] + result["interband"])
-                            )
-                        )
-                    ),
+            except Exception:
+                logger.error(
+                    "[LindhardParallel] writing %s failed; the assembled "
+                    "result is discarded and no partial product is left "
+                    "behind",
+                    output_path,
+                    exc_info=True,
                 )
-                for key in _ARRAY_KEYS:
-                    logger.info(
-                        "[LindhardParallel] digest %s sum=%.12e max=%.12e min=%.12e",
-                        key,
-                        digest[key]["sum"],
-                        digest[key]["max"],
-                        digest[key]["min"],
-                    )
-        finally:
-            if previous_handler is not None:
-                signal.signal(signal.SIGINT, previous_handler)
-    finally:
-        lock.release()
-        if auto_checkpoint and exit_code == 0:
-            _remove_tree(ckpt_dir)
+                return 7
+            logger.info(
+                "[LindhardParallel] wrote %s (%.2f MB)",
+                output_path,
+                Path(output_path).stat().st_size / 1024**2,
+            )
 
-    if exit_code == 0 and output_path is None:
-        logger.warning(
-            "[LindhardParallel] no --output given: the assembled result was "
-            "computed and discarded"
+        digest = _digest_arrays({key: result[key] for key in _ARRAY_KEYS})
+        logger.info(
+            "[LindhardParallel] summary rows=%d pixels=%d workers=%d "
+            "mirror=%s total_s=%.3f stats.rss_peak_bytes=%s "
+            "max|data-(intra+inter)|=%.3e",
+            stats.rows_total,
+            stats.pixels_total,
+            stats.workers,
+            mirror,
+            time.perf_counter() - stats.started,
+            format_bytes(stats.rss_peak_bytes),
+            float(
+                np.max(
+                    np.abs(result["data"] - (result["intraband"] + result["interband"]))
+                )
+            ),
         )
-    return exit_code
+        for key in _ARRAY_KEYS:
+            logger.info(
+                "[LindhardParallel] digest %s sum=%.12e max=%.12e min=%.12e",
+                key,
+                digest[key]["sum"],
+                digest[key]["max"],
+                digest[key]["min"],
+            )
 
-
-def _absorb_progress(
-    message: Any,
-    pending: Sequence[tuple[int, int]],
-    worker_rows: dict[tuple[int, int], int],
-    worker_pixels: dict[tuple[int, int], int],
-) -> None:
-    worker_id, payload = message
-    if worker_id >= len(pending):
-        return
-    row_range = pending[worker_id]
-    rows_done, _rows_total, pixels_done = payload
-    worker_rows[row_range] = max(worker_rows[row_range], int(rows_done))
-    worker_pixels[row_range] = max(worker_pixels[row_range], int(pixels_done))
+    spec = ShardSpec(
+        label=_LABEL,
+        store=store,
+        plan=_plan,
+        progress_units=_progress_units,
+        worker_process=_worker_process,
+        worker_payload=lambda: payload,
+        log_plan=_log_plan,
+        log_progress=_log_progress,
+        describe_plan=_describe_plan,
+        finalize=_finalize,
+        worker_log_dir=worker_log_dir,
+        logger=logger,
+        per_worker_bytes=per_worker,
+        max_mem_gb=max_mem_gb,
+    )
+    return run_shards(
+        spec,
+        n_workers=n_workers,
+        checkpoint_dir=checkpoint_dir,
+        resume=resume,
+        start_method=start_method,
+        progress_interval_s=progress_interval_s,
+        dry_run=dry_run,
+    )
 
 
 def _verify_assembled_digests(
@@ -1818,25 +1270,3 @@ def _verify_assembled_digests(
             len(reports),
         )
     return ok
-
-
-def _terminate_all(processes: Mapping[int, Any]) -> None:
-    for process in processes.values():
-        if process.is_alive():
-            process.terminate()
-    for process in processes.values():
-        process.join(timeout=10)
-
-
-def _remove_tree(path: Path) -> None:
-    try:
-        for child in sorted(
-            path.rglob("*"), key=lambda item: len(item.parts), reverse=True
-        ):
-            if child.is_dir():
-                child.rmdir()
-            else:
-                child.unlink(missing_ok=True)
-        path.rmdir()
-    except OSError:  # pragma: no cover - best effort cleanup
-        pass
