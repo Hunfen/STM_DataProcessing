@@ -9,6 +9,8 @@
 * 包入口：`src/stm_data_processing/parallel/__init__.py`（`__all__` 导出下面全部名字）
 * 第一个使用者：`src/stm_data_processing/dft/wannier90/lindhard_re_chi_parallel.py`
   （`run_parallel` 现在只负责声明物理，循环交给 `run_shards`）
+* 第二个使用者：`src/stm_data_processing/stm/qpi_jdos.py`（`JDOSQPI.calculate` 的
+  opt-in 并行路径，见 §5）
 
 ## 1. 公共接口（名字 + 签名）
 
@@ -94,28 +96,66 @@ ShardSpec(
 * **内存预算**：调用方给出 `per_worker_bytes`（一次运行一份的估算），驱动负责比较
   与拒绝；`available_memory_bytes()`/`memory_guard()` 也可单独调用。
 
-## 4. 下一个计算器怎么接入（走查）
+## 4. 接入清单（通用步骤）
 
-以「给 QPI 计算器加并行」为例（QPI 本身的改造是后续任务，这里只列步骤）：
-
-1. **定分片键**：QPI 逐能量层独立，键可以是 `(layer_start, layer_stop)`；
-   `plan=lambda: plan_slices(n_energies, n_workers)`。
-2. **写 worker 函数**（模块级）：`def _qpi_worker(index, key, store, payload, rq, pq)`
-   —— 计算该层的 `qpi_layers`，`store.write(key, {"qpi_layers": arr}, meta)`，
-   把进度 `rq.put({"worker_id": index, "status": "ok", "rss_peak_bytes": ...})`、
-   进度 `pq.put((index, (rows_done, rows_total, pixels_done)))` 发回父进程。
-   `store.array_keys` 设为 `("qpi_layers",)`。
-3. **identity**：把决定结果的那组参数写进字典（`nk`、`eta`、`normalize`、`bvecs` 的
+1. **定分片键**：找一个「片与片之间互不影响」的轴，键是它的半开区间
+   `(start, stop)`；`plan=lambda: plan_slices(work_size, n_workers)`。
+2. **写 worker 函数**（必须模块级，`spawn` 会重新导入模块）：
+   `def _worker(index, key, store, payload, rq, pq)` —— 算完本片后
+   `store.write(key, {<array_key>: arr}, meta)`，再用 `rq.put({...})`（结果）与
+   `pq.put((index, (rows_done, rows_total, pixels_done)))`（进度）回报父进程。
+3. **identity**：把决定结果的那组参数写进字典（`nk`、`eta`、`normalize`、上游数组的
    SHA 等），`ShardStore(..., identity=signature)`；换模型/换参数时旧分片自动重算。
-4. **finalize**：把所有分片按序 `concatenate`（或你需要的合并规则），
-   校验（例如逐片 digest 与 worker 报告比对），然后调用既有的
-   `save_qpi_to_h5(...)` 发布产物 —— 产物写入仍然只走 `io.h5_convention`。
-5. **调用**：`run_shards(spec, n_workers=..., checkpoint_dir=..., resume=..., max_mem_gb=...)`，
-   把返回码当成 CLI 退出码；`--dry-run` 直接交给 `dry_run=True`。
-6. **回归**：像 `tests/regression/check_lindhard_re_chi.py` 那样加一组检查：resume 复用、
-   空/截断分片自愈、外来签名拒绝、中断后只重算缺失分片、产物字节幂等。
+4. **finalize**：分片已按 `plan()` 顺序加载好，按需 `concatenate`，校验总数，然后走
+   既有落盘函数发布产物 —— 产物写入仍然只走 `io.h5_convention`。
+5. **调用**：`run_shards(spec, n_workers=..., checkpoint_dir=..., resume=...)`，
+   把返回码映射成调用方的语义（CLI 退出码或异常）；`--dry-run` 直接给 `dry_run=True`。
+6. **回归**：像 `tests/regression/check_lindhard_re_chi.py`、`check_qpi_parallel.py`
+   那样加检查：产物字节幂等、resume 复用、外来签名拒绝、中断后只重算缺失分片。
 
-## 5. 实测（本轮抽取）
+## 5. 已接入的第二个计算器：QPI JDOS
+
+`JDOSQPI.calculate()`（`src/stm_data_processing/stm/qpi_jdos.py`）是 §4 清单的第一个
+真实落地案例；**串行仍是默认**，并行是显式 opt-in：
+
+```python
+calc.calculate(energies, q_range=None, output_path=...)  # 串行（默认，行为不变）
+calc.calculate(
+    energies, q_range=None, n_workers=4, checkpoint_dir="var/qpi_ckpt"
+)  # 并行，临时目录
+calc.calculate(
+    energies, q_range=None, n_workers=4, checkpoint_dir="var/qpi_ckpt", resume=True
+)  # 只补缺失分片
+```
+
+* **为什么分片键是能量轴**：JDOS 的每一层 `A(k, E)` 由
+  `_jdos_layer(eigenvalues, eta, energy, normalize)` 算出，层与层之间唯一的耦合是
+  「按各自的 `max` 归一化」——每层除以自己的最大值，所以切片后逐层重算得到的结果与串行
+  逐位相同（不是容差相同）。键就是能量下标区间 `(start, stop)`：同一 `plan_slices`
+  策略给出的 4 个 worker 分片是 `[0,16) [16,32) [32,48) [48,64)`。
+* **调用方供给**：模块级 `_qpi_jdos_worker(worker_id, key, store, payload, rq, pq)`
+  与可 pickle 的 `worker_payload()`（`energies`、`eigenvalues`、`eta`、`normalize`、
+  分片元数据）；`array_keys=("qpi_layers",)`、`label="JDOSQPI"`。串行循环与 worker
+  调用**同一个** `_jdos_layer`，两条路径不可能算岔。
+* **合并顺序**：`finalize(loaded, reports, stats)` 拿到的是驱动按 `spec.plan()` 顺序
+  加载的分片，`np.concatenate(layers, axis=0)` 后即串行结果；层数总和与 `n_energies`
+  不符时返回 6，父进程抛 `RuntimeError` 而不是发出一个缺层的产物。
+* **内存上界**：`per_worker_bytes = eigenvalues.nbytes + max_shard_layers * 3 * nk * nk * 8`
+  （每个 worker 同时持有 `A(k)`、`|FFT|²` 和输出层三张 `nk×nk` float64），交给
+  `memory_guard` 在 dispatch 前裁决；QPI 不给 `max_mem_gb`（只依赖实测可用内存）。
+* **identity**：`{nk, eta, normalize, num_wann, n_energies, eigenvalues_sha256}`。
+  换模型（特征值不同）、换 `eta`、换归一化开关都会让旧分片被判为外来并重算并打
+  WARNING「does not match the requested parameters and is recomputed」。
+* **GPU 后端**：`n_workers>1` 且 `BACKEND == "gpu"` 时**不并行**——worker 会继承 CUDA
+  上下文，不安全。此时打 WARNING（含「CUDA context」字样）并退回串行 CUDA 路径；
+  单能量请求同样退回串行（并行无意义）。
+* **中断语义**：驱动捕获 SIGINT 后终止 worker、保留已完成分片并返回 130，适配层把 130
+  翻成 `KeyboardInterrupt`（串行路径被 Ctrl-C 也是它），所以调用方看到的仍是「被打断」
+  而不是「跑失败」；下一次 `resume=True` 只 dispatch 缺失分片。
+
+## 6. 实测
+
+**驱动抽取（上一轮）**
 
 * `check_lindhard_re_chi.py`：`RESULT: ALL CHECKS PASSED`（exit 0），
   含 (s) resume/reuse、(v) 空/截断分片、(z) 外来模型拒绝、(t) 父日志、(o) Accelerate 宽模型。
@@ -123,3 +163,23 @@ ShardSpec(
   （`1c7085d1…10b2`，13872 字节）。
 * 中断→恢复：SIGINT 退出 130 并保留已完成分片，`--resume` 只 dispatch 缺失的 3 片、
   复用 1 片。
+
+**QPI JDOS 接入（本轮）** —— `tests/regression/check_qpi_parallel.py`（合成 mock，
+不需要外部数据，因此在 CI 里被选中）：
+
+* (a) 串行 vs 并行：`max|Δ| = 0`、uint8 视图逐位相同、冻结时钟后**写出文件的 sha256
+  完全相同**（`506027844a0369ba…`，17075 字节）。重复测量 3 种规模 × 2 次共 6 次，
+  6 次全部 sha256 相同（最大的 `nk=64`、33 个能量、4 worker：`ec3d2a2ad9a7c071…`，
+  683936 字节）。
+* (b) 分片是 `io.h5_convention` 写的 HDF5（分块 + gzip/4 + 必需属性）；显式 checkpoint
+  目录合并后保留供 resume，自动临时目录合并成功后删除。
+* (c) 真 SIGINT：被杀的子进程退出码 `-2`（shell 里即 130，与 Ctrl-C 串行一致），
+  4 片里保住已完成的 1 片；`--resume` 只 dispatch 缺失的 3 片、复用 1 片。
+* (d) 换 `eta` 的分片被判外来、重算并打 WARNING。
+* (e) GPU 后端 + `n_workers`：打 WARNING 后走串行 CUDA 分支，不写任何分片。
+* (f) 共享的 `_jdos_layer` 仍与重构前的串行公式逐位相同（6 组 E × normalize）。
+  这条不可省：若 `_jdos_layer` 自己漂移，串行与并行会一起漂，(a) 仍会全绿——实测把
+  `1/π` 写成 `1/3.14159265` 后 (a)–(e) 全过、只有 (f) 报红。
+* 另有一次「只做一次」的证据（不属于门）：用 `git show HEAD:…/qpi_jdos.py` 载入重构前的
+  模块，与当前模块在同一 mock 上比串行 `_compute_jdos_cpu` 的返回值，`nk=8/21` 与
+  `nk=32/64` 两组都 `max|Δ| = 0`、层数组 sha256 相同 —— 默认路径没有被这次改造推动。
