@@ -43,6 +43,7 @@ Usage:
         [--a 0.246] [--anchor-ring 1x1|r3] [--delimiter ','] [--list-peaks] \
         [--save-transform TRANSFORM.json]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,45 +80,91 @@ STRETCH_SCALE_TOL = 0.05
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("input", help="topography matrix (whitespace, tab or comma separated)")
-    parser.add_argument("-L", "--size-nm", type=float, required=True,
-                        help="scan size in nm (square image)")
-    parser.add_argument("-o", "--outdir", default=None,
-                        help="output directory (default: next to the input file)")
-    parser.add_argument("--a", type=float, default=0.246,
-                        help="lattice constant of the 1x1 ring in nm (default 0.246)")
-    parser.add_argument("--anchor-ring", default="1x1", choices=("1x1", "r3"),
-                        help="which physical ring the data-anchored detection labels "
-                             "as the first ring (default 1x1); with r3 the reference "
-                             "lattice is sqrt(3) times a")
-    parser.add_argument("--stm-lib", default="/Users/hunfen/Documents/GitHub/"
-                                             "STM_DataProcessing/src",
-                        help="STM_DataProcessing src directory")
-    parser.add_argument("--peaks", nargs=4, type=float, default=None,
-                        metavar=("Q1X", "Q1Y", "Q2X", "Q2Y"),
-                        help="optional manual anchor pair (q offsets in px): restrict the "
-                             "stretch fit to the two detected peaks closest to these")
-    parser.add_argument("--delimiter", default=None,
-                        help="column delimiter (default: auto-detect tab/comma/whitespace; "
-                             "the escape '\\t' is accepted)")
-    parser.add_argument("--patch-half", type=int, default=PATCH_HALF,
-                        help="sub-pixel localizer patch half width (default 8)")
-    parser.add_argument("--list-peaks", action="store_true",
-                        help="print the detected peak table")
-    parser.add_argument("--list-rings", action="store_true",
-                        help="print the detected ring table (radius clustering)")
-    parser.add_argument("--ring-cluster-tol", type=float, default=0.02,
-                        help="relative radius tolerance of the ring clustering")
-    parser.add_argument("--save-transform", default=None, metavar="FILE",
-                        help="also write the fitted stretch as a standalone transform "
-                             "JSON (schema topo-correction-transform, version 1) that "
-                             "stm_apply_transform.py can apply to another dataset; "
-                             "without this flag every output is unchanged")
+    parser.add_argument(
+        "input", help="topography matrix (whitespace, tab or comma separated)"
+    )
+    parser.add_argument(
+        "-L",
+        "--size-nm",
+        type=float,
+        required=True,
+        help="scan size in nm (square image)",
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default=None,
+        help="output directory (default: next to the input file)",
+    )
+    parser.add_argument(
+        "--a",
+        type=float,
+        default=0.246,
+        help="lattice constant of the 1x1 ring in nm (default 0.246)",
+    )
+    parser.add_argument(
+        "--anchor-ring",
+        default="1x1",
+        choices=("1x1", "r3"),
+        help="which physical ring the data-anchored detection labels "
+        "as the first ring (default 1x1); with r3 the reference "
+        "lattice is sqrt(3) times a",
+    )
+    parser.add_argument(
+        "--stm-lib",
+        default="/Users/hunfen/Documents/GitHub/STM_DataProcessing/src",
+        help="STM_DataProcessing src directory",
+    )
+    parser.add_argument(
+        "--peaks",
+        nargs=4,
+        type=float,
+        default=None,
+        metavar=("Q1X", "Q1Y", "Q2X", "Q2Y"),
+        help="optional manual anchor pair (q offsets in px): restrict the "
+        "stretch fit to the two detected peaks closest to these",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=None,
+        help="column delimiter (default: auto-detect tab/comma/whitespace; "
+        "the escape '\\t' is accepted)",
+    )
+    parser.add_argument(
+        "--patch-half",
+        type=int,
+        default=PATCH_HALF,
+        help="sub-pixel localizer patch half width (default 8)",
+    )
+    parser.add_argument(
+        "--list-peaks", action="store_true", help="print the detected peak table"
+    )
+    parser.add_argument(
+        "--list-rings",
+        action="store_true",
+        help="print the detected ring table (radius clustering)",
+    )
+    parser.add_argument(
+        "--ring-cluster-tol",
+        type=float,
+        default=0.02,
+        help="relative radius tolerance of the ring clustering",
+    )
+    parser.add_argument(
+        "--save-transform",
+        default=None,
+        metavar="FILE",
+        help="also write the fitted stretch as a standalone transform "
+        "JSON (schema topo-correction-transform, version 1) that "
+        "stm_apply_transform.py can apply to another dataset; "
+        "without this flag every output is unchanged",
+    )
     return parser.parse_args(argv)
 
 
-def transform_payload(report_path, csv_path, args, a_ref, correction, stretch_scale,
-                      anchor_verdict):
+def transform_payload(
+    report_path, csv_path, args, a_ref, correction, stretch_scale, anchor_verdict
+):
     """Standalone description of the fitted correction, dataset independent.
 
     Everything the apply stage needs to repeat this resampling on another
@@ -133,10 +180,13 @@ def transform_payload(report_path, csv_path, args, a_ref, correction, stretch_sc
         "schema_version": 1,
         "source_report": str(Path(report_path).resolve()),
         "source_input": str(Path(csv_path).resolve()),
-        "affine_q": [[float(value) for value in row]
-                     for row in np.asarray(correction.affine_q)],
-        "affine_image_reference": [[float(value) for value in row]
-                                   for row in np.asarray(correction.affine_image)],
+        "affine_q": [
+            [float(value) for value in row] for row in np.asarray(correction.affine_q)
+        ],
+        "affine_image_reference": [
+            [float(value) for value in row]
+            for row in np.asarray(correction.affine_image)
+        ],
         "n_px_reference": int(correction.n_px),
         "n_out_reference": int(correction.n_out),
         "field_of_view_nm_reference": float(args.size_nm),
@@ -150,9 +200,11 @@ def transform_payload(report_path, csv_path, args, a_ref, correction, stretch_sc
         "a_ref_nm": float(a_ref),
         "stretch_scale_sqrt_det": float(stretch_scale),
         "anchor_verdict": anchor_verdict,
-        "usage": ("apply with: .venv/bin/python "
-                  "skills/topo-correction/scripts/stm_apply_transform.py INPUT.csv "
-                  "--transform <this file> -L SIZE_NM -o OUT"),
+        "usage": (
+            "apply with: .venv/bin/python "
+            "skills/topo-correction/scripts/stm_apply_transform.py INPUT.csv "
+            "--transform <this file> -L SIZE_NM -o OUT"
+        ),
     }
 
 
@@ -171,19 +223,29 @@ def load_matrix(path, delimiter, loader):
 
 def pin_anchor_pair(detection, anchors):
     """Restrict the stretch fit to the two detected peaks closest to the anchors."""
-    labelled = [peak for peak in detection.peaks
-                if peak.index_hk is not None and peak.independent]
+    labelled = [
+        peak
+        for peak in detection.peaks
+        if peak.index_hk is not None and peak.independent
+    ]
     if len(labelled) < 2:
         raise ValueError("--peaks needs at least two labelled peaks in the detection")
     chosen, used = [], set()
     for target in (np.array(anchors[:2]), np.array(anchors[2:])):
-        order = sorted(range(len(labelled)),
-                       key=lambda i: float(np.hypot(*(np.array(labelled[i].q_px) - target))))
+        order = sorted(
+            range(len(labelled)),
+            key=lambda i: float(np.hypot(*(np.array(labelled[i].q_px) - target))),
+        )
         pick = next((i for i in order if i not in used), order[0])
         used.add(pick)
         chosen.append(labelled[pick])
-    print("anchor pair: " + ", ".join(
-        f"{peak.index_hk} q=({peak.q_px[0]:.2f}, {peak.q_px[1]:.2f})" for peak in chosen))
+    print(
+        "anchor pair: "
+        + ", ".join(
+            f"{peak.index_hk} q=({peak.q_px[0]:.2f}, {peak.q_px[1]:.2f})"
+            for peak in chosen
+        )
+    )
     return replace(detection, peaks=tuple(chosen))
 
 
@@ -206,8 +268,16 @@ def lattice_orientation_deg(detection):
 
 def ring_table(peaks, cluster_tol):
     """Radius clustering of the detected peaks (geometry only, no labels)."""
-    records = [(float(peak.q_px[0]), float(peak.q_px[1]), float(peak.amplitude),
-                float(peak.snr), float(np.hypot(*peak.q_px))) for peak in peaks]
+    records = [
+        (
+            float(peak.q_px[0]),
+            float(peak.q_px[1]),
+            float(peak.amplitude),
+            float(peak.snr),
+            float(np.hypot(*peak.q_px)),
+        )
+        for peak in peaks
+    ]
     return cl.group_rings(records, tol_frac=cluster_tol, min_members=6)
 
 
@@ -221,8 +291,11 @@ def implied_lattice(radius_nm_inv, a_nm, anchor):
     """
     a_ref = 4.0 * np.pi / (np.sqrt(3.0) * float(radius_nm_inv))
     a_1x1 = a_ref if anchor == "1x1" else a_ref / np.sqrt(3.0)
-    return {"a_ref_nm": float(a_ref), "a_1x1_nm": float(a_1x1),
-            "deviation_from_nominal": float(a_1x1 / float(a_nm) - 1.0)}
+    return {
+        "a_ref_nm": float(a_ref),
+        "a_1x1_nm": float(a_1x1),
+        "deviation_from_nominal": float(a_1x1 / float(a_nm) - 1.0),
+    }
 
 
 def main(argv=None):
@@ -250,26 +323,41 @@ def main(argv=None):
     topo = load_matrix(csv_path, resolve_delimiter(args.delimiter), load_image)
     topo = np.flipud(subtractMeanPlane(topo))  # first row = top scan line
 
-    detection = detect_bragg_peaks(topo, args.size_nm, patch_half=args.patch_half,
-                                   subtract_plane=False, return_fft2=False)
+    detection = detect_bragg_peaks(
+        topo,
+        args.size_nm,
+        patch_half=args.patch_half,
+        subtract_plane=False,
+        return_fft2=False,
+    )
     orientation_deg = lattice_orientation_deg(detection)
     a_ref = float(args.a) if args.anchor_ring == "1x1" else float(args.a) * np.sqrt(3.0)
-    spec = LatticeSpec(a_nm=a_ref, symmetry="hexagonal", orientation_deg=orientation_deg)
+    spec = LatticeSpec(
+        a_nm=a_ref, symmetry="hexagonal", orientation_deg=orientation_deg
+    )
 
-    emit("# geometry correction through the bragg_peak package "
-         f"(skill version {SKILL_VERSION})")
+    emit(
+        "# geometry correction through the bragg_peak package "
+        f"(skill version {SKILL_VERSION})"
+    )
     emit(f"# input: {csv_path}")
-    emit(f"# canvas {topo.shape[0]} x {topo.shape[1]} px, field of view "
-         f"{args.size_nm:g} nm ({args.size_nm / topo.shape[0]:.6f} nm/px)")
-    emit(f"# reference lattice: hexagonal, 1x1 lattice constant a = {args.a:g} nm, "
-         f"anchor ring = {args.anchor_ring} -> a_ref = {a_ref:.6f} nm, "
-         f"|b1|_ideal = {4 * np.pi / (np.sqrt(3) * a_ref):.4f} nm^-1, orientation "
-         f"{'unknown' if orientation_deg is None else f'{orientation_deg:.2f} deg'}"
-         f" (from the data), basis_source = {detection.meta.get('basis_source')}")
-    emit("# the anchor ring is what the package's data-anchored detection labelled as "
-         "the first ring; stating it is the caller's responsibility: with the r3 ring "
-         "inside the 1x1 ring (radius ratio 1/sqrt(3)) an anchor assumption of 1x1 "
-         "would stretch the r3 ring up to the 1x1 radius")
+    emit(
+        f"# canvas {topo.shape[0]} x {topo.shape[1]} px, field of view "
+        f"{args.size_nm:g} nm ({args.size_nm / topo.shape[0]:.6f} nm/px)"
+    )
+    emit(
+        f"# reference lattice: hexagonal, 1x1 lattice constant a = {args.a:g} nm, "
+        f"anchor ring = {args.anchor_ring} -> a_ref = {a_ref:.6f} nm, "
+        f"|b1|_ideal = {4 * np.pi / (np.sqrt(3) * a_ref):.4f} nm^-1, orientation "
+        f"{'unknown' if orientation_deg is None else f'{orientation_deg:.2f} deg'}"
+        f" (from the data), basis_source = {detection.meta.get('basis_source')}"
+    )
+    emit(
+        "# the anchor ring is what the package's data-anchored detection labelled as "
+        "the first ring; stating it is the caller's responsibility: with the r3 ring "
+        "inside the 1x1 ring (radius ratio 1/sqrt(3)) an anchor assumption of 1x1 "
+        "would stretch the r3 ring up to the 1x1 radius"
+    )
 
     rings = ring_table(detection.peaks, args.ring_cluster_tol)
     if rings:
@@ -277,18 +365,22 @@ def main(argv=None):
         emit("== detected rings (radius clustering of the detected peaks) ==")
         for ring in rings:
             radius = float(ring["radius"])
-            emit(f"#   radius {radius:10.4f} px = {radius * 2 * np.pi / args.size_nm:9.4f} "
-                 f"nm^-1  members {len(ring['members']):2d}  |F| "
-                 f"{ring['total_amplitude']:.4e}")
+            emit(
+                f"#   radius {radius:10.4f} px = {radius * 2 * np.pi / args.size_nm:9.4f} "
+                f"nm^-1  members {len(ring['members']):2d}  |F| "
+                f"{ring['total_amplitude']:.4e}"
+            )
         if len(rings) > 1:
             strongest = max(rings, key=lambda ring: ring["total_amplitude"])
             innermost = min(rings, key=lambda ring: ring["radius"])
             ratio = float(innermost["radius"]) / float(strongest["radius"])
             if abs(ratio - 1.0 / np.sqrt(3.0)) < 0.03:
-                emit(f"# geometry note: the innermost ring ({innermost['radius']:.4f} px) "
-                     f"sits at 1/sqrt(3) of the strongest ring ({strongest['radius']:.4f} "
-                     f"px, ratio {ratio:.6f}); if the anchor of the detection is the "
-                     f"innermost ring, pass --anchor-ring r3")
+                emit(
+                    f"# geometry note: the innermost ring ({innermost['radius']:.4f} px) "
+                    f"sits at 1/sqrt(3) of the strongest ring ({strongest['radius']:.4f} "
+                    f"px, ratio {ratio:.6f}); if the anchor of the detection is the "
+                    f"innermost ring, pass --anchor-ring r3"
+                )
 
     if args.peaks is not None:
         detection = pin_anchor_pair(detection, args.peaks)
@@ -296,70 +388,109 @@ def main(argv=None):
         emit("")
         emit("detected peaks (qx, qy, |q|, label, snr, quality):")
         for index, peak in enumerate(detection.peaks, 1):
-            label = "-" if peak.index_hk is None else f"{peak.index_hk[0]},{peak.index_hk[1]}"
-            emit(f"  {index:2d}: q=({peak.q_px[0]:8.2f}, {peak.q_px[1]:8.2f}) "
-                 f"|q|={np.hypot(*peak.q_px):8.2f} label={label:>7s} "
-                 f"snr={peak.snr:6.2f} {peak.quality}")
+            label = (
+                "-"
+                if peak.index_hk is None
+                else f"{peak.index_hk[0]},{peak.index_hk[1]}"
+            )
+            emit(
+                f"  {index:2d}: q=({peak.q_px[0]:8.2f}, {peak.q_px[1]:8.2f}) "
+                f"|q|={np.hypot(*peak.q_px):8.2f} label={label:>7s} "
+                f"snr={peak.snr:6.2f} {peak.quality}"
+            )
     if args.list_rings:
         emit("")
         emit("ring members (radius px, member radii):")
         for ring in rings:
             radii = sorted(float(member[4]) for member in ring["members"])
-            emit(f"  radius {ring['radius']:9.4f}: "
-                 + ", ".join(f"{value:.3f}" for value in radii))
+            emit(
+                f"  radius {ring['radius']:9.4f}: "
+                + ", ".join(f"{value:.3f}" for value in radii)
+            )
 
-    correction = correct_bragg_peaks(topo, args.size_nm, lattice=spec, result=detection,
-                                     return_fft2=False)
+    correction = correct_bragg_peaks(
+        topo, args.size_nm, lattice=spec, result=detection, return_fft2=False
+    )
     meta = correction.meta
     b_ideal = float(meta["target_radius_nm_inv"])
     before = implied_lattice(meta["measured_radius_nm_inv"], args.a, args.anchor_ring)
     stretch_scale = float(np.sqrt(np.linalg.det(correction.affine_q)))
     emit("")
     emit("== stretch fit ==")
-    emit(f"# {meta['n_labelled']} labelled peak(s), method={meta['method']}, "
-         f"fallback={meta['fallback']}, rms={meta['rms_residual_px']:.3f} px")
+    emit(
+        f"# {meta['n_labelled']} labelled peak(s), method={meta['method']}, "
+        f"fallback={meta['fallback']}, rms={meta['rms_residual_px']:.3f} px"
+    )
     emit(f"# symmetric stretch M =\n{correction.affine_q}")
-    emit(f"# anchored ring before: {meta['measured_radius_nm_inv']:.4f} nm^-1 "
-         f"({correction.measured_radius_px:.2f} px), ideal {b_ideal:.4f} nm^-1 "
-         f"({correction.target_radius_px:.2f} px), ratio {correction.residual_ratio:.5f}, "
-         f"stretch scale |det M|^(1/2) = {stretch_scale:.5f}")
-    emit(f"# implied lattice constant of the anchored ring {before['a_ref_nm']:.4f} nm, "
-         f"implied 1x1 lattice constant {before['a_1x1_nm']:.4f} nm "
-         f"({100 * before['deviation_from_nominal']:+.3f} % from a = {args.a:g} nm)")
+    emit(
+        f"# anchored ring before: {meta['measured_radius_nm_inv']:.4f} nm^-1 "
+        f"({correction.measured_radius_px:.2f} px), ideal {b_ideal:.4f} nm^-1 "
+        f"({correction.target_radius_px:.2f} px), ratio {correction.residual_ratio:.5f}, "
+        f"stretch scale |det M|^(1/2) = {stretch_scale:.5f}"
+    )
+    emit(
+        f"# implied lattice constant of the anchored ring {before['a_ref_nm']:.4f} nm, "
+        f"implied 1x1 lattice constant {before['a_1x1_nm']:.4f} nm "
+        f"({100 * before['deviation_from_nominal']:+.3f} % from a = {args.a:g} nm)"
+    )
     if meta["fallback"]:
-        emit("# WARNING: the fit fell back (method = "
-             f"{meta['method']}); the returned array is NOT a corrected image, it is "
-             "the input resampled onto a larger NaN canvas -- do not trust it")
-    emit(f"# corrected canvas: {correction.n_out} x {correction.n_out} px, field of view "
-         f"{correction.size_nm:.4f} nm ({correction.size_nm / correction.n_out:.6f} nm/px), "
-         f"NaN {100 * (1 - correction.valid_fraction):.2f} %")
+        emit(
+            "# WARNING: the fit fell back (method = "
+            f"{meta['method']}); the returned array is NOT a corrected image, it is "
+            "the input resampled onto a larger NaN canvas -- do not trust it"
+        )
+    emit(
+        f"# corrected canvas: {correction.n_out} x {correction.n_out} px, field of view "
+        f"{correction.size_nm:.4f} nm ({correction.size_nm / correction.n_out:.6f} nm/px), "
+        f"NaN {100 * (1 - correction.valid_fraction):.2f} %"
+    )
 
-    after = detect_bragg_peaks(correction.image, correction.size_nm, lattice=spec,
-                               patch_half=args.patch_half, subtract_plane=False,
-                               return_fft2=False)
-    b_after = (float(np.hypot(*after.lattice.bvecs_nm_inv[0]))
-               if after.lattice is not None else float("nan"))
-    after_implied = (implied_lattice(b_after, args.a, args.anchor_ring)
-                     if np.isfinite(b_after) else None)
+    after = detect_bragg_peaks(
+        correction.image,
+        correction.size_nm,
+        lattice=spec,
+        patch_half=args.patch_half,
+        subtract_plane=False,
+        return_fft2=False,
+    )
+    b_after = (
+        float(np.hypot(*after.lattice.bvecs_nm_inv[0]))
+        if after.lattice is not None
+        else float("nan")
+    )
+    after_implied = (
+        implied_lattice(b_after, args.a, args.anchor_ring)
+        if np.isfinite(b_after)
+        else None
+    )
     emit("")
     emit("== after the correction (re-detected on the corrected image) ==")
-    emit(f"# anchored ring: {b_after:.4f} nm^-1 "
-         f"({abs(b_after - b_ideal) / b_ideal * 100:.3f} % off the ideal "
-         f"{b_ideal:.4f} nm^-1)" if np.isfinite(b_after) else
-         "# anchored ring: not detected on the corrected image")
+    emit(
+        f"# anchored ring: {b_after:.4f} nm^-1 "
+        f"({abs(b_after - b_ideal) / b_ideal * 100:.3f} % off the ideal "
+        f"{b_ideal:.4f} nm^-1)"
+        if np.isfinite(b_after)
+        else "# anchored ring: not detected on the corrected image"
+    )
     if after_implied:
-        emit(f"# implied lattice constant of the anchored ring "
-             f"{after_implied['a_ref_nm']:.4f} nm, implied 1x1 lattice constant "
-             f"{after_implied['a_1x1_nm']:.4f} nm "
-             f"({100 * after_implied['deviation_from_nominal']:+.3f} % from "
-             f"a = {args.a:g} nm)")
+        emit(
+            f"# implied lattice constant of the anchored ring "
+            f"{after_implied['a_ref_nm']:.4f} nm, implied 1x1 lattice constant "
+            f"{after_implied['a_1x1_nm']:.4f} nm "
+            f"({100 * after_implied['deviation_from_nominal']:+.3f} % from "
+            f"a = {args.a:g} nm)"
+        )
     after_rings = ring_table(after.peaks, args.ring_cluster_tol)
     if after_rings:
-        emit("# corrected rings: " + ", ".join(
-            f"{float(ring['radius']):.2f} px = "
-            f"{float(ring['radius']) * 2 * np.pi / correction.size_nm:.4f} nm^-1 "
-            f"({len(ring['members'])} members)"
-            for ring in after_rings))
+        emit(
+            "# corrected rings: "
+            + ", ".join(
+                f"{float(ring['radius']):.2f} px = "
+                f"{float(ring['radius']) * 2 * np.pi / correction.size_nm:.4f} nm^-1 "
+                f"({len(ring['members'])} members)"
+                for ring in after_rings
+            )
+        )
     # Anchor self-check, two independent tell-tales.
     #
     # (a) The radius ratio of the two strongest corrected rings is 1 : sqrt(3) for a
@@ -372,26 +503,38 @@ def main(argv=None):
     # scale |det M|^(1/2) is the tell-tale that survives this, and it is
     # non-circular in the same way: it is fixed by the two reference radii, not by
     # "the anchored ring reached its ideal radius".
-    check = {"ratio": None, "deviation": None, "consistent": None,
-             "verdict": "unverifiable", "outer_radius_px": None,
-             "inner_radius_px": None, "tolerance": float(args.ring_cluster_tol),
-             "n_rings": len(after_rings),
-             "stretch_scale_sqrt_det": float(stretch_scale),
-             "stretch_scale_tolerance": float(STRETCH_SCALE_TOL),
-             "stretch_scale_deviation": None,
-             "stretch_scale_consistent": None,
-             "ratio_consistent": None,
-             "verdict_reason": None}
+    check = {
+        "ratio": None,
+        "deviation": None,
+        "consistent": None,
+        "verdict": "unverifiable",
+        "outer_radius_px": None,
+        "inner_radius_px": None,
+        "tolerance": float(args.ring_cluster_tol),
+        "n_rings": len(after_rings),
+        "stretch_scale_sqrt_det": float(stretch_scale),
+        "stretch_scale_tolerance": float(STRETCH_SCALE_TOL),
+        "stretch_scale_deviation": None,
+        "stretch_scale_consistent": None,
+        "ratio_consistent": None,
+        "verdict_reason": None,
+    }
     stretch_deviation = abs(stretch_scale - 1.0)
     stretch_ok = bool(stretch_deviation <= STRETCH_SCALE_TOL)
-    check.update({"stretch_scale_deviation": float(stretch_deviation),
-                  "stretch_scale_consistent": stretch_ok})
+    check.update(
+        {
+            "stretch_scale_deviation": float(stretch_deviation),
+            "stretch_scale_consistent": stretch_ok,
+        }
+    )
     if not stretch_ok:
-        emit(f"# WARNING: the global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
-             f"deviates {100 * stretch_deviation:.2f} % from 1 (tolerance "
-             f"{100 * STRETCH_SCALE_TOL:.0f} %): the fit rescaled the whole image. "
-             "Either the anchor ring is mis-stated (try the other --anchor-ring) or "
-             "the field of view L is wrong; both stretch the fit by a global factor.")
+        emit(
+            f"# WARNING: the global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
+            f"deviates {100 * stretch_deviation:.2f} % from 1 (tolerance "
+            f"{100 * STRETCH_SCALE_TOL:.0f} %): the fit rescaled the whole image. "
+            "Either the anchor ring is mis-stated (try the other --anchor-ring) or "
+            "the field of view L is wrong; both stretch the fit by a global factor."
+        )
     ratio_ok = None
     if len(after_rings) >= 2:
         strongest = sorted(after_rings, key=lambda ring: -ring["total_amplitude"])[:2]
@@ -400,54 +543,75 @@ def main(argv=None):
         ratio = float(outer["radius"]) / float(inner["radius"])
         deviation = abs(ratio - np.sqrt(3.0)) / np.sqrt(3.0)
         ratio_ok = bool(deviation <= args.ring_cluster_tol)
-        check.update({"ratio": ratio, "deviation": deviation,
-                      "consistent": ratio_ok,
-                      "ratio_consistent": ratio_ok,
-                      "outer_radius_px": float(outer["radius"]),
-                      "inner_radius_px": float(inner["radius"])})
-        emit(f"# anchor self-check: the two strongest corrected rings are at a radius "
-             f"ratio {ratio:.6f} (1/sqrt(3) pair: {np.sqrt(3.0):.6f}, deviation "
-             f"{100 * deviation:.4f} %) -> ring-pair verdict = "
-             f"{'consistent' if ratio_ok else 'inconsistent'}")
+        check.update(
+            {
+                "ratio": ratio,
+                "deviation": deviation,
+                "consistent": ratio_ok,
+                "ratio_consistent": ratio_ok,
+                "outer_radius_px": float(outer["radius"]),
+                "inner_radius_px": float(inner["radius"]),
+            }
+        )
+        emit(
+            f"# anchor self-check: the two strongest corrected rings are at a radius "
+            f"ratio {ratio:.6f} (1/sqrt(3) pair: {np.sqrt(3.0):.6f}, deviation "
+            f"{100 * deviation:.4f} %) -> ring-pair verdict = "
+            f"{'consistent' if ratio_ok else 'inconsistent'}"
+        )
     else:
-        emit(f"# anchor self-check: only {len(after_rings)} ring(s) with at least six "
-             f"members detected on the corrected image -> the 1 : sqrt(3) ring pair "
-             f"cannot be confirmed")
-    emit(f"# anchor self-check: global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
-         f"(deviation {100 * stretch_deviation:.4f} % from 1, tolerance "
-         f"{100 * STRETCH_SCALE_TOL:.0f} %) -> stretch verdict = "
-         f"{'consistent' if stretch_ok else 'inconsistent'}")
+        emit(
+            f"# anchor self-check: only {len(after_rings)} ring(s) with at least six "
+            f"members detected on the corrected image -> the 1 : sqrt(3) ring pair "
+            f"cannot be confirmed"
+        )
+    emit(
+        f"# anchor self-check: global stretch scale |det M|^(1/2) = {stretch_scale:.5f} "
+        f"(deviation {100 * stretch_deviation:.4f} % from 1, tolerance "
+        f"{100 * STRETCH_SCALE_TOL:.0f} %) -> stretch verdict = "
+        f"{'consistent' if stretch_ok else 'inconsistent'}"
+    )
     # Both tell-tales are necessary and neither is sufficient: the combination is
     # inconsistent as soon as one of them fails, unverifiable when the ring pair
     # cannot be formed at all and the stretch scale is the only evidence left.
     reasons = []
     if not stretch_ok:
-        reasons.append(f"global stretch scale {stretch_scale:.5f} deviates "
-                       f"{100 * stretch_deviation:.2f} % from 1 (tolerance "
-                       f"{100 * STRETCH_SCALE_TOL:.0f} %): the anchor ring is "
-                       "mis-stated or the field of view L is wrong")
+        reasons.append(
+            f"global stretch scale {stretch_scale:.5f} deviates "
+            f"{100 * stretch_deviation:.2f} % from 1 (tolerance "
+            f"{100 * STRETCH_SCALE_TOL:.0f} %): the anchor ring is "
+            "mis-stated or the field of view L is wrong"
+        )
     if ratio_ok is False:
-        reasons.append(f"the two strongest corrected rings are at a radius ratio "
-                       f"{check['ratio']:.6f}, not 1 : sqrt(3)")
+        reasons.append(
+            f"the two strongest corrected rings are at a radius ratio "
+            f"{check['ratio']:.6f}, not 1 : sqrt(3)"
+        )
     if ratio_ok is None:
-        reasons.append("fewer than two corrected rings with at least six members: "
-                       "the 1 : sqrt(3) pair cannot be formed")
+        reasons.append(
+            "fewer than two corrected rings with at least six members: "
+            "the 1 : sqrt(3) pair cannot be formed"
+        )
     if not stretch_ok or ratio_ok is False:
         check["verdict"] = "inconsistent"
     elif ratio_ok is None:
         check["verdict"] = "unverifiable"
     else:
         check["verdict"] = "consistent"
-    check["verdict_reason"] = ("; ".join(reasons) if reasons else
-                               "the global stretch scale is within tolerance and the "
-                               "two strongest corrected rings form a 1 : sqrt(3) pair")
-    emit(f"# anchor verdict = {check['verdict']} "
-         f"({check['verdict_reason']})")
+    check["verdict_reason"] = (
+        "; ".join(reasons)
+        if reasons
+        else "the global stretch scale is within tolerance and the "
+        "two strongest corrected rings form a 1 : sqrt(3) pair"
+    )
+    emit(f"# anchor verdict = {check['verdict']} ({check['verdict_reason']})")
     if check["verdict"] != "consistent":
-        emit("# WARNING: the corrected image does not show a 1 : sqrt(3) ring pair "
-             "with an unscaled fit. Either the anchor ring is mis-stated (try the "
-             "other --anchor-ring), the field of view L is wrong, or the data does "
-             "not contain such a pair.")
+        emit(
+            "# WARNING: the corrected image does not show a 1 : sqrt(3) ring pair "
+            "with an unscaled fit. Either the anchor ring is mis-stated (try the "
+            "other --anchor-ring), the field of view L is wrong, or the data does "
+            "not contain such a pair."
+        )
 
     corrected = np.asarray(correction.image, dtype=float)
     out_csv = outdir / f"{stem}_corrected.csv"
@@ -466,8 +630,9 @@ def main(argv=None):
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
-    fig.savefig(outdir / f"{stem}_corrected.png", dpi=300, bbox_inches="tight",
-                pad_inches=0)
+    fig.savefig(
+        outdir / f"{stem}_corrected.png", dpi=300, bbox_inches="tight", pad_inches=0
+    )
     plt.close(fig)
 
     magnitude = np.abs(fft2_corrected)
@@ -475,13 +640,17 @@ def main(argv=None):
     logged = np.log(1.0 + magnitude)
     span = np.log(1.0 + hi) - np.log(1.0 + lo)
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0), cmap="inferno",
-              origin="lower")
+    ax.imshow(
+        np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0),
+        cmap="inferno",
+        origin="lower",
+    )
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
-    fig.savefig(outdir / f"{stem}_corrected_fft.png", dpi=300, bbox_inches="tight",
-                pad_inches=0)
+    fig.savefig(
+        outdir / f"{stem}_corrected_fft.png", dpi=300, bbox_inches="tight", pad_inches=0
+    )
     plt.close(fig)
 
     report = {
@@ -500,7 +669,9 @@ def main(argv=None):
         "fallback": bool(meta["fallback"]),
         "n_labelled": int(meta["n_labelled"]),
         "rms_residual_px": float(meta["rms_residual_px"]),
-        "affine_q": [[float(value) for value in row] for row in np.asarray(correction.affine_q)],
+        "affine_q": [
+            [float(value) for value in row] for row in np.asarray(correction.affine_q)
+        ],
         "stretch_scale_sqrt_det": stretch_scale,
         "b1_measured_nm_inv_before": float(meta["measured_radius_nm_inv"]),
         "b1_measured_px_before": float(correction.measured_radius_px),
@@ -514,33 +685,55 @@ def main(argv=None):
         "nan_fraction": float(1.0 - correction.valid_fraction),
         "b1_measured_nm_inv_after": b_after if np.isfinite(b_after) else None,
         "implied_lattice_after": after_implied,
-        "rings_before": [{"radius_px": float(ring["radius"]),
-                          "radius_nm_inv": float(ring["radius"]) * 2 * np.pi / args.size_nm,
-                          "n_members": len(ring["members"]),
-                          "total_amplitude": float(ring["total_amplitude"])}
-                         for ring in rings],
-        "rings_after": [{"radius_px": float(ring["radius"]),
-                         "radius_nm_inv": float(ring["radius"]) * 2 * np.pi / correction.size_nm,
-                         "n_members": len(ring["members"]),
-                         "total_amplitude": float(ring["total_amplitude"])}
-                        for ring in after_rings],
+        "rings_before": [
+            {
+                "radius_px": float(ring["radius"]),
+                "radius_nm_inv": float(ring["radius"]) * 2 * np.pi / args.size_nm,
+                "n_members": len(ring["members"]),
+                "total_amplitude": float(ring["total_amplitude"]),
+            }
+            for ring in rings
+        ],
+        "rings_after": [
+            {
+                "radius_px": float(ring["radius"]),
+                "radius_nm_inv": float(ring["radius"]) * 2 * np.pi / correction.size_nm,
+                "n_members": len(ring["members"]),
+                "total_amplitude": float(ring["total_amplitude"]),
+            }
+            for ring in after_rings
+        ],
         "anchor_self_check": check,
         "corrected_csv": str(out_csv),
         "corrected_fft2_npy": str(out_fft2),
     }
     (outdir / "correction_report.json").write_text(json.dumps(report, indent=2) + "\n")
     emit("")
-    emit(f"# written: {out_csv}, {out_fft2}, "
-         f"{outdir / f'{stem}_corrected.png'}, {outdir / f'{stem}_corrected_fft.png'}, "
-         f"{outdir / 'correction_report.json'}, {outdir / 'correction.log'}")
+    emit(
+        f"# written: {out_csv}, {out_fft2}, "
+        f"{outdir / f'{stem}_corrected.png'}, {outdir / f'{stem}_corrected_fft.png'}, "
+        f"{outdir / 'correction_report.json'}, {outdir / 'correction.log'}"
+    )
     (outdir / "correction.log").write_text("\n".join(log_lines) + "\n")
     if args.save_transform:
         # Written last and outside the log, so a run without the flag is byte-identical.
         transform_path = Path(args.save_transform)
         transform_path.parent.mkdir(parents=True, exist_ok=True)
-        transform_path.write_text(json.dumps(transform_payload(
-            outdir / "correction_report.json", csv_path, args, a_ref, correction,
-            stretch_scale, check["verdict"]), indent=2) + "\n")
+        transform_path.write_text(
+            json.dumps(
+                transform_payload(
+                    outdir / "correction_report.json",
+                    csv_path,
+                    args,
+                    a_ref,
+                    correction,
+                    stretch_scale,
+                    check["verdict"],
+                ),
+                indent=2,
+            )
+            + "\n"
+        )
         print(f"# transform written: {transform_path}")
     return 0
 

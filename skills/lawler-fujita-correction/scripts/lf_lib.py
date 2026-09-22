@@ -20,6 +20,7 @@ self-test, which requires the corrected image to be the ideal lattice):
 ``Q`` is the 2x2 matrix whose rows are the two reference wave vectors in
 rad/nm, ``theta`` the column of the two phases.
 """
+
 from __future__ import annotations
 
 import sys
@@ -38,24 +39,38 @@ BAD_COLOR = "#b0b0b0"
 # --------------------------------------------------------------------------- #
 def setup_style():
     """Plot style of the skill (no usetex: broken with mpl 3.10 + TeX Live 2026)."""
-    matplotlib.rcParams.update({
-        "text.usetex": False,
-        "mathtext.fontset": "cm",
-        "font.family": "serif",
-        "font.serif": ["Palatino"],
-        "axes.unicode_minus": False,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    matplotlib.rcParams.update(
+        {
+            "text.usetex": False,
+            "mathtext.fontset": "cm",
+            "font.family": "serif",
+            "font.serif": ["Palatino"],
+            "axes.unicode_minus": False,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
 
 
 _GWYDDION_ANCHORS = {  # mirrors stm_data_processing.stm.preview_plot.cdict_gwyddion
-    "red": [(0.0, 0.0, 0.0), (0.344671, 0.658824, 0.658824),
-            (0.687075, 0.953506, 0.953506), (1.0, 1.0, 1.0)],
-    "green": [(0.0, 0.0, 0.0), (0.344671, 0.156863, 0.156863),
-              (0.687075, 0.759686, 0.759686), (1.0, 1.0, 1.0)],
-    "blue": [(0.0, 0.0, 0.0), (0.344671, 0.0588235, 0.0588235),
-             (0.687075, 0.363821, 0.363821), (1.0, 1.0, 1.0)],
+    "red": [
+        (0.0, 0.0, 0.0),
+        (0.344671, 0.658824, 0.658824),
+        (0.687075, 0.953506, 0.953506),
+        (1.0, 1.0, 1.0),
+    ],
+    "green": [
+        (0.0, 0.0, 0.0),
+        (0.344671, 0.156863, 0.156863),
+        (0.687075, 0.759686, 0.759686),
+        (1.0, 1.0, 1.0),
+    ],
+    "blue": [
+        (0.0, 0.0, 0.0),
+        (0.344671, 0.0588235, 0.0588235),
+        (0.687075, 0.363821, 0.363821),
+        (1.0, 1.0, 1.0),
+    ],
 }
 
 
@@ -68,9 +83,10 @@ def load_colormap(stm_lib=None):
 
         return gwyddion.copy(), "package:stm_data_processing.stm.preview_plot.gwyddion"
     except Exception:  # any import problem falls back to the anchors
-        return (LinearSegmentedColormap("gwyddion", segmentdata=_GWYDDION_ANCHORS,
-                                        N=4096),
-                "builtin:identical anchors of cdict_gwyddion")
+        return (
+            LinearSegmentedColormap("gwyddion", segmentdata=_GWYDDION_ANCHORS, N=4096),
+            "builtin:identical anchors of cdict_gwyddion",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -90,14 +106,19 @@ def group_rings(reflections, tol_frac=0.02, min_members=6):
             if abs(record[4] - ring["radius"]) <= tol_frac * ring["radius"]:
                 ring["members"].append(record)
                 total = sum(member[2] for member in ring["members"])
-                ring["radius"] = float(np.average([m[4] for m in ring["members"]],
-                                                  weights=[m[2] for m in ring["members"]]))
+                ring["radius"] = float(
+                    np.average(
+                        [m[4] for m in ring["members"]],
+                        weights=[m[2] for m in ring["members"]],
+                    )
+                )
                 ring["total_amplitude"] = float(total)
                 placed = True
                 break
         if not placed:
-            rings.append({"radius": record[4], "members": [record],
-                          "total_amplitude": record[2]})
+            rings.append(
+                {"radius": record[4], "members": [record], "total_amplitude": record[2]}
+            )
     keep = [ring for ring in rings if len(ring["members"]) >= min_members]
     keep.sort(key=lambda ring: -ring["total_amplitude"])
     return keep
@@ -180,8 +201,11 @@ def unwrap_phase(wrapped):
     divergence[:, 1:] -= dx[:, :-1]
     divergence[:-1, :] += dy[:-1, :]
     divergence[1:, :] -= dy[:-1, :]
-    eigenvalues = (2.0 * np.cos(np.pi * np.arange(rows) / rows)[:, None]
-                   + 2.0 * np.cos(np.pi * np.arange(cols) / cols)[None, :] - 4.0)
+    eigenvalues = (
+        2.0 * np.cos(np.pi * np.arange(rows) / rows)[:, None]
+        + 2.0 * np.cos(np.pi * np.arange(cols) / cols)[None, :]
+        - 4.0
+    )
     eigenvalues[0, 0] = 1.0
     solution = dctn(divergence, type=2, norm=None) / eigenvalues
     return idctn(solution, type=2, norm=None)
@@ -215,10 +239,12 @@ def lockin_phase(image, q_px, lambda_nm, size_nm, amplitude_fraction=0.10):
     wrapped = np.angle(field)
     if not bool(valid.all()):
         if not bool(valid.any()):
-            raise ValueError("the lock-in field is below the amplitude threshold "
-                             "everywhere")
-        indices = distance_transform_edt(~valid, return_distances=False,
-                                         return_indices=True)
+            raise ValueError(
+                "the lock-in field is below the amplitude threshold everywhere"
+            )
+        indices = distance_transform_edt(
+            ~valid, return_distances=False, return_indices=True
+        )
         wrapped = wrapped[tuple(indices)]
     theta = unwrap_phase(wrapped)
     if np.any(valid):
@@ -234,12 +260,15 @@ def displacement_from_phase(theta_a, theta_b, q_a_px, q_b_px, size_nm):
     :func:`lockin_phase`.  Returns an array of shape ``(2, n, n)`` holding
     ``u_x`` and ``u_y`` in nm.
     """
-    k_matrix = np.vstack([wave_vectors_nm_inv(q_a_px, size_nm),
-                          wave_vectors_nm_inv(q_b_px, size_nm)])
+    k_matrix = np.vstack(
+        [wave_vectors_nm_inv(q_a_px, size_nm), wave_vectors_nm_inv(q_b_px, size_nm)]
+    )
     determinant = float(np.linalg.det(k_matrix))
     if not np.isfinite(determinant) or abs(determinant) < 1e-12:
         raise ValueError("the two reference wave vectors are collinear")
-    phases = np.stack([np.asarray(theta_a, dtype=float), np.asarray(theta_b, dtype=float)])
+    phases = np.stack(
+        [np.asarray(theta_a, dtype=float), np.asarray(theta_b, dtype=float)]
+    )
     flat = np.reshape(phases, (2, -1))
     solved = np.linalg.solve(k_matrix, -flat)
     return np.reshape(solved, (2, *np.asarray(theta_a).shape))
@@ -277,17 +306,28 @@ def warp_by_field(image, u_nm, size_nm, valid=None, pad=10, order=3):
     present = np.isfinite(array)
     fill_value = float(np.mean(array[present])) if bool(present.any()) else 0.0
     prepared = np.where(present, array, fill_value)
-    corrected = map_coordinates(prepared, [row, col], order=int(order),
-                                mode="constant", cval=np.nan, prefilter=int(order) > 1)
+    corrected = map_coordinates(
+        prepared,
+        [row, col],
+        order=int(order),
+        mode="constant",
+        cval=np.nan,
+        prefilter=int(order) > 1,
+    )
     if not bool(present.all()):
-        coverage = map_coordinates(present.astype(float), [row, col], order=1,
-                                   mode="constant", cval=0.0, prefilter=False)
+        coverage = map_coordinates(
+            present.astype(float),
+            [row, col],
+            order=1,
+            mode="constant",
+            cval=0.0,
+            prefilter=False,
+        )
         corrected = np.where(coverage >= 0.5, corrected, np.nan)
     return corrected, n_out, half, magnitude
 
 
-def resample_field(u_nm, valid, size_nm_reference, n_target, size_nm_target,
-                   order=1):
+def resample_field(u_nm, valid, size_nm_reference, n_target, size_nm_target, order=1):
     """Carry a displacement field (nm) from the reference grid to a target grid.
 
     ``u`` is physical, so only the grid changes: the target pixel centres are
@@ -297,22 +337,41 @@ def resample_field(u_nm, valid, size_nm_reference, n_target, size_nm_target,
     """
     array = np.asarray(u_nm, dtype=float)
     n_reference = int(array.shape[1])
-    if int(n_target) == n_reference and float(size_nm_target) == float(size_nm_reference):
+    if int(n_target) == n_reference and float(size_nm_target) == float(
+        size_nm_reference
+    ):
         return array, np.asarray(valid, dtype=bool)
     pixel_reference = float(size_nm_reference) / n_reference
     pixel_target = float(size_nm_target) / int(n_target)
-    rows, cols = np.mgrid[:int(n_target), :int(n_target)]
+    rows, cols = np.mgrid[: int(n_target), : int(n_target)]
     # pixel centre i covers the middle of pixel i, in both grids
     target_x = (cols + 0.5) * pixel_target
     target_y = (rows + 0.5) * pixel_target
     src_x = target_x / pixel_reference - 0.5
     src_y = target_y / pixel_reference - 0.5
-    resampled = np.stack([
-        map_coordinates(array[component], [src_y, src_x], order=int(order),
-                        mode="constant", cval=np.nan, prefilter=int(order) > 1)
-        for component in (0, 1)])
-    mask = map_coordinates(np.asarray(valid, dtype=float), [src_y, src_x],
-                           order=0, mode="constant", cval=0.0) > 0.5
+    resampled = np.stack(
+        [
+            map_coordinates(
+                array[component],
+                [src_y, src_x],
+                order=int(order),
+                mode="constant",
+                cval=np.nan,
+                prefilter=int(order) > 1,
+            )
+            for component in (0, 1)
+        ]
+    )
+    mask = (
+        map_coordinates(
+            np.asarray(valid, dtype=float),
+            [src_y, src_x],
+            order=0,
+            mode="constant",
+            cval=0.0,
+        )
+        > 0.5
+    )
     return resampled, mask
 
 
@@ -332,7 +391,7 @@ def wrapped_residual(phases_deg):
     for phase in phases_deg:
         total = total + np.asarray(phase, dtype=float)
     wrapped = (total + 180.0) % 360.0 - 180.0
-    return float(np.sqrt(np.mean(wrapped ** 2))), wrapped
+    return float(np.sqrt(np.mean(wrapped**2))), wrapped
 
 
 # --------------------------------------------------------------------------- #

@@ -36,6 +36,7 @@ Usage:
         .venv/bin/python <this script> INPUT.csv --transform TRANSFORM.json \
         -L 50 -o OUT_DIR [--delimiter ','] [--stm-lib DIR]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -63,20 +64,38 @@ TRANSFORM_SCHEMA_VERSION = 1
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("input", help="topography matrix (whitespace, tab or comma separated)")
-    parser.add_argument("--transform", required=True,
-                        help="transform JSON written by stm_topo_correct.py "
-                             "--save-transform")
-    parser.add_argument("-L", "--size-nm", type=float, required=True,
-                        help="scan size of THIS input in nm (square image)")
-    parser.add_argument("-o", "--outdir", default=None,
-                        help="output directory (default: next to the input file)")
-    parser.add_argument("--delimiter", default=None,
-                        help="column delimiter (default: auto-detect tab/comma/whitespace; "
-                             "the escape '\\t' is accepted)")
-    parser.add_argument("--stm-lib", default="/Users/hunfen/Documents/GitHub/"
-                                             "STM_DataProcessing/src",
-                        help="STM_DataProcessing src directory")
+    parser.add_argument(
+        "input", help="topography matrix (whitespace, tab or comma separated)"
+    )
+    parser.add_argument(
+        "--transform",
+        required=True,
+        help="transform JSON written by stm_topo_correct.py --save-transform",
+    )
+    parser.add_argument(
+        "-L",
+        "--size-nm",
+        type=float,
+        required=True,
+        help="scan size of THIS input in nm (square image)",
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default=None,
+        help="output directory (default: next to the input file)",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=None,
+        help="column delimiter (default: auto-detect tab/comma/whitespace; "
+        "the escape '\\t' is accepted)",
+    )
+    parser.add_argument(
+        "--stm-lib",
+        default="/Users/hunfen/Documents/GitHub/STM_DataProcessing/src",
+        help="STM_DataProcessing src directory",
+    )
     return parser.parse_args(argv)
 
 
@@ -107,7 +126,9 @@ def _image_transform(stretch, n, pad):
     ``n``-pixel input plus ``pad`` pixels and the offset aligns the two centres.
     """
     matrix = AXIS_SWAP @ np.linalg.inv(stretch) @ AXIS_SWAP
-    corners = np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    corners = (
+        np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    )
     extent = np.abs(np.linalg.inv(matrix) @ corners.T).max(axis=1)
     n_out = 2 * (int(np.ceil(float(extent.max()))) + int(pad)) + 1
     offset = (n - 1) / 2.0 - matrix @ np.array([(n_out - 1) / 2.0, (n_out - 1) / 2.0])
@@ -124,25 +145,37 @@ def load_transform(path):
     """
     payload = json.loads(Path(path).read_text())
     if not isinstance(payload, dict):
-        raise ValueError(f"{path}: the transform JSON must be an object, got "
-                         f"{type(payload).__name__}")
+        raise ValueError(
+            f"{path}: the transform JSON must be an object, got "
+            f"{type(payload).__name__}"
+        )
     if payload.get("schema") != TRANSFORM_SCHEMA:
-        raise ValueError(f"{path}: schema must be '{TRANSFORM_SCHEMA}', got "
-                         f"{payload.get('schema')!r}")
+        raise ValueError(
+            f"{path}: schema must be '{TRANSFORM_SCHEMA}', got "
+            f"{payload.get('schema')!r}"
+        )
     if payload.get("schema_version") != TRANSFORM_SCHEMA_VERSION:
-        raise ValueError(f"{path}: schema_version must be {TRANSFORM_SCHEMA_VERSION}, "
-                         f"got {payload.get('schema_version')!r}")
+        raise ValueError(
+            f"{path}: schema_version must be {TRANSFORM_SCHEMA_VERSION}, "
+            f"got {payload.get('schema_version')!r}"
+        )
     try:
         affine = np.asarray(payload.get("affine_q"), dtype=float)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{path}: affine_q is not a numeric 2x2 matrix ({exc})") from exc
+        raise ValueError(
+            f"{path}: affine_q is not a numeric 2x2 matrix ({exc})"
+        ) from exc
     if affine.shape != (2, 2) or not np.all(np.isfinite(affine)):
-        raise ValueError(f"{path}: affine_q must be a finite 2x2 matrix, got "
-                         f"{payload.get('affine_q')!r}")
+        raise ValueError(
+            f"{path}: affine_q must be a finite 2x2 matrix, got "
+            f"{payload.get('affine_q')!r}"
+        )
     determinant = float(np.linalg.det(affine))
     if determinant <= 0.0:
-        raise ValueError(f"{path}: affine_q must have a positive determinant, got "
-                         f"det = {determinant!r}")
+        raise ValueError(
+            f"{path}: affine_q must have a positive determinant, got "
+            f"det = {determinant!r}"
+        )
     order = int(payload.get("order", 3))
     pad = int(payload.get("pad", 10))
     if not 0 <= order <= 5:
@@ -163,8 +196,9 @@ def load_transform(path):
         "source_input": str(payload.get("source_input", "")),
         "n_px_reference": int(payload.get("n_px_reference", 0)),
         "n_out_reference": int(payload.get("n_out_reference", 0)),
-        "field_of_view_nm_reference": float(payload.get("field_of_view_nm_reference",
-                                                        np.nan)),
+        "field_of_view_nm_reference": float(
+            payload.get("field_of_view_nm_reference", np.nan)
+        ),
     }
 
 
@@ -200,48 +234,71 @@ def main(argv=None):
 
     emit("# apply a fitted correction transform (topo-correction skill, stage 2)")
     emit(f"# input: {csv_path}")
-    emit(f"# canvas {n} x {n} px, field of view {args.size_nm:g} nm "
-         f"({args.size_nm / n:.6f} nm/px)")
-    emit(f"# transform: {transform_path} (schema {TRANSFORM_SCHEMA} v"
-         f"{TRANSFORM_SCHEMA_VERSION})")
+    emit(
+        f"# canvas {n} x {n} px, field of view {args.size_nm:g} nm "
+        f"({args.size_nm / n:.6f} nm/px)"
+    )
+    emit(
+        f"# transform: {transform_path} (schema {TRANSFORM_SCHEMA} v"
+        f"{TRANSFORM_SCHEMA_VERSION})"
+    )
     emit(f"#   source report: {transform['source_report']}")
-    emit(f"#   source input: {transform['source_input']} "
-         f"({transform['n_px_reference']} px, field of view "
-         f"{transform['field_of_view_nm_reference']:g} nm, n_out "
-         f"{transform['n_out_reference']})")
-    emit(f"#   method={transform['method']}, fallback={transform['fallback']}, "
-         f"n_labelled={transform['n_labelled']}, anchor_ring="
-         f"{transform['anchor_ring']}, anchor_verdict="
-         f"{transform['anchor_verdict']}")
+    emit(
+        f"#   source input: {transform['source_input']} "
+        f"({transform['n_px_reference']} px, field of view "
+        f"{transform['field_of_view_nm_reference']:g} nm, n_out "
+        f"{transform['n_out_reference']})"
+    )
+    emit(
+        f"#   method={transform['method']}, fallback={transform['fallback']}, "
+        f"n_labelled={transform['n_labelled']}, anchor_ring="
+        f"{transform['anchor_ring']}, anchor_verdict="
+        f"{transform['anchor_verdict']}"
+    )
     emit(f"#   fitted stretch M =\n{affine_q}")
-    emit(f"#   pad={pad}, order={order}, stretch scale |det M|^(1/2) = "
-         f"{transform['stretch_scale_sqrt_det']:.5f}")
-    emit("# the transform is applied as given: no peak detection and no anchor "
-         "self-check are re-run on this dataset")
+    emit(
+        f"#   pad={pad}, order={order}, stretch scale |det M|^(1/2) = "
+        f"{transform['stretch_scale_sqrt_det']:.5f}"
+    )
+    emit(
+        "# the transform is applied as given: no peak detection and no anchor "
+        "self-check are re-run on this dataset"
+    )
 
     if transform["method"] == "identity_fallback":
         # Same semantics as the package: nothing was solved, so nothing is remapped.
-        emit("# WARNING: the transform carries method = identity_fallback: the fit "
-             "stage found no positive-definite stretch and corrected nothing. The "
-             "input is copied verbatim with its own canvas and field of view; do not "
-             "treat this output as a corrected image.")
+        emit(
+            "# WARNING: the transform carries method = identity_fallback: the fit "
+            "stage found no positive-definite stretch and corrected nothing. The "
+            "input is copied verbatim with its own canvas and field of view; do not "
+            "treat this output as a corrected image."
+        )
         corrected = np.array(topo, copy=True)
         matrix, offset = np.eye(2), np.zeros(2, dtype=float)
         n_out, size_out = n, float(args.size_nm)
     else:
         matrix, n_out, offset = _image_transform(affine_q, n, pad)
-        corrected = affine_transform(topo, matrix, offset=offset,
-                                     output_shape=(n_out, n_out), order=order,
-                                     mode="constant", cval=np.nan,
-                                     prefilter=order > 1)
+        corrected = affine_transform(
+            topo,
+            matrix,
+            offset=offset,
+            output_shape=(n_out, n_out),
+            order=order,
+            mode="constant",
+            cval=np.nan,
+            prefilter=order > 1,
+        )
         size_out = float(args.size_nm) * n_out / n
 
-    valid_fraction = (float(np.count_nonzero(np.isfinite(corrected)))
-                      / float(corrected.size))
+    valid_fraction = float(np.count_nonzero(np.isfinite(corrected))) / float(
+        corrected.size
+    )
     nan_fraction = 1.0 - valid_fraction
-    emit(f"# corrected canvas: {n_out} x {n_out} px, field of view "
-         f"{size_out:.4f} nm ({size_out / n_out:.6f} nm/px), "
-         f"NaN {100 * nan_fraction:.2f} %")
+    emit(
+        f"# corrected canvas: {n_out} x {n_out} px, field of view "
+        f"{size_out:.4f} nm ({size_out / n_out:.6f} nm/px), "
+        f"NaN {100 * nan_fraction:.2f} %"
+    )
 
     out_csv = outdir / f"{stem}_corrected.csv"
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
@@ -268,8 +325,11 @@ def main(argv=None):
     logged = np.log(1.0 + magnitude)
     span = np.log(1.0 + hi) - np.log(1.0 + lo)
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0), cmap="inferno",
-              origin="lower")
+    ax.imshow(
+        np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0),
+        cmap="inferno",
+        origin="lower",
+    )
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
@@ -307,8 +367,10 @@ def main(argv=None):
     }
     (outdir / "apply_report.json").write_text(json.dumps(report, indent=2) + "\n")
     emit("")
-    emit(f"# written: {out_csv}, {out_fft2}, {out_png}, {out_fft_png}, "
-         f"{outdir / 'apply_report.json'}, {outdir / 'correction.log'}")
+    emit(
+        f"# written: {out_csv}, {out_fft2}, {out_png}, {out_fft_png}, "
+        f"{outdir / 'apply_report.json'}, {outdir / 'correction.log'}"
+    )
     (outdir / "correction.log").write_text("\n".join(log_lines) + "\n")
     return 0
 

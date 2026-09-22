@@ -142,7 +142,7 @@ def circ_median(phi, w=None):
     base = float(p[0])
     rel = np.concatenate([np.mod(p - base, TWO_PI), np.mod(p + np.pi - base, TWO_PI)])
     delta = np.concatenate([ww, -ww])
-    rel = np.where(rel <= 0.0, TWO_PI, rel)          # entries at the base: already in
+    rel = np.where(rel <= 0.0, TWO_PI, rel)  # entries at the base: already in
     order = np.argsort(rel, kind="stable")
     rel, delta = rel[order], delta[order]
     # merge coincident kinks: an entry and an exit at the same angle cancel, and a
@@ -150,8 +150,8 @@ def circ_median(phi, w=None):
     starts = np.concatenate([[0], np.flatnonzero(np.diff(rel) > 1e-12) + 1])
     rel = rel[starts]
     delta = np.add.reduceat(delta, starts)
-    offset = np.mod(base - p, TWO_PI)                # in [0, 2pi)
-    a0 = float(np.sum(ww[offset < np.pi]))           # A(base^+) = weight in (base-pi, base]
+    offset = np.mod(base - p, TWO_PI)  # in [0, 2pi)
+    a0 = float(np.sum(ww[offset < np.pi]))  # A(base^+) = weight in (base-pi, base]
     a_after = a0 + np.cumsum(delta)
     s_after = 2.0 * a_after - total
     s_before = np.concatenate([[2.0 * a0 - total], s_after[:-1]])
@@ -175,26 +175,33 @@ def circ_median(phi, w=None):
                 last += 1
             head, tail = offset + first, offset + last
             start = base + rel[head % rel.size]
-            span = float(rel[tail % rel.size] - rel[head % rel.size]
-                         + (TWO_PI if tail >= rel.size else 0.0))
+            span = float(
+                rel[tail % rel.size]
+                - rel[head % rel.size]
+                + (TWO_PI if tail >= rel.size else 0.0)
+            )
         inside = int(np.count_nonzero(np.mod(p - start, TWO_PI) <= span + 1e-12))
-        return float(np.mod(start + span / 2.0, TWO_PI)), float(
-            np.degrees(span)), inside
+        return (
+            float(np.mod(start + span / 2.0, TWO_PI)),
+            float(np.degrees(span)),
+            inside,
+        )
     candidates = base + rel[cross]
     values = np.empty(cross.size)
     for start in range(0, cross.size, 16):
-        chunk = candidates[start:start + 16]
-        values[start:start + 16] = np.sum(
-            ww[None, :] * np.abs(wrap_pm_pi(chunk[:, None] - p[None, :])), axis=1)
+        chunk = candidates[start : start + 16]
+        values[start : start + 16] = np.sum(
+            ww[None, :] * np.abs(wrap_pm_pi(chunk[:, None] - p[None, :])), axis=1
+        )
     best = int(np.argmin(values))
     k0 = int(cross[best])
     if s_after[k0] > tol:
         return float(np.mod(base + rel[k0], TWO_PI)), 0.0, 1
-    nxt = np.flatnonzero(s_after[k0 + 1:] > tol)
+    nxt = np.flatnonzero(s_after[k0 + 1 :] > tol)
     if nxt.size == 0:
         return float(np.mod(base + rel[k0], TWO_PI)), 0.0, 1
     k1 = k0 + 1 + int(nxt[0])
-    if np.any(s_after[k0 + 1:k1] < -tol):
+    if np.any(s_after[k0 + 1 : k1] < -tol):
         return float(np.mod(base + rel[k0], TWO_PI)), 0.0, 1
     span = float(rel[k1] - rel[k0])
     start = base + rel[k0]
@@ -241,7 +248,7 @@ def circ_spread(phi, w=None):
         # kappa diverges, which the closed forms below cannot express
         return 0.0, float("inf"), 1.0
     if r_length < 0.53:
-        kappa = 2.0 * r_length + r_length ** 3 + 5.0 * r_length ** 5 / 6.0
+        kappa = 2.0 * r_length + r_length**3 + 5.0 * r_length**5 / 6.0
     else:
         kappa = -0.4 + 1.39 * r_length + 0.43 / (1.0 - r_length)
     std = float(np.sqrt(-2.0 * np.log(r_length)))
@@ -271,7 +278,7 @@ def smooth_circular(h, sigma_bins):
     kernel /= kernel.sum()
     padded = np.concatenate([h[-half:], h, h[:half]])
     conv = np.convolve(padded, kernel, mode="same")
-    return conv[half:half + n]
+    return conv[half : half + n]
 
 
 def _parabolic_peak(y_prev, y_peak, y_next):
@@ -334,11 +341,19 @@ def deconvolve_fwhm_deg(fwhm, sigma_deg):
     kernel = 2.354820045 * float(sigma_deg)
     if not np.isfinite(fwhm) or fwhm <= kernel:
         return float("nan")
-    return float(np.sqrt(fwhm ** 2 - kernel ** 2))
+    return float(np.sqrt(fwhm**2 - kernel**2))
 
 
-def cluster_list(phi, w=None, bins=3600, sigma_deg=3.0, min_frac=0.25,
-                 merge_deg=30.0, window_deg=15.0, refine_iters=10):
+def cluster_list(
+    phi,
+    w=None,
+    bins=3600,
+    sigma_deg=3.0,
+    min_frac=0.25,
+    merge_deg=30.0,
+    window_deg=15.0,
+    refine_iters=10,
+):
     """Clusters of the smoothed circular histogram.
 
     Rule: ``bins`` on [0, 2pi), wrap-around Gaussian smoothing of width
@@ -372,8 +387,9 @@ def cluster_list(phi, w=None, bins=3600, sigma_deg=3.0, min_frac=0.25,
     coarse.sort(key=lambda item: -item[1])
     kept = []
     for centre, height in coarse:
-        if all(min(abs(centre - c), 360.0 - abs(centre - c)) >= merge_deg
-               for c, _ in kept):
+        if all(
+            min(abs(centre - c), 360.0 - abs(centre - c)) >= merge_deg for c, _ in kept
+        ):
             kept.append((centre, height))
     if not kept:
         return []
@@ -400,11 +416,15 @@ def cluster_list(phi, w=None, bins=3600, sigma_deg=3.0, min_frac=0.25,
     out = []
     for i, (_centre, height) in enumerate(kept):
         # the refined centre stays inside the +-window of the seed
-        out.append({
-            "centre_deg": float(np.degrees(centres[i]) % 360.0),
-            "height": float(height),
-            "weight_fraction": float(weight[i]) if i < len(weight) else float("nan"),
-        })
+        out.append(
+            {
+                "centre_deg": float(np.degrees(centres[i]) % 360.0),
+                "height": float(height),
+                "weight_fraction": float(weight[i])
+                if i < len(weight)
+                else float("nan"),
+            }
+        )
     out.sort(key=lambda item: item["centre_deg"])
     return out
 
@@ -465,8 +485,9 @@ def weighted_stats(phi, w=None, bins=3600, smooth_deg=2.0, cluster_kw=None):
     std, kappa, _ = circ_spread(phi, w)
     width, peak_deg, peak_h, _, ok = fwhm_deg(phi, w, bins=bins, sigma_deg=smooth_deg)
     quantiles = circ_quantiles(phi, w, (0.25, 0.5, 0.75), centre=median)
-    clusters = cluster_list(phi, w, bins=bins, sigma_deg=max(smooth_deg, 3.0),
-                            **cluster_kw)
+    clusters = cluster_list(
+        phi, w, bins=bins, sigma_deg=max(smooth_deg, 3.0), **cluster_kw
+    )
     return {
         "fwhm_deconv_deg": deconvolve_fwhm_deg(width, smooth_deg),
         "n_samples": int(np.size(np.asarray(phi).ravel())),
@@ -520,14 +541,17 @@ def fit_origin(qs, phases, n, c_free=True, n_start=36, tol=1e-12, max_iter=80):
         u[2] = start
         for _ in range(int(max_iter)):
             residual = _origin_residual(qs, phases, n, u[:2], u[2])
-            jac = np.c_[-((TWO_PI / n) * qs[:, 0]), -((TWO_PI / n) * qs[:, 1]),
-                        -np.ones(qs.shape[0]) if c_free else np.zeros(qs.shape[0])]
+            jac = np.c_[
+                -((TWO_PI / n) * qs[:, 0]),
+                -((TWO_PI / n) * qs[:, 1]),
+                -np.ones(qs.shape[0]) if c_free else np.zeros(qs.shape[0]),
+            ]
             delta, *_ = np.linalg.lstsq(jac, -residual, rcond=None)
             u = u + delta
             if float(np.max(np.abs(delta))) < tol:
                 break
         residual = _origin_residual(qs, phases, n, u[:2], u[2])
-        rms = float(np.degrees(np.sqrt(np.mean(residual ** 2))))
+        rms = float(np.degrees(np.sqrt(np.mean(residual**2))))
         results.append((rms, float(u[0]), float(u[1]), float(u[2] % TWO_PI)))
     results.sort(key=lambda item: item[0])
     minima, seen = [], []
@@ -535,8 +559,9 @@ def fit_origin(qs, phases, n, c_free=True, n_start=36, tol=1e-12, max_iter=80):
         if any(np.hypot(x0 - sx, y0 - sy) < 1e-6 for sx, sy in seen):
             continue
         seen.append((x0, y0))
-        minima.append({"rms_deg": rms, "r0_px": (x0, y0), "c_deg": to_deg(c),
-                       "c_rad": c})
+        minima.append(
+            {"rms_deg": rms, "r0_px": (x0, y0), "c_deg": to_deg(c), "c_rad": c}
+        )
     best = dict(minima[0])
     best["minima"] = minima
     return best, minima

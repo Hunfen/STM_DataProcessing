@@ -64,7 +64,7 @@ from phasemath import TWO_PI, circ_mean, linear_median_fwhm, weighted_stats, wra
 
 # The demodulation engine of the sibling skill ``local-q-map`` is used as delivered,
 # by path (the two skills are installed side by side under ``skills/``).
-_LOCAL_Q_MAP_SCRIPTS = (Path(__file__).resolve().parents[2] / "local-q-map" / "scripts")
+_LOCAL_Q_MAP_SCRIPTS = Path(__file__).resolve().parents[2] / "local-q-map" / "scripts"
 if str(_LOCAL_Q_MAP_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_LOCAL_Q_MAP_SCRIPTS))
 
@@ -118,8 +118,9 @@ def gaussian_field(topo, q_px, lambda_nm, nm_per_px):
         raise ValueError(f"the canvas must be square, got {array.shape}")
     n = int(array.shape[0])
     q_rad_px = (TWO_PI / n) * np.asarray(q_px, dtype=float)
-    return localqmap.demodulate(array, q_rad_px=q_rad_px, lambda_nm=lambda_nm,
-                                nm_per_px=nm_per_px)
+    return localqmap.demodulate(
+        array, q_rad_px=q_rad_px, lambda_nm=lambda_nm, nm_per_px=nm_per_px
+    )
 
 
 def window_px(lambda_nm, nm_per_px):
@@ -153,11 +154,13 @@ def subpixel_offset(patch):
     iy, ix = np.unravel_index(int(np.argmax(patch)), patch.shape)
     if not (1 <= iy <= patch.shape[0] - 2 and 1 <= ix <= patch.shape[1] - 2):
         return 0.0, 0.0
+
     def axis(zm, z0, zp):
         denom = zm - 2.0 * z0 + zp
         if denom >= 0.0:
             return 0.0
         return float(np.clip(0.5 * (zm - zp) / denom, -0.5, 0.5))
+
     log_patch = np.log(np.maximum(patch, np.finfo(float).tiny))
     dy = axis(log_patch[iy - 1, ix], log_patch[iy, ix], log_patch[iy + 1, ix])
     dx = axis(log_patch[iy, ix - 1], log_patch[iy, ix], log_patch[iy, ix + 1])
@@ -185,13 +188,19 @@ def detect_reflections(mag, min_radius=6.0, snr_floor=6.0, max_peaks=400):
         iy, ix = divmod(int(index), n)
         if mag[iy, ix] < threshold:
             continue
-        patch = mag[iy - 1:iy + 2, ix - 1:ix + 2]
+        patch = mag[iy - 1 : iy + 2, ix - 1 : ix + 2]
         dy, dx = subpixel_offset(patch)
         qx = ix + dx - centre
         qy = iy + dy - centre
-        records.append((float(qx), float(qy), float(mag[iy, ix]),
-                        float(mag[iy, ix] / sigma if sigma > 0 else np.inf),
-                        float(np.hypot(qx, qy))))
+        records.append(
+            (
+                float(qx),
+                float(qy),
+                float(mag[iy, ix]),
+                float(mag[iy, ix] / sigma if sigma > 0 else np.inf),
+                float(np.hypot(qx, qy)),
+            )
+        )
     records.sort(key=lambda item: -item[2])
     return records[:max_peaks]
 
@@ -209,14 +218,19 @@ def group_rings(reflections, tol_frac=0.02, min_members=6):
             if abs(record[4] - ring["radius"]) <= tol_frac * ring["radius"]:
                 ring["members"].append(record)
                 total = sum(member[2] for member in ring["members"])
-                ring["radius"] = float(np.average([m[4] for m in ring["members"]],
-                                                  weights=[m[2] for m in ring["members"]]))
+                ring["radius"] = float(
+                    np.average(
+                        [m[4] for m in ring["members"]],
+                        weights=[m[2] for m in ring["members"]],
+                    )
+                )
                 ring["total_amplitude"] = float(total)
                 placed = True
                 break
         if not placed:
-            rings.append({"radius": record[4], "members": [record],
-                          "total_amplitude": record[2]})
+            rings.append(
+                {"radius": record[4], "members": [record], "total_amplitude": record[2]}
+            )
     keep = [ring for ring in rings if len(ring["members"]) >= min_members]
     keep.sort(key=lambda ring: -ring["total_amplitude"])
     return keep
@@ -272,15 +286,23 @@ def snap_to_true_vectors(members, true_vectors, expect=6):
         for index, vector in enumerate(true_vectors):
             if index in used:
                 continue
-            angle = abs(np.arctan2(record[1], record[0])
-                        - np.arctan2(vector[1], vector[0]))
+            angle = abs(
+                np.arctan2(record[1], record[0]) - np.arctan2(vector[1], vector[0])
+            )
             angle = min(angle, TWO_PI - angle)
             if angle < best_distance:
                 best, best_distance = index, angle
         used.add(best)
         vector = true_vectors[best]
-        snapped.append((float(vector[0]), float(vector[1]), float(record[2]),
-                        float(record[3]), float(np.hypot(*vector))))
+        snapped.append(
+            (
+                float(vector[0]),
+                float(vector[1]),
+                float(record[2]),
+                float(record[3]),
+                float(np.hypot(*vector)),
+            )
+        )
     return snapped
 
 
@@ -336,7 +358,9 @@ def reflection_stats(theta, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
     _gmean, g_r, _ = circ_mean(theta[good], amp[good])
     _umean, u_r, _ = circ_mean(theta[valid], amp[valid])
     return {
-        "gate_fraction": float(np.count_nonzero(good) / max(np.count_nonzero(valid), 1)),
+        "gate_fraction": float(
+            np.count_nonzero(good) / max(np.count_nonzero(valid), 1)
+        ),
         "phase_ungated": allpix,
         "phase_gated": gated,
         "amp_mean": float(np.mean(amp[valid])),
@@ -367,7 +391,9 @@ def pair_phase_diff_field(psi_j, psi_k):
     of two demodulated fields is one complex product; neither field carries a
     ``q.r`` ramp, so the difference carries none either.
     """
-    product = np.asarray(psi_j, dtype=complex) * np.conj(np.asarray(psi_k, dtype=complex))
+    product = np.asarray(psi_j, dtype=complex) * np.conj(
+        np.asarray(psi_k, dtype=complex)
+    )
     return np.asarray(np.angle(product), dtype=float)
 
 
@@ -384,12 +410,14 @@ def pair_amplitude_diff_field(psi_j, psi_k):
 
 def pair_weight_field(psi_j, psi_k):
     """``|psi_j psi_k|``, the amplitude weight of a pair sample."""
-    return (np.abs(np.asarray(psi_j, dtype=complex))
-            * np.abs(np.asarray(psi_k, dtype=complex)))
+    return np.abs(np.asarray(psi_j, dtype=complex)) * np.abs(
+        np.asarray(psi_k, dtype=complex)
+    )
 
 
-def pair_histogram(phase_diff, amp_diff, mask, weight, bins_phase=180,
-                   bins_amplitude=100):
+def pair_histogram(
+    phase_diff, amp_diff, mask, weight, bins_phase=180, bins_amplitude=100
+):
     """2D histogram of ``(|D| mod pi, a)`` over the pair's effective pixels.
 
     ``x`` folds the phase difference onto ``[0, pi]`` (the modulo-``pi`` folding
@@ -404,14 +432,25 @@ def pair_histogram(phase_diff, amp_diff, mask, weight, bins_phase=180,
     y = np.asarray(amp_diff, dtype=float)
     keep = good & np.isfinite(x) & np.isfinite(y)
     counts, x_edges, y_edges = np.histogram2d(
-        x[keep], y[keep], bins=[int(bins_phase), int(bins_amplitude)],
+        x[keep],
+        y[keep],
+        bins=[int(bins_phase), int(bins_amplitude)],
         range=[[0.0, np.pi], [-1.0, 1.0]],
-        weights=np.asarray(weight, dtype=float)[keep])
+        weights=np.asarray(weight, dtype=float)[keep],
+    )
     return counts.astype(float), x_edges, y_edges, int(np.count_nonzero(keep))
 
 
-def pair_analysis(psi_j, psi_k, valid_j, valid_k, bins_phase=180, bins_amplitude=100,
-                  bins=3600, smooth_deg=2.0):
+def pair_analysis(
+    psi_j,
+    psi_k,
+    valid_j,
+    valid_k,
+    bins_phase=180,
+    bins_amplitude=100,
+    bins=3600,
+    smooth_deg=2.0,
+):
     """The three fields and the statistics of one reflection pair.
 
     The effective pixels of a pair are the intersection of the two validity masks.
@@ -423,12 +462,18 @@ def pair_analysis(psi_j, psi_k, valid_j, valid_k, bins_phase=180, bins_amplitude
     phase_diff = pair_phase_diff_field(psi_j, psi_k)
     amp_diff = pair_amplitude_diff_field(psi_j, psi_k)
     weight = pair_weight_field(psi_j, psi_k)
-    stats = weighted_stats(phase_diff[mask], weight[mask], bins=bins,
-                           smooth_deg=smooth_deg)
+    stats = weighted_stats(
+        phase_diff[mask], weight[mask], bins=bins, smooth_deg=smooth_deg
+    )
     amp_median, amp_fwhm, _ = linear_median_fwhm(amp_diff[mask], weight[mask])
     counts, x_edges, y_edges, n_valid = pair_histogram(
-        phase_diff, amp_diff, mask, weight, bins_phase=bins_phase,
-        bins_amplitude=bins_amplitude)
+        phase_diff,
+        amp_diff,
+        mask,
+        weight,
+        bins_phase=bins_phase,
+        bins_amplitude=bins_amplitude,
+    )
     return {
         "phase_diff": phase_diff,
         "amp_diff": amp_diff,
@@ -512,10 +557,14 @@ def triple_selection(peaks_q):
     the mirror explicitly (``triple_summary``).
     """
     import itertools
+
     best = None
     for combo in itertools.combinations(range(len(peaks_q)), 3):
-        norm = float(np.hypot(sum(peaks_q[i][0] for i in combo),
-                              sum(peaks_q[i][1] for i in combo)))
+        norm = float(
+            np.hypot(
+                sum(peaks_q[i][0] for i in combo), sum(peaks_q[i][1] for i in combo)
+            )
+        )
         first = min(np.arctan2(peaks_q[i][1], peaks_q[i][0]) % TWO_PI for i in combo)
         key = (round(norm, 6), first)
         if best is None or key < best[0]:
@@ -526,8 +575,19 @@ def triple_selection(peaks_q):
 # --------------------------------------------------------------------------- #
 # ring level analysis
 # --------------------------------------------------------------------------- #
-def analyse_ring(topo, valid, ring, lambda_nm, nm_per_px, gate="p50", bins=3600,
-                 smooth_deg=2.0, expect=6, prefix="", peaks_override=None):
+def analyse_ring(
+    topo,
+    valid,
+    ring,
+    lambda_nm,
+    nm_per_px,
+    gate="p50",
+    bins=3600,
+    smooth_deg=2.0,
+    expect=6,
+    prefix="",
+    peaks_override=None,
+):
     """Phase statistics of all reflections of one ring.
 
     Every field is demodulated with ``gaussian_field`` at the wavevector of the
@@ -542,8 +602,11 @@ def analyse_ring(topo, valid, ring, lambda_nm, nm_per_px, gate="p50", bins=3600,
 
     Returns ``(records, fields, psi)``.
     """
-    peaks = (ring_six(ring["members"], expect=expect) if peaks_override is None
-             else list(peaks_override))
+    peaks = (
+        ring_six(ring["members"], expect=expect)
+        if peaks_override is None
+        else list(peaks_override)
+    )
     n = int(np.asarray(topo).shape[0])
     centre = n // 2
     records, fields, psi_map = [], {}, {}
@@ -552,15 +615,21 @@ def analyse_ring(topo, valid, ring, lambda_nm, nm_per_px, gate="p50", bins=3600,
         psi = gaussian_field(topo, (qx, qy), lambda_nm, nm_per_px)
         theta = theta_field(psi)
         amp = np.abs(psi)
-        stats = reflection_stats(theta, amp, valid, gate=gate, bins=bins,
-                                 smooth_deg=smooth_deg)
-        records.append({
-            "name": name, "q_px": (float(qx), float(qy)),
-            "integer": (round(qx) + centre, round(qy) + centre),
-            "subpixel": (float(qx - round(qx)), float(qy - round(qy))),
-            "radius_px": float(radius), "fft_amplitude": float(amplitude),
-            "snr": float(snr), "stats": stats,
-        })
+        stats = reflection_stats(
+            theta, amp, valid, gate=gate, bins=bins, smooth_deg=smooth_deg
+        )
+        records.append(
+            {
+                "name": name,
+                "q_px": (float(qx), float(qy)),
+                "integer": (round(qx) + centre, round(qy) + centre),
+                "subpixel": (float(qx - round(qx)), float(qy - round(qy))),
+                "radius_px": float(radius),
+                "fft_amplitude": float(amplitude),
+                "snr": float(snr),
+                "stats": stats,
+            }
+        )
         fields[name] = ((float(qx), float(qy)), theta, amp)
         psi_map[name] = psi
     return records, fields, psi_map
@@ -574,18 +643,31 @@ def pair_summary(records, key="phase_gated", quantity="mean_deg"):
         a = records[i]["stats"][key][quantity]
         b = records[j]["stats"][key][quantity]
         total = (a + b) % 360.0
-        out.append({
-            "pair": (records[i]["name"], records[j]["name"]),
-            "sum_q_norm_px": norm,
-            "sum_deg": total,
-            "deviation_from_360_deg": abs(total - 360.0) if total > 180.0 else total,
-            "a_deg": a, "b_deg": b,
-        })
+        out.append(
+            {
+                "pair": (records[i]["name"], records[j]["name"]),
+                "sum_q_norm_px": norm,
+                "sum_deg": total,
+                "deviation_from_360_deg": abs(total - 360.0)
+                if total > 180.0
+                else total,
+                "a_deg": a,
+                "b_deg": b,
+            }
+        )
     return out
 
 
-def triple_summary(records, fields, valid, key="phase_gated", quantity="mean_deg",
-                   bins=3600, smooth_deg=2.0, gate="p50"):
+def triple_summary(
+    records,
+    fields,
+    valid,
+    key="phase_gated",
+    quantity="mean_deg",
+    bins=3600,
+    smooth_deg=2.0,
+    gate="p50",
+):
     """Scalar triple sum and the per-pixel triple-product phase of one ring.
 
     ``scalar``  the three per-reflection phases added as angles
@@ -606,16 +688,19 @@ def triple_summary(records, fields, valid, key="phase_gated", quantity="mean_deg
         amp_prod = amp_prod * fields[name][2]
     theta = np.mod(phi_sum, TWO_PI)
     good = gate_mask(amp_prod, valid, gate)
-    gated = weighted_stats(theta[good], amp_prod[good], bins=bins,
-                           smooth_deg=smooth_deg)
-    allpix = weighted_stats(theta[valid], amp_prod[valid], bins=bins,
-                            smooth_deg=smooth_deg)
+    gated = weighted_stats(
+        theta[good], amp_prod[good], bins=bins, smooth_deg=smooth_deg
+    )
+    allpix = weighted_stats(
+        theta[valid], amp_prod[valid], bins=bins, smooth_deg=smooth_deg
+    )
     # Friedel conjugates are exact negatives, so the antipodal triple is the mirror
     mirror_scalar = float((-scalar) % 360.0)
     return {
         "combo": names,
-        "antipodal_combo": [(-qx, -qy) for qx, qy in
-                            (records[i]["q_px"] for i in combo)],
+        "antipodal_combo": [
+            (-qx, -qy) for qx, qy in (records[i]["q_px"] for i in combo)
+        ],
         "q_sum_norm_px": q_sum_norm,
         "scalar_sum_deg": scalar,
         "scalar_sum_mirror_deg": mirror_scalar,
@@ -705,8 +790,18 @@ def antipodal_triple(vectors):
     return [(-qx, -qy) for qx, qy in independent_triple(vectors)]
 
 
-def synth_image(n, r1_px, domains, ref_amp=1.0, ref_phase_deg=0.0, noise=0.0,
-                seed=0, rotation_deg=30.0, harmonics=(1,), rng=None):
+def synth_image(
+    n,
+    r1_px,
+    domains,
+    ref_amp=1.0,
+    ref_phase_deg=0.0,
+    noise=0.0,
+    seed=0,
+    rotation_deg=30.0,
+    harmonics=(1,),
+    rng=None,
+):
     """Ground-truth synthetic image: reference ring plus region-dependent r3 ring.
 
     The reference ring (radius ``r1_px``) carries one phase everywhere; the r3
@@ -722,15 +817,18 @@ def synth_image(n, r1_px, domains, ref_amp=1.0, ref_phase_deg=0.0, noise=0.0,
     ref_vectors = [(r1_px * np.cos(a), r1_px * np.sin(a)) for a in angles]
     rotate = np.radians(rotation_deg)
     r3_radius = r1_px / SQRT3
-    r3_vectors = [(r3_radius * np.cos(a + rotate), r3_radius * np.sin(a + rotate))
-                  for a in angles]
+    r3_vectors = [
+        (r3_radius * np.cos(a + rotate), r3_radius * np.sin(a + rotate)) for a in angles
+    ]
     ref_triple = independent_triple(ref_vectors)
     image = ring_wave(n, ref_triple, np.radians(ref_phase_deg)) * ref_amp
     for domain in domains:
         chi = _domain_mask(n, domain)
         for harmonic in harmonics:
-            vectors = [(harmonic * qx, harmonic * qy) for qx, qy in
-                       independent_triple(r3_vectors)]
+            vectors = [
+                (harmonic * qx, harmonic * qy)
+                for qx, qy in independent_triple(r3_vectors)
+            ]
             phase = harmonic * np.radians(domain["phase_deg"])
             image = image + chi * domain["amp"] * ring_wave(n, vectors, phase)
     if noise:
@@ -770,8 +868,9 @@ def true_mixture(domains, n, r1_px, window="hann"):
     return {
         "weights": weights,
         "area_weights": area_weights,
-        "area_fractions": np.asarray([float(np.mean(_domain_mask(n, d)))
-                                      for d in domains]),
+        "area_fractions": np.asarray(
+            [float(np.mean(_domain_mask(n, d))) for d in domains]
+        ),
         "weight_fractions": weights / total,
         "area_weight_fractions": area_weights / total_area,
         "phases_deg": np.asarray(phases),
@@ -781,8 +880,9 @@ def true_mixture(domains, n, r1_px, window="hann"):
         "three_phi_bar_deg": float(3.0 * np.degrees(np.angle(phasor)) % 360.0),
         "phi_bar_area_deg": float(np.degrees(np.angle(area_phasor)) % 360.0),
         "coherence_area": float(abs(area_phasor) / total_area),
-        "three_phi_bar_area_deg": float(3.0 * np.degrees(np.angle(area_phasor))
-                                        % 360.0),
+        "three_phi_bar_area_deg": float(
+            3.0 * np.degrees(np.angle(area_phasor)) % 360.0
+        ),
     }
 
 
@@ -805,13 +905,22 @@ def affine_resample(image, stretch, pad=10, order=3):
     n = arr.shape[0]
     swap = np.array([[0.0, 1.0], [1.0, 0.0]])
     matrix = swap @ np.linalg.inv(np.asarray(stretch, dtype=float)) @ swap
-    corners = np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    corners = (
+        np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    )
     extent = np.abs(np.linalg.inv(matrix) @ corners.T).max(axis=1)
     n_out = 2 * (int(np.ceil(float(extent.max()))) + int(pad)) + 1
     offset = (n - 1) / 2.0 - matrix @ np.array([(n_out - 1) / 2.0, (n_out - 1) / 2.0])
-    out = affine_transform(arr, matrix, offset=offset, output_shape=(n_out, n_out),
-                           order=int(order), mode="constant", cval=np.nan,
-                           prefilter=int(order) > 1)
+    out = affine_transform(
+        arr,
+        matrix,
+        offset=offset,
+        output_shape=(n_out, n_out),
+        order=int(order),
+        mode="constant",
+        cval=np.nan,
+        prefilter=int(order) > 1,
+    )
     return out, matrix, n_out, offset
 
 
@@ -822,8 +931,9 @@ def stretched_image(image, stretch, pad=10, order=3):
     ``img`` from ``q`` to ``q @ S^-1``; applying ``M`` therefore means resampling
     with ``S = M^-1``.  Used to build synthetic images with a known anisotropy.
     """
-    return affine_resample(image, np.linalg.inv(np.asarray(stretch, dtype=float)),
-                           pad=pad, order=order)
+    return affine_resample(
+        image, np.linalg.inv(np.asarray(stretch, dtype=float)), pad=pad, order=order
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -845,8 +955,16 @@ def find_ring_at_ratio(rings, reference_radius_px, ratio=1.0 / SQRT3, tol_frac=0
     return best
 
 
-def choose_rings(rings, anchor="auto", reference_radius_px=None, match_tol=0.03,
-                 pair_tol=0.03, r3_tol=0.03, expect=6, ratio=SQRT3):
+def choose_rings(
+    rings,
+    anchor="auto",
+    reference_radius_px=None,
+    match_tol=0.03,
+    pair_tol=0.03,
+    r3_tol=0.03,
+    expect=6,
+    ratio=SQRT3,
+):
     """Pick ``ring_1x1`` (the reference ring) and ``ring_r3`` = ring_1x1 / sqrt(3).
 
     The reference ring is a *choice*, never an implicit assumption: the caller
@@ -868,10 +986,14 @@ def choose_rings(rings, anchor="auto", reference_radius_px=None, match_tol=0.03,
     ``method`` (text), ``ring_1x1``, ``ring_r3``, ``ratio``, ``sqrt3_deviation``.
     """
     usable = [ring for ring in rings if len(ring["members"]) >= int(expect)]
-    result = {"status": "no_rings", "method": ("no ring with at least "
-                                               f"{int(expect)} members"),
-              "ring_1x1": None, "ring_r3": None, "ratio": float("nan"),
-              "sqrt3_deviation": float("nan")}
+    result = {
+        "status": "no_rings",
+        "method": (f"no ring with at least {int(expect)} members"),
+        "ring_1x1": None,
+        "ring_r3": None,
+        "ratio": float("nan"),
+        "sqrt3_deviation": float("nan"),
+    }
     if not usable:
         return result
     by_amplitude = sorted(usable, key=lambda ring: -ring["total_amplitude"])
@@ -880,13 +1002,17 @@ def choose_rings(rings, anchor="auto", reference_radius_px=None, match_tol=0.03,
     if anchor == "radius":
         if reference_radius_px is None:
             raise ValueError("--reference-radius-px is required with --anchor radius")
-        nearest = min(usable, key=lambda ring: abs(ring["radius"] - reference_radius_px))
+        nearest = min(
+            usable, key=lambda ring: abs(ring["radius"] - reference_radius_px)
+        )
         deviation = abs(nearest["radius"] - reference_radius_px) / reference_radius_px
         if deviation > match_tol:
-            result["method"] = (f"no ring within {match_tol:.1%} of the requested "
-                                f"reference radius {reference_radius_px:.4f} px "
-                                f"(nearest {nearest['radius']:.4f} px, "
-                                f"{deviation:.2%} away)")
+            result["method"] = (
+                f"no ring within {match_tol:.1%} of the requested "
+                f"reference radius {reference_radius_px:.4f} px "
+                f"(nearest {nearest['radius']:.4f} px, "
+                f"{deviation:.2%} away)"
+            )
             return result
         reference = nearest
         method = f"explicit reference radius {reference_radius_px:.4f} px"
@@ -894,37 +1020,54 @@ def choose_rings(rings, anchor="auto", reference_radius_px=None, match_tol=0.03,
         reference = by_amplitude[0]
         method = "strongest ring by total reflection amplitude"
     elif anchor in ("outer", "inner"):
-        pair = select_ring_pair(usable, ratio=ratio, tol_frac=pair_tol, expect=int(expect))
+        pair = select_ring_pair(
+            usable, ratio=ratio, tol_frac=pair_tol, expect=int(expect)
+        )
         if pair is None:
-            result["method"] = (f"no ring pair with a radius ratio inside "
-                                f"{pair_tol:.1%} of sqrt(3)")
+            result["method"] = (
+                f"no ring pair with a radius ratio inside {pair_tol:.1%} of sqrt(3)"
+            )
             return result
         reference = pair[0] if anchor == "outer" else pair[1]
-        method = (f"{anchor} member of the ratio-{pair[2]:.4f} ring pair "
-                  f"({pair[0]['radius']:.4f} px / {pair[1]['radius']:.4f} px)")
+        method = (
+            f"{anchor} member of the ratio-{pair[2]:.4f} ring pair "
+            f"({pair[0]['radius']:.4f} px / {pair[1]['radius']:.4f} px)"
+        )
     elif anchor == "auto":
         for ring in by_amplitude:
-            if find_ring_at_ratio(usable, ring["radius"], ratio=1.0 / SQRT3,
-                                  tol_frac=r3_tol) is not None:
+            if (
+                find_ring_at_ratio(
+                    usable, ring["radius"], ratio=1.0 / SQRT3, tol_frac=r3_tol
+                )
+                is not None
+            ):
                 reference = ring
-                method = ("strongest ring that has a ring at 1/sqrt(3) of its "
-                          "radius inside tolerance")
+                method = (
+                    "strongest ring that has a ring at 1/sqrt(3) of its "
+                    "radius inside tolerance"
+                )
                 break
         if reference is None:
-            pair = select_ring_pair(usable, ratio=ratio, tol_frac=pair_tol,
-                                    expect=int(expect))
+            pair = select_ring_pair(
+                usable, ratio=ratio, tol_frac=pair_tol, expect=int(expect)
+            )
             if pair is not None:
                 reference = pair[0]
-                method = (f"outer member of the ratio-{pair[2]:.4f} ring pair "
-                          f"(no direct 1/sqrt(3) match for the strongest rings)")
+                method = (
+                    f"outer member of the ratio-{pair[2]:.4f} ring pair "
+                    f"(no direct 1/sqrt(3) match for the strongest rings)"
+                )
         if reference is None:
             for ring in by_amplitude:
-                above = find_ring_at_ratio(usable, ring["radius"], ratio=SQRT3,
-                                           tol_frac=r3_tol)
+                above = find_ring_at_ratio(
+                    usable, ring["radius"], ratio=SQRT3, tol_frac=r3_tol
+                )
                 if above is not None:
                     reference = above
-                    method = ("the innermost ring sits at 1/sqrt(3) of the "
-                              "reference ring: the reference is the ring above it")
+                    method = (
+                        "the innermost ring sits at 1/sqrt(3) of the "
+                        "reference ring: the reference is the ring above it"
+                    )
                     break
     else:
         raise ValueError(f"unsupported anchor {anchor!r}")
@@ -932,20 +1075,25 @@ def choose_rings(rings, anchor="auto", reference_radius_px=None, match_tol=0.03,
     if reference is None:
         result["status"] = "r3_not_found"
         if not result["method"] or result["method"].startswith("no ring with at least"):
-            result["method"] = ("no reference ring could be established: "
-                                + (method or "no ring pair with a sqrt(3) radius ratio "
-                                             "and no ring at 1/sqrt(3) or sqrt(3) of "
-                                             "another ring inside tolerance"))
+            result["method"] = "no reference ring could be established: " + (
+                method
+                or "no ring pair with a sqrt(3) radius ratio "
+                "and no ring at 1/sqrt(3) or sqrt(3) of "
+                "another ring inside tolerance"
+            )
         return result
 
     result["ring_1x1"] = reference
-    partner = find_ring_at_ratio(usable, reference["radius"], ratio=1.0 / SQRT3,
-                                 tol_frac=r3_tol)
+    partner = find_ring_at_ratio(
+        usable, reference["radius"], ratio=1.0 / SQRT3, tol_frac=r3_tol
+    )
     if partner is None:
         result["status"] = "r3_not_found"
-        result["method"] = (method + f"; reference radius {reference['radius']:.4f} px "
-                            f"but no ring at 1/sqrt(3) of it inside {r3_tol:.1%} "
-                            f"(target {reference['radius'] / SQRT3:.4f} px)")
+        result["method"] = (
+            method + f"; reference radius {reference['radius']:.4f} px "
+            f"but no ring at 1/sqrt(3) of it inside {r3_tol:.1%} "
+            f"(target {reference['radius'] / SQRT3:.4f} px)"
+        )
         return result
     result["status"] = "ok"
     result["method"] = method
@@ -969,5 +1117,5 @@ def clock_order_index(qx, qy):
 
 def order_ring_members(members, expect=6):
     """The six strongest members of a ring, numbered clockwise from 12 o'clock."""
-    strongest = sorted(members, key=lambda item: -item[2])[:int(expect)]
+    strongest = sorted(members, key=lambda item: -item[2])[: int(expect)]
     return sorted(strongest, key=lambda item: clock_order_index(item[0], item[1]))

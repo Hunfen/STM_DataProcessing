@@ -40,6 +40,7 @@ Usage:
         .venv/bin/python <this script> INPUT.csv --transform BUNDLE.json \
         -L 50 -o OUT_DIR [--delimiter ','] [--stm-lib DIR]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,22 +66,45 @@ DEFAULT_FOV_TOLERANCE = 1e-3
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("input", help="topography matrix (whitespace, tab or comma separated)")
-    parser.add_argument("--transform", required=True,
-                        help="bundle JSON written by stm_lf_correct.py --save-transform")
-    parser.add_argument("-L", "--size-nm", type=float, required=True,
-                        help="scan size of THIS input in nm (square image)")
-    parser.add_argument("-o", "--outdir", default=None,
-                        help="output directory (default: next to the input file)")
-    parser.add_argument("--fov-tol", type=float, default=DEFAULT_FOV_TOLERANCE,
-                        help="relative field-of-view mismatch that triggers a WARNING "
-                             f"(default {DEFAULT_FOV_TOLERANCE:g})")
-    parser.add_argument("--delimiter", default=None,
-                        help="column delimiter (default: auto-detect tab/comma/whitespace; "
-                             "the escape '\\t' is accepted)")
-    parser.add_argument("--stm-lib", default="/Users/hunfen/Documents/GitHub/"
-                                             "STM_DataProcessing/src",
-                        help="STM_DataProcessing src directory")
+    parser.add_argument(
+        "input", help="topography matrix (whitespace, tab or comma separated)"
+    )
+    parser.add_argument(
+        "--transform",
+        required=True,
+        help="bundle JSON written by stm_lf_correct.py --save-transform",
+    )
+    parser.add_argument(
+        "-L",
+        "--size-nm",
+        type=float,
+        required=True,
+        help="scan size of THIS input in nm (square image)",
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default=None,
+        help="output directory (default: next to the input file)",
+    )
+    parser.add_argument(
+        "--fov-tol",
+        type=float,
+        default=DEFAULT_FOV_TOLERANCE,
+        help="relative field-of-view mismatch that triggers a WARNING "
+        f"(default {DEFAULT_FOV_TOLERANCE:g})",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=None,
+        help="column delimiter (default: auto-detect tab/comma/whitespace; "
+        "the escape '\\t' is accepted)",
+    )
+    parser.add_argument(
+        "--stm-lib",
+        default="/Users/hunfen/Documents/GitHub/STM_DataProcessing/src",
+        help="STM_DataProcessing src directory",
+    )
     return parser.parse_args(argv)
 
 
@@ -103,30 +127,51 @@ def load_bundle(path):
     """Read and validate the bundle; ``ValueError`` carries the reason."""
     payload = json.loads(Path(path).read_text())
     if not isinstance(payload, dict):
-        raise ValueError(f"{path}: the bundle JSON must be an object, got "
-                         f"{type(payload).__name__}")
+        raise ValueError(
+            f"{path}: the bundle JSON must be an object, got {type(payload).__name__}"
+        )
     if payload.get("schema") != BUNDLE_SCHEMA:
-        raise ValueError(f"{path}: schema must be '{BUNDLE_SCHEMA}', got "
-                         f"{payload.get('schema')!r}")
+        raise ValueError(
+            f"{path}: schema must be '{BUNDLE_SCHEMA}', got {payload.get('schema')!r}"
+        )
     if payload.get("schema_version") != BUNDLE_SCHEMA_VERSION:
-        raise ValueError(f"{path}: schema_version must be {BUNDLE_SCHEMA_VERSION}, got "
-                         f"{payload.get('schema_version')!r}")
-    for key in ("n_px_reference", "field_of_view_nm_reference", "pad", "order", "method"):
+        raise ValueError(
+            f"{path}: schema_version must be {BUNDLE_SCHEMA_VERSION}, got "
+            f"{payload.get('schema_version')!r}"
+        )
+    for key in (
+        "n_px_reference",
+        "field_of_view_nm_reference",
+        "pad",
+        "order",
+        "method",
+    ):
         if key not in payload:
             raise ValueError(f"{path}: missing key {key!r}")
-    fallback = bool(payload.get("fallback", False)) or payload.get("method") == "identity_fallback"
+    fallback = (
+        bool(payload.get("fallback", False))
+        or payload.get("method") == "identity_fallback"
+    )
     u_path = payload.get("u_field_file")
     field = None
     if not fallback:
         if not u_path or not Path(u_path).is_file():
             raise ValueError(f"{path}: the u-field npz is missing ({u_path!r})")
         with np.load(u_path) as handle:
-            field = {"u_x": handle["u_x"], "u_y": handle["u_y"],
-                     "valid": handle["valid"].astype(bool)}
-        if field["u_x"].shape != field["u_y"].shape or field["valid"].shape != field["u_x"].shape:
-            raise ValueError(f"{u_path}: u_x, u_y and valid must share one shape, got "
-                             f"{field['u_x'].shape}, {field['u_y'].shape}, "
-                             f"{field['valid'].shape}")
+            field = {
+                "u_x": handle["u_x"],
+                "u_y": handle["u_y"],
+                "valid": handle["valid"].astype(bool),
+            }
+        if (
+            field["u_x"].shape != field["u_y"].shape
+            or field["valid"].shape != field["u_x"].shape
+        ):
+            raise ValueError(
+                f"{u_path}: u_x, u_y and valid must share one shape, got "
+                f"{field['u_x'].shape}, {field['u_y'].shape}, "
+                f"{field['valid'].shape}"
+            )
     return {"payload": payload, "fallback": fallback, "field": field, "u_path": u_path}
 
 
@@ -162,34 +207,48 @@ def main(argv=None):
 
     emit("# apply a fitted Lawler-Fujita correction bundle (stage 2)")
     emit(f"# input: {csv_path}")
-    emit(f"# canvas {n} x {n} px, field of view {args.size_nm:g} nm "
-         f"({args.size_nm / n:.6f} nm/px)")
+    emit(
+        f"# canvas {n} x {n} px, field of view {args.size_nm:g} nm "
+        f"({args.size_nm / n:.6f} nm/px)"
+    )
     emit(f"# bundle: {bundle_path} (schema {BUNDLE_SCHEMA} v{BUNDLE_SCHEMA_VERSION})")
-    emit(f"#   source input: {payload.get('source_input')} "
-         f"({payload['n_px_reference']} px, field of view {reference_fov:g} nm, n_out "
-         f"{payload.get('n_out_reference')})")
+    emit(
+        f"#   source input: {payload.get('source_input')} "
+        f"({payload['n_px_reference']} px, field of view {reference_fov:g} nm, n_out "
+        f"{payload.get('n_out_reference')})"
+    )
     emit(f"#   source report: {payload.get('source_report')}")
-    emit(f"#   method={payload.get('method')}, fallback={bundle['fallback']}, "
-         f"lambda={payload.get('lambda_nm')} nm, Q_a_px={payload.get('q_a_px')}, "
-         f"Q_b_px={payload.get('q_b_px')}")
-    emit(f"#   pad={payload['pad']}, order={payload['order']}, mask coverage "
-         f"{100 * float(payload.get('mask_coverage_fraction', 0.0)):.2f} %")
-    emit("# the bundle is applied as given: no peak detection and no self-check are "
-         "re-run on this dataset")
+    emit(
+        f"#   method={payload.get('method')}, fallback={bundle['fallback']}, "
+        f"lambda={payload.get('lambda_nm')} nm, Q_a_px={payload.get('q_a_px')}, "
+        f"Q_b_px={payload.get('q_b_px')}"
+    )
+    emit(
+        f"#   pad={payload['pad']}, order={payload['order']}, mask coverage "
+        f"{100 * float(payload.get('mask_coverage_fraction', 0.0)):.2f} %"
+    )
+    emit(
+        "# the bundle is applied as given: no peak detection and no self-check are "
+        "re-run on this dataset"
+    )
     if fov_mismatch > args.fov_tol:
-        emit(f"# WARNING: the target field of view {args.size_nm:g} nm differs from the "
-             f"reference {reference_fov:g} nm by {100 * fov_mismatch:.3f} % (tolerance "
-             f"{100 * args.fov_tol:.3f} %): the bundle belongs to another scan, so the "
-             "transferred field is only meaningful if the two images really cover the "
-             "same area")
+        emit(
+            f"# WARNING: the target field of view {args.size_nm:g} nm differs from the "
+            f"reference {reference_fov:g} nm by {100 * fov_mismatch:.3f} % (tolerance "
+            f"{100 * args.fov_tol:.3f} %): the bundle belongs to another scan, so the "
+            "transferred field is only meaningful if the two images really cover the "
+            "same area"
+        )
 
     rescaled = False
     u_stats = {}
     if bundle["fallback"]:
-        emit("# WARNING: the bundle carries method = identity_fallback: the fit stage "
-             "found no usable 1x1 ring and corrected nothing. The input is copied "
-             "verbatim with its own canvas and field of view; do not treat this output "
-             "as a corrected image.")
+        emit(
+            "# WARNING: the bundle carries method = identity_fallback: the fit stage "
+            "found no usable 1x1 ring and corrected nothing. The input is copied "
+            "verbatim with its own canvas and field of view; do not treat this output "
+            "as a corrected image."
+        )
         corrected = np.array(topo, dtype=float, copy=True)
         n_out, half, magnitude_px, size_out = n, 0, 0.0, float(args.size_nm)
     else:
@@ -198,23 +257,46 @@ def main(argv=None):
         valid = field["valid"]
         u_nm, valid = lf.resample_field(u_nm, valid, reference_fov, n, args.size_nm)
         rescaled = u_nm.shape[1] != int(payload["n_px_reference"]) or (
-            float(args.size_nm) != reference_fov)
+            float(args.size_nm) != reference_fov
+        )
         values = u_nm[:, valid] if bool(np.any(valid)) else np.zeros((2, 0))
-        u_stats = {"u_x": {"rms_nm": float(np.sqrt(np.mean(values[0] ** 2)))
-                           if values.size else 0.0},
-                   "u_y": {"rms_nm": float(np.sqrt(np.mean(values[1] ** 2)))
-                           if values.size else 0.0}}
+        u_stats = {
+            "u_x": {
+                "rms_nm": float(np.sqrt(np.mean(values[0] ** 2)))
+                if values.size
+                else 0.0
+            },
+            "u_y": {
+                "rms_nm": float(np.sqrt(np.mean(values[1] ** 2)))
+                if values.size
+                else 0.0
+            },
+        }
         corrected, n_out, half, magnitude_px = lf.warp_by_field(
-            topo, u_nm, args.size_nm, valid=valid, pad=int(payload["pad"]),
-            order=int(payload["order"]))
+            topo,
+            u_nm,
+            args.size_nm,
+            valid=valid,
+            pad=int(payload["pad"]),
+            order=int(payload["order"]),
+        )
         size_out = float(args.size_nm) * n_out / n
-        emit(f"# u field: {u_nm.shape[1]} x {u_nm.shape[1]} on the target grid"
-             + (" (rescaled from the reference grid)" if rescaled
-                else " (identical grid, used verbatim)"))
+        emit(
+            f"# u field: {u_nm.shape[1]} x {u_nm.shape[1]} on the target grid"
+            + (
+                " (rescaled from the reference grid)"
+                if rescaled
+                else " (identical grid, used verbatim)"
+            )
+        )
 
-    nan_fraction = 1.0 - float(np.count_nonzero(np.isfinite(corrected))) / corrected.size
-    emit(f"# corrected canvas: {n_out} x {n_out} px, field of view {size_out:.4f} nm "
-         f"({size_out / n_out:.6f} nm/px), NaN {100 * nan_fraction:.2f} %")
+    nan_fraction = (
+        1.0 - float(np.count_nonzero(np.isfinite(corrected))) / corrected.size
+    )
+    emit(
+        f"# corrected canvas: {n_out} x {n_out} px, field of view {size_out:.4f} nm "
+        f"({size_out / n_out:.6f} nm/px), NaN {100 * nan_fraction:.2f} %"
+    )
 
     out_csv = outdir / f"{stem}_corrected.csv"
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
@@ -241,8 +323,11 @@ def main(argv=None):
     logged = np.log(1.0 + magnitude)
     span = np.log(1.0 + hi) - np.log(1.0 + lo)
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0), cmap="inferno",
-              origin="lower")
+    ax.imshow(
+        np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0),
+        cmap="inferno",
+        origin="lower",
+    )
     ax.set_xticks([])
     ax.set_yticks([])
     ax.axis("off")
@@ -290,8 +375,10 @@ def main(argv=None):
     }
     (outdir / "apply_report.json").write_text(json.dumps(report, indent=2) + "\n")
     emit("")
-    emit(f"# written: {out_csv}, {out_fft2}, {out_png}, {out_fft_png}, "
-         f"{outdir / 'apply_report.json'}, {outdir / 'correction.log'}")
+    emit(
+        f"# written: {out_csv}, {out_fft2}, {out_png}, {out_fft_png}, "
+        f"{outdir / 'apply_report.json'}, {outdir / 'correction.log'}"
+    )
     (outdir / "correction.log").write_text("\n".join(log_lines) + "\n")
     return 0
 

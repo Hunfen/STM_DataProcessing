@@ -46,6 +46,7 @@ unconditionally before any artifact is written (``basis_canvas_check``).
 Everything here is geometry and signal processing: no physical statement is made
 anywhere, and no ring is ever named after a k-space high-symmetry point.
 """
+
 from __future__ import annotations
 
 import json
@@ -93,13 +94,17 @@ BAD_COLOR = "#b0b0b0"
 
 # Members of the two rings in the {b1, b2} basis (the negatives complete them).
 RING_1X1_MEMBERS = ((1.0, 0.0), (0.0, 1.0), (1.0, -1.0))
-RING_R3_MEMBERS = ((1.0 / 3.0, 1.0 / 3.0), (2.0 / 3.0, -1.0 / 3.0),
-                   (1.0 / 3.0, -2.0 / 3.0))
+RING_R3_MEMBERS = (
+    (1.0 / 3.0, 1.0 / 3.0),
+    (2.0 / 3.0, -1.0 / 3.0),
+    (1.0 / 3.0, -2.0 / 3.0),
+)
 
 FOV_FROM_LOG_HELP = (
     "read the field of view from a correction log; the "
     "'# corrected canvas: ... field of view <value> nm' line wins, otherwise the "
-    "last 'field of view <value> nm' line of the log is used")
+    "last 'field of view <value> nm' line of the log is used"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -109,15 +114,17 @@ def setup_style():
     """Plot style of the skill (no usetex: broken with mpl 3.10 + TeX Live 2026)."""
     import matplotlib
 
-    matplotlib.rcParams.update({
-        "text.usetex": False,
-        "mathtext.fontset": "cm",
-        "font.family": "serif",
-        "font.serif": ["Palatino"],
-        "axes.unicode_minus": False,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    matplotlib.rcParams.update(
+        {
+            "text.usetex": False,
+            "mathtext.fontset": "cm",
+            "font.family": "serif",
+            "font.serif": ["Palatino"],
+            "axes.unicode_minus": False,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
 
 
 def save_map(path, data, cmap="inferno", vmin=None, vmax=None, dpi=150, size=4.0):
@@ -166,20 +173,23 @@ def parse_q_spec(text):
             numerator, _, denominator = token.partition("/")
             try:
                 return float(numerator) / float(denominator)
-            except (ValueError, ZeroDivisionError):
+            except ValueError, ZeroDivisionError:
                 raise SystemExit(
-                    f"--q {text!r}: cannot read the fraction {token!r}") from None
+                    f"--q {text!r}: cannot read the fraction {token!r}"
+                ) from None
         try:
             return float(token)
         except ValueError:
             raise SystemExit(
-                f"--q {text!r}: cannot read the number {token!r}") from None
+                f"--q {text!r}: cannot read the number {token!r}"
+            ) from None
 
     return value(parts[0]), value(parts[1])
 
 
 def format_hk(h, k):
     """Compact English label of an (h, k) pair for the log."""
+
     def one(token):
         if abs(token - round(token)) < 1e-9:
             return f"{round(token)}"
@@ -203,11 +213,18 @@ def parse_fov_log(text):
         hit = pattern.search(line)
         if not hit:
             continue
-        matches.append({"value": float(hit.group(1)),
-                        "corrected": "corrected canvas" in line,
-                        "label": ("corrected canvas line" if "corrected canvas" in line
-                                  else "input canvas line"),
-                        "line": line.strip()})
+        matches.append(
+            {
+                "value": float(hit.group(1)),
+                "corrected": "corrected canvas" in line,
+                "label": (
+                    "corrected canvas line"
+                    if "corrected canvas" in line
+                    else "input canvas line"
+                ),
+                "line": line.strip(),
+            }
+        )
     return matches
 
 
@@ -220,7 +237,8 @@ def field_of_view_from_log(path):
         text = source.read_text()
     except OSError as exc:
         raise SystemExit(
-            f"--size-nm-from-log {source}: cannot read it ({exc})") from exc
+            f"--size-nm-from-log {source}: cannot read it ({exc})"
+        ) from exc
     matches = parse_fov_log(text)
     if not matches:
         raise SystemExit(f"no 'field of view <value> nm' line in {source}")
@@ -267,8 +285,9 @@ def rotate_basis(basis, orientation_deg):
         return np.asarray(package_rotate(array, float(orientation_deg)), dtype=float)
     except Exception:  # any import problem falls back to the copy
         theta = np.radians(float(orientation_deg))
-        rot = np.array([[np.cos(theta), -np.sin(theta)],
-                        [np.sin(theta), np.cos(theta)]])
+        rot = np.array(
+            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+        )
         return array @ rot.T
 
 
@@ -303,7 +322,7 @@ def ring_radii(payload):
         value = item.get("radius_nm_inv") if isinstance(item, dict) else None
         try:
             value = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if np.isfinite(value) and value > 0.0:
             radii.append(value)
@@ -333,11 +352,15 @@ def anchored_ring(payload, radius, labelled):
             continue
         for big in radii:
             if big > small and _close(big / small, np.sqrt(3.0)):
-                return "r3", ("rings_after shows the ratio-1/sqrt(3) pair "
-                              f"{small:.6f} and {big:.6f} nm^-1 and the radius keys "
-                              "match the inner one, so they refer to ring_r3")
-    return "1x1", ("rings_after shows no ratio-1/sqrt(3) pair containing the radius "
-                   "keys, so they refer to ring_1x1")
+                return "r3", (
+                    "rings_after shows the ratio-1/sqrt(3) pair "
+                    f"{small:.6f} and {big:.6f} nm^-1 and the radius keys "
+                    "match the inner one, so they refer to ring_r3"
+                )
+    return "1x1", (
+        "rings_after shows no ratio-1/sqrt(3) pair containing the radius "
+        "keys, so they refer to ring_1x1"
+    )
 
 
 def basis_ring_warning(payload, radius, anchored, anchored_radius):
@@ -358,10 +381,12 @@ def basis_ring_warning(payload, radius, anchored, anchored_radius):
         inner = nearest
     outer = float(np.sqrt(3.0) * inner)
     if _close(radius, inner) and not _close(radius, outer):
-        return (f"the resolved |b1| = {float(radius):.6f} nm^-1 matches the report's "
-                f"anchored ring_r3 at {inner:.6f} nm^-1, which sits at 1/sqrt(3) of "
-                f"the ring_1x1 ring at {outer:.6f} nm^-1: the chosen basis is the r3 "
-                "ring, not the ring_1x1 ring")
+        return (
+            f"the resolved |b1| = {float(radius):.6f} nm^-1 matches the report's "
+            f"anchored ring_r3 at {inner:.6f} nm^-1, which sits at 1/sqrt(3) of "
+            f"the ring_1x1 ring at {outer:.6f} nm^-1: the chosen basis is the r3 "
+            "ring, not the ring_1x1 ring"
+        )
     return None
 
 
@@ -389,21 +414,29 @@ def basis_from_report(path):
         payload = json.loads(source.read_text())
     except (OSError, ValueError) as exc:
         raise SystemExit(
-            f"--basis-from {source}: cannot read the JSON report ({exc})") from exc
+            f"--basis-from {source}: cannot read the JSON report ({exc})"
+        ) from exc
     if not isinstance(payload, dict):
         raise SystemExit(f"--basis-from {source}: expected a JSON object")
 
     lockin = payload.get("lockin")
-    lockin_lambda = (float(lockin["lambda_nm"])
-                     if isinstance(lockin, dict) and lockin.get("lambda_nm") is not None
-                     else None)
+    lockin_lambda = (
+        float(lockin["lambda_nm"])
+        if isinstance(lockin, dict) and lockin.get("lambda_nm") is not None
+        else None
+    )
     common = {
         "path": str(source),
-        "corrected_nm_per_px": (float(payload["corrected_nm_per_px"])
-                                if payload.get("corrected_nm_per_px") else None),
-        "corrected_field_of_view_nm": (float(payload["corrected_field_of_view_nm"])
-                                       if payload.get("corrected_field_of_view_nm")
-                                       else None),
+        "corrected_nm_per_px": (
+            float(payload["corrected_nm_per_px"])
+            if payload.get("corrected_nm_per_px")
+            else None
+        ),
+        "corrected_field_of_view_nm": (
+            float(payload["corrected_field_of_view_nm"])
+            if payload.get("corrected_field_of_view_nm")
+            else None
+        ),
         "report_lockin_lambda_nm": lockin_lambda,
         "notes": [],
         "warnings": [],
@@ -415,27 +448,45 @@ def basis_from_report(path):
         b1 = q_a
         b2 = q_a + q_b
         notes = ["lawler-fujita style report: b1 = q_a, b2 = q_a + q_b = -q_c"]
-        angle = float(np.degrees(np.arccos(np.clip(
-            float(q_a @ q_b) / (float(np.hypot(*q_a)) * float(np.hypot(*q_b))),
-            -1.0, 1.0))))
-        notes.append(f"measured angle between q_a and q_b: {angle:.3f} deg "
-                     f"(120 deg expected for the ring_1x1 pair)")
+        angle = float(
+            np.degrees(
+                np.arccos(
+                    np.clip(
+                        float(q_a @ q_b)
+                        / (float(np.hypot(*q_a)) * float(np.hypot(*q_b))),
+                        -1.0,
+                        1.0,
+                    )
+                )
+            )
+        )
+        notes.append(
+            f"measured angle between q_a and q_b: {angle:.3f} deg "
+            f"(120 deg expected for the ring_1x1 pair)"
+        )
         q_c = _pair(payload.get("q_c_nm_inv"))
         if q_c is not None:
-            notes.append(f"|q_c - (-(q_a + q_b))| = "
-                         f"{float(np.hypot(*(q_c + q_a + q_b))):.6g} nm^-1")
-        detected = ["q_a_nm_inv", "q_b_nm_inv"] + (["q_c_nm_inv"] if q_c is not None
-                                                   else [])
-        return dict(common, kind="correction_report_lawler_fujita",
-                    b1_nm_inv=[float(value) for value in b1],
-                    b2_nm_inv=[float(value) for value in b2],
-                    detected_keys=detected, notes=notes)
+            notes.append(
+                f"|q_c - (-(q_a + q_b))| = "
+                f"{float(np.hypot(*(q_c + q_a + q_b))):.6g} nm^-1"
+            )
+        detected = ["q_a_nm_inv", "q_b_nm_inv"] + (
+            ["q_c_nm_inv"] if q_c is not None else []
+        )
+        return dict(
+            common,
+            kind="correction_report_lawler_fujita",
+            b1_nm_inv=[float(value) for value in b1],
+            b2_nm_inv=[float(value) for value in b2],
+            detected_keys=detected,
+            notes=notes,
+        )
 
     orientation = payload.get("orientation_deg")
     measured = payload.get("b1_measured_nm_inv_after")
     ideal = payload.get("b1_ideal_nm_inv")
     implied = payload.get("implied_lattice_after")
-    a_1x1 = (implied.get("a_1x1_nm") if isinstance(implied, dict) else None)
+    a_1x1 = implied.get("a_1x1_nm") if isinstance(implied, dict) else None
     if orientation is not None and (measured or ideal or a_1x1):
         notes = []
         warnings = []
@@ -453,49 +504,67 @@ def basis_from_report(path):
         notes.append(f"anchored ring of the radius keys: {reason}")
         if a_1x1 is not None and anchored == "r3":
             radius = 4.0 * np.pi / (np.sqrt(3.0) * float(a_1x1))
-            notes.append("affine report anchored on ring_r3 -> 1x1 basis radius from "
-                         "implied_lattice_after.a_1x1_nm = 4 pi / (sqrt(3) a_1x1) = "
-                         f"{radius:.6f} nm^-1 (anchor_ring = r3, the a_1x1 key is the "
-                         "ring_1x1 lattice constant by definition)")
+            notes.append(
+                "affine report anchored on ring_r3 -> 1x1 basis radius from "
+                "implied_lattice_after.a_1x1_nm = 4 pi / (sqrt(3) a_1x1) = "
+                f"{radius:.6f} nm^-1 (anchor_ring = r3, the a_1x1 key is the "
+                "ring_1x1 lattice constant by definition)"
+            )
         elif radius_raw is None:
             radius = 4.0 * np.pi / (np.sqrt(3.0) * float(a_1x1))
-            notes.append("radius from implied_lattice_after.a_1x1_nm = "
-                         f"{float(a_1x1):.6f} nm -> 4 pi / (sqrt(3) a) = "
-                         f"{radius:.6f} nm^-1")
+            notes.append(
+                "radius from implied_lattice_after.a_1x1_nm = "
+                f"{float(a_1x1):.6f} nm -> 4 pi / (sqrt(3) a) = "
+                f"{radius:.6f} nm^-1"
+            )
         elif anchored == "r3":
             radius = float(np.sqrt(3.0) * radius_raw)
-            notes.append("affine report anchored on ring_r3 -> 1x1 basis radius = "
-                         f"sqrt(3) * {radius_key} = {radius:.6f} nm^-1")
+            notes.append(
+                "affine report anchored on ring_r3 -> 1x1 basis radius = "
+                f"sqrt(3) * {radius_key} = {radius:.6f} nm^-1"
+            )
         else:
             radius = radius_raw
             notes.append(f"radius from {radius_key} = {radius:.6f} nm^-1")
         basis = hexagon_from_radius(radius, float(orientation))
-        notes.append("affine style report: b1 = R (cos t, sin t) with "
-                     f"orientation_deg = {float(orientation):.6f} deg, b2 = b1 "
-                     "rotated by +60 deg (bragg_peak rotate_basis)")
+        notes.append(
+            "affine style report: b1 = R (cos t, sin t) with "
+            f"orientation_deg = {float(orientation):.6f} deg, b2 = b1 "
+            "rotated by +60 deg (bragg_peak rotate_basis)"
+        )
         cross_check = basis_ring_warning(payload, radius, anchored, radius_raw)
         if cross_check:
             warnings.append(cross_check)
-        detected = [name for name, value in (("orientation_deg", orientation),
-                                             ("b1_measured_nm_inv_after", measured),
-                                             ("b1_ideal_nm_inv", ideal),
-                                             ("implied_lattice_after", implied),
-                                             ("anchor_ring",
-                                              payload.get("anchor_ring")))
-                    if value is not None]
+        detected = [
+            name
+            for name, value in (
+                ("orientation_deg", orientation),
+                ("b1_measured_nm_inv_after", measured),
+                ("b1_ideal_nm_inv", ideal),
+                ("implied_lattice_after", implied),
+                ("anchor_ring", payload.get("anchor_ring")),
+            )
+            if value is not None
+        ]
         if ring_radii(payload):
             detected.append("rings_after")
-        return dict(common, kind="correction_report_affine",
-                    b1_nm_inv=[float(value) for value in basis[0]],
-                    b2_nm_inv=[float(value) for value in basis[1]],
-                    detected_keys=detected, notes=notes, warnings=warnings)
+        return dict(
+            common,
+            kind="correction_report_affine",
+            b1_nm_inv=[float(value) for value in basis[0]],
+            b2_nm_inv=[float(value) for value in basis[1]],
+            detected_keys=detected,
+            notes=notes,
+            warnings=warnings,
+        )
 
     raise SystemExit(
         f"--basis-from {source}: no recognised reciprocal basis in the report. "
         "Expected either the lawler-fujita keys 'q_a_nm_inv' and 'q_b_nm_inv' (a "
         "120 deg ring_1x1 pair), or the affine keys 'orientation_deg' plus "
         "'b1_measured_nm_inv_after' (fallback 'b1_ideal_nm_inv', fallback "
-        "'implied_lattice_after.a_1x1_nm'). Use --basis-px for an explicit basis.")
+        "'implied_lattice_after.a_1x1_nm'). Use --basis-px for an explicit basis."
+    )
 
 
 def basis_from_px(text):
@@ -512,13 +581,21 @@ def basis_from_px(text):
         if len(values) != 2:
             raise SystemExit(f"--basis-px {text!r}: '{block}' is not a pair")
         vectors.append(values)
-    return {"kind": "command_line_px", "path": None, "b1_px": vectors[0],
-            "b2_px": vectors[1], "detected_keys": ["--basis-px"],
-            "report_lockin_lambda_nm": None, "corrected_nm_per_px": None,
-            "corrected_field_of_view_nm": None,
-            "warnings": [],
-            "notes": ["command line escape hatch: b1, b2 are signed fftshift "
-                      "offsets in px on the corrected canvas"]}
+    return {
+        "kind": "command_line_px",
+        "path": None,
+        "b1_px": vectors[0],
+        "b2_px": vectors[1],
+        "detected_keys": ["--basis-px"],
+        "report_lockin_lambda_nm": None,
+        "corrected_nm_per_px": None,
+        "corrected_field_of_view_nm": None,
+        "warnings": [],
+        "notes": [
+            "command line escape hatch: b1, b2 are signed fftshift "
+            "offsets in px on the corrected canvas"
+        ],
+    }
 
 
 def resolve_basis(basis, n_px, nm_per_px):
@@ -540,8 +617,11 @@ def resolve_basis(basis, n_px, nm_per_px):
         scale = float(report_scale) if report_scale else float(nm_per_px)
         b1_rad_px = nm_inv_to_rad_px(b1_nm_inv, scale)
         b2_rad_px = nm_inv_to_rad_px(b2_nm_inv, scale)
-        provenance = ("correction report corrected_nm_per_px"
-                      if report_scale else "canvas nm/px = L / N")
+        provenance = (
+            "correction report corrected_nm_per_px"
+            if report_scale
+            else "canvas nm/px = L / N"
+        )
     resolved = dict(basis)
     resolved.update(
         b1_nm_inv=[float(value) for value in b1_nm_inv],
@@ -556,9 +636,18 @@ def resolve_basis(basis, n_px, nm_per_px):
         b2_angle_deg=float(np.degrees(np.arctan2(b2_nm_inv[1], b2_nm_inv[0]))),
         abs_b1_nm_inv=float(np.hypot(*b1_nm_inv)),
     )
-    resolved["angle_between_deg"] = float(np.degrees(np.arccos(np.clip(
-        float(b1_nm_inv @ b2_nm_inv)
-        / (float(np.hypot(*b1_nm_inv)) * float(np.hypot(*b2_nm_inv))), -1.0, 1.0))))
+    resolved["angle_between_deg"] = float(
+        np.degrees(
+            np.arccos(
+                np.clip(
+                    float(b1_nm_inv @ b2_nm_inv)
+                    / (float(np.hypot(*b1_nm_inv)) * float(np.hypot(*b2_nm_inv))),
+                    -1.0,
+                    1.0,
+                )
+            )
+        )
+    )
     return resolved
 
 
@@ -600,14 +689,20 @@ def fold_deg(angle_deg, period_deg=60.0):
 def fold_residual_deg(angle_deg, reference_deg, period_deg=60.0):
     """``angle - reference`` wrapped into ``(-period/2, period/2]``."""
     half = 0.5 * float(period_deg)
-    return float((float(angle_deg) - float(reference_deg) + half)
-                 % float(period_deg) - half)
+    return float(
+        (float(angle_deg) - float(reference_deg) + half) % float(period_deg) - half
+    )
 
 
-def canvas_ring_orientation(image, size_nm, radius_px, reference_deg,
-                            patch_half=BASIS_RING_DETECTION_PATCH_HALF,
-                            band_fraction=BASIS_RING_ORIENTATION_BAND,
-                            max_candidates=BASIS_RING_DETECTION_MAX_CANDIDATES):
+def canvas_ring_orientation(
+    image,
+    size_nm,
+    radius_px,
+    reference_deg,
+    patch_half=BASIS_RING_DETECTION_PATCH_HALF,
+    band_fraction=BASIS_RING_ORIENTATION_BAND,
+    max_candidates=BASIS_RING_DETECTION_MAX_CANDIDATES,
+):
     """Orientation of the canvas' own ring_1x1, measured on the corrected canvas.
 
     The detector is ``bragg_peak.detect_bragg_peaks`` (the call of the sibling
@@ -624,61 +719,96 @@ def canvas_ring_orientation(image, size_nm, radius_px, reference_deg,
     ``member_angles_deg``, ``radius_px``, ``detector`` and an English ``message``.
     """
     reference = float(reference_deg)
-    record = {"status": "no_members", "orientation_deg": reference, "delta_deg": 0.0,
-              "n_members": 0, "spread_deg": float("nan"), "member_angles_deg": [],
-              "members": [], "radius_px": float(radius_px),
-              "band_fraction": float(band_fraction), "patch_half": int(patch_half),
-              "max_candidates": int(max_candidates),
-              "detector": "bragg_peak.detect_bragg_peaks", "message": ""}
+    record = {
+        "status": "no_members",
+        "orientation_deg": reference,
+        "delta_deg": 0.0,
+        "n_members": 0,
+        "spread_deg": float("nan"),
+        "member_angles_deg": [],
+        "members": [],
+        "radius_px": float(radius_px),
+        "band_fraction": float(band_fraction),
+        "patch_half": int(patch_half),
+        "max_candidates": int(max_candidates),
+        "detector": "bragg_peak.detect_bragg_peaks",
+        "message": "",
+    }
     try:
         from stm_data_processing.utils.bragg_peak import detect_bragg_peaks
     except Exception as exc:  # an import problem is reported, not raised
-        record.update(status="no_detector",
-                      message=("the bragg_peak detector is not importable "
-                               f"({exc}); the orientation of the report is kept"))
+        record.update(
+            status="no_detector",
+            message=(
+                "the bragg_peak detector is not importable "
+                f"({exc}); the orientation of the report is kept"
+            ),
+        )
         return record
-    detection = detect_bragg_peaks(np.asarray(image, dtype=float), float(size_nm),
-                                   q_max_px=1.5 * float(radius_px),
-                                   max_candidates=int(max_candidates),
-                                   patch_half=int(patch_half), subtract_plane=False,
-                                   return_fft2=False)
+    detection = detect_bragg_peaks(
+        np.asarray(image, dtype=float),
+        float(size_nm),
+        q_max_px=1.5 * float(radius_px),
+        max_candidates=int(max_candidates),
+        patch_half=int(patch_half),
+        subtract_plane=False,
+        return_fft2=False,
+    )
     for peak in detection.peaks:
         q_px = np.asarray(peak.q_px, dtype=float)
         member_radius = float(np.hypot(*q_px))
         if member_radius <= 0.0:
             continue
-        if abs(member_radius - float(radius_px)) > float(band_fraction) * float(radius_px):
+        if abs(member_radius - float(radius_px)) > float(band_fraction) * float(
+            radius_px
+        ):
             continue
         angle = float(np.degrees(np.arctan2(q_px[1], q_px[0])))
-        record["members"].append({"q_px": [float(q_px[0]), float(q_px[1])],
-                                  "radius_px": member_radius, "angle_deg": angle,
-                                  "folded_deg": fold_deg(angle),
-                                  "residual_deg": fold_residual_deg(angle, reference),
-                                  "amplitude": float(peak.amplitude)})
+        record["members"].append(
+            {
+                "q_px": [float(q_px[0]), float(q_px[1])],
+                "radius_px": member_radius,
+                "angle_deg": angle,
+                "folded_deg": fold_deg(angle),
+                "residual_deg": fold_residual_deg(angle, reference),
+                "amplitude": float(peak.amplitude),
+            }
+        )
     if not record["members"]:
-        record["message"] = (f"no ring_1x1 member within "
-                             f"{100.0 * float(band_fraction):.0f} % of "
-                             f"{float(radius_px):.3f} px was detected on the canvas")
+        record["message"] = (
+            f"no ring_1x1 member within "
+            f"{100.0 * float(band_fraction):.0f} % of "
+            f"{float(radius_px):.3f} px was detected on the canvas"
+        )
         return record
-    weight = np.asarray([member["amplitude"] for member in record["members"]],
-                        dtype=float)
+    weight = np.asarray(
+        [member["amplitude"] for member in record["members"]], dtype=float
+    )
     residual = np.radians([member["residual_deg"] for member in record["members"]])
     z = complex(np.sum(weight * np.exp(6j * residual)))  # 6 = 2 pi / (60 deg in rad)
     if abs(z) == 0.0:
         record["message"] = "the detected ring_1x1 members cancel in the circular mean"
         return record
     delta = float(np.degrees(np.angle(z)) / 6.0)
-    spread = max(abs(fold_residual_deg(member["residual_deg"], delta))
-                 for member in record["members"])
-    record.update(status="measured", orientation_deg=reference + delta,
-                  delta_deg=delta, n_members=len(record["members"]),
-                  spread_deg=float(spread),
-                  member_angles_deg=[member["angle_deg"] for member in record["members"]],
-                  message=(f"{len(record['members'])} ring_1x1 member(s) within "
-                           f"{100.0 * float(band_fraction):.0f} % of "
-                           f"{float(radius_px):.3f} px; the amplitude-weighted "
-                           f"azimuth difference to the report orientation is "
-                           f"{delta:+.4f} deg (spread {spread:.4f} deg)"))
+    spread = max(
+        abs(fold_residual_deg(member["residual_deg"], delta))
+        for member in record["members"]
+    )
+    record.update(
+        status="measured",
+        orientation_deg=reference + delta,
+        delta_deg=delta,
+        n_members=len(record["members"]),
+        spread_deg=float(spread),
+        member_angles_deg=[member["angle_deg"] for member in record["members"]],
+        message=(
+            f"{len(record['members'])} ring_1x1 member(s) within "
+            f"{100.0 * float(band_fraction):.0f} % of "
+            f"{float(radius_px):.3f} px; the amplitude-weighted "
+            f"azimuth difference to the report orientation is "
+            f"{delta:+.4f} deg (spread {spread:.4f} deg)"
+        ),
+    )
     return record
 
 
@@ -689,8 +819,10 @@ def rebase_orientation(basis, delta_deg, note):
     the frame of the two vectors changes.  ``note`` is appended to the basis notes
     (and therefore to ``basis_source.notes`` and to the log).
     """
-    vectors = rotate_basis(np.asarray([basis["b1_nm_inv"], basis["b2_nm_inv"]],
-                                      dtype=float), float(delta_deg))
+    vectors = rotate_basis(
+        np.asarray([basis["b1_nm_inv"], basis["b2_nm_inv"]], dtype=float),
+        float(delta_deg),
+    )
     updated = dict(basis)
     updated["b1_nm_inv"] = [float(value) for value in vectors[0]]
     updated["b2_nm_inv"] = [float(value) for value in vectors[1]]
@@ -698,9 +830,16 @@ def rebase_orientation(basis, delta_deg, note):
     return updated
 
 
-def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
-                       band_fraction=BASIS_RING_BAND_FRACTION,
-                       member_half_px=BASIS_RING_MEMBER_HALF_PX, nan_fill=0.0):
+def basis_canvas_check(
+    image,
+    members_rad_px,
+    radius_px,
+    n_px,
+    lambda_px_value,
+    band_fraction=BASIS_RING_BAND_FRACTION,
+    member_half_px=BASIS_RING_MEMBER_HALF_PX,
+    nan_fill=0.0,
+):
     """Unconditional validation of a resolved ring_1x1 basis against the canvas.
 
     The strongest spectrum magnitude inside the annulus
@@ -720,36 +859,49 @@ def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
     columns = offsets[None, :]
     rows = offsets[:, None]
     radial = np.hypot(columns, rows)
-    band = ((radial >= float(radius_px) * (1.0 - float(band_fraction)))
-            & (radial <= float(radius_px) * (1.0 + float(band_fraction))))
+    band = (radial >= float(radius_px) * (1.0 - float(band_fraction))) & (
+        radial <= float(radius_px) * (1.0 + float(band_fraction))
+    )
     record = {
-        "band_fraction": float(band_fraction), "radius_px": float(radius_px),
+        "band_fraction": float(band_fraction),
+        "radius_px": float(radius_px),
         "member_half_px": float(member_half_px),
         "strength_fraction": float(BASIS_RING_STRENGTH_FRACTION),
         "offset_factor": float(BASIS_RING_OFFSET_FACTOR),
         "window_radius_px": float(n / (TWO_PI * float(lambda_px_value))),
         "annulus_pixels": int(np.count_nonzero(band)),
-        "annulus_peak_px": None, "annulus_peak_radius_px": None,
-        "annulus_peak_angle_deg": None, "measured_angle_deg": None,
-        "resolved_angle_deg": None, "annulus_strength": 0.0,
-        "member_strength": 0.0, "strength_ratio": float("nan"),
-        "worst_offset_px": None, "offset_tolerance_px": None,
-        "mismatch": False, "reason": None, "summary": "",
+        "annulus_peak_px": None,
+        "annulus_peak_radius_px": None,
+        "annulus_peak_angle_deg": None,
+        "measured_angle_deg": None,
+        "resolved_angle_deg": None,
+        "annulus_strength": 0.0,
+        "member_strength": 0.0,
+        "strength_ratio": float("nan"),
+        "worst_offset_px": None,
+        "offset_tolerance_px": None,
+        "mismatch": False,
+        "reason": None,
+        "summary": "",
     }
     if not bool(band.any()):
-        record["reason"] = (f"no FFT pixel in the comparison annulus "
-                            f"{float(radius_px):.3f} px +/- "
-                            f"{100.0 * float(band_fraction):.0f} %")
+        record["reason"] = (
+            f"no FFT pixel in the comparison annulus "
+            f"{float(radius_px):.3f} px +/- "
+            f"{100.0 * float(band_fraction):.0f} %"
+        )
         record["summary"] = f"not applicable: {record['reason']}"
         return record
     magnitude = canvas_spectrum_magnitude(image, nan_fill)
     band_values = np.where(band, magnitude, 0.0)
-    peak_row, peak_column = np.unravel_index(int(np.argmax(band_values)),
-                                             band_values.shape)
+    peak_row, peak_column = np.unravel_index(
+        int(np.argmax(band_values)), band_values.shape
+    )
     annulus_strength = float(band_values[peak_row, peak_column])
     if annulus_strength <= 0.0:
-        record["reason"] = ("the comparison annulus carries no spectrum magnitude "
-                            "(a constant canvas)")
+        record["reason"] = (
+            "the comparison annulus carries no spectrum magnitude (a constant canvas)"
+        )
         record["summary"] = f"not applicable: {record['reason']}"
         return record
     peak_px = [float(columns[0, peak_column]), float(rows[peak_row, 0])]
@@ -758,15 +910,17 @@ def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
     member_angles = []
     for member in members_rad_px:
         q_px = rad_px_to_px_offsets(member, n)
-        window = ((np.abs(columns - q_px[0]) <= float(member_half_px))
-                  & (np.abs(rows - q_px[1]) <= float(member_half_px)))
+        window = (np.abs(columns - q_px[0]) <= float(member_half_px)) & (
+            np.abs(rows - q_px[1]) <= float(member_half_px)
+        )
         if bool(window.any()):
             member_strength = max(member_strength, float(magnitude[window].max()))
         member_angles.append(float(np.degrees(np.arctan2(q_px[1], q_px[0]))))
     ratio = member_strength / annulus_strength
-    worst_offset = max(float(radius_px)
-                       * abs(np.radians(fold_residual_deg(angle, measured_angle)))
-                       for angle in member_angles)
+    worst_offset = max(
+        float(radius_px) * abs(np.radians(fold_residual_deg(angle, measured_angle)))
+        for angle in member_angles
+    )
     tolerance = BASIS_RING_OFFSET_FACTOR * record["window_radius_px"]
     mismatch = bool(ratio < BASIS_RING_STRENGTH_FRACTION or worst_offset > tolerance)
     record.update(
@@ -774,10 +928,16 @@ def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
         annulus_peak_radius_px=float(np.hypot(*peak_px)),
         annulus_peak_angle_deg=measured_angle,
         measured_angle_deg=fold_deg(measured_angle),
-        resolved_angle_deg=sorted({round(fold_deg(angle), 9) for angle in member_angles}),
-        annulus_strength=annulus_strength, member_strength=member_strength,
-        strength_ratio=float(ratio), worst_offset_px=float(worst_offset),
-        offset_tolerance_px=float(tolerance), mismatch=mismatch)
+        resolved_angle_deg=sorted(
+            {round(fold_deg(angle), 9) for angle in member_angles}
+        ),
+        annulus_strength=annulus_strength,
+        member_strength=member_strength,
+        strength_ratio=float(ratio),
+        worst_offset_px=float(worst_offset),
+        offset_tolerance_px=float(tolerance),
+        mismatch=mismatch,
+    )
     record["summary"] = (
         f"annulus {float(radius_px):.4f} px +/- "
         f"{100.0 * float(band_fraction):.0f} %, annulus peak {annulus_strength:.6g} at "
@@ -785,8 +945,8 @@ def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
         f"{record['measured_angle_deg']:.4f} deg), the resolved members reach "
         f"{member_strength:.6g} -> ratio {ratio:.6f} (threshold "
         f"{BASIS_RING_STRENGTH_FRACTION:g}), worst member offset {worst_offset:.4f} px "
-        f"(tolerance {tolerance:.4f} px) -> "
-        + ("MISMATCH" if mismatch else "OK"))
+        f"(tolerance {tolerance:.4f} px) -> " + ("MISMATCH" if mismatch else "OK")
+    )
     if mismatch:
         record["reason"] = (
             f"the resolved ring_1x1 members (folded to 60 deg: "
@@ -797,7 +957,8 @@ def basis_canvas_check(image, members_rad_px, radius_px, n_px, lambda_px_value,
             f"{tolerance:.3f} px), while the canvas' strongest in-band peak is at "
             f"{measured_angle:.4f} deg (folded {record['measured_angle_deg']:.4f} deg, "
             f"{record['annulus_peak_radius_px']:.3f} px): the resolved basis does not "
-            "describe this canvas")
+            "describe this canvas"
+        )
     return record
 
 
@@ -821,8 +982,9 @@ def nm_inv_to_rad_px(nm_inv, nm_per_px):
 
 def q_vector(h, k, b1_rad_px, b2_rad_px):
     """``q(h, k) = h b1 + k b2`` in rad/px for arbitrary real ``h`` and ``k``."""
-    return (float(h) * np.asarray(b1_rad_px, dtype=float)
-            + float(k) * np.asarray(b2_rad_px, dtype=float))
+    return float(h) * np.asarray(b1_rad_px, dtype=float) + float(k) * np.asarray(
+        b2_rad_px, dtype=float
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -855,8 +1017,9 @@ def demodulate(image, q_rad_px, lambda_nm, nm_per_px, nan_fill=0.0):
     spectrum = np.fft.fft2(filled * carrier)
     frequency = TWO_PI * np.fft.fftfreq(n)  # rad/px, unshifted FFT order
     width = lambda_px(lambda_nm, nm_per_px)
-    window = np.exp(-0.5 * (width ** 2)
-                    * (frequency[None, :] ** 2 + frequency[:, None] ** 2))
+    window = np.exp(
+        -0.5 * (width**2) * (frequency[None, :] ** 2 + frequency[:, None] ** 2)
+    )
     return np.fft.ifft2(spectrum * window)
 
 
@@ -896,8 +1059,9 @@ def valid_mask(amplitude, nan_region, amplitude_fraction):
     """
     reference = float(np.median(np.asarray(amplitude, dtype=float)))
     threshold = float(amplitude_fraction) * reference
-    valid = (np.asarray(amplitude, dtype=float) >= threshold) & ~np.asarray(nan_region,
-                                                                           dtype=bool)
+    valid = (np.asarray(amplitude, dtype=float) >= threshold) & ~np.asarray(
+        nan_region, dtype=bool
+    )
     return valid, threshold
 
 
@@ -950,20 +1114,25 @@ def circular_median_rad(phi, weight=None, bins=3600, candidates=64):
     centres = (np.arange(bins) + 0.5) * (TWO_PI / bins)
     objective = np.empty(bins)
     for start in range(0, bins, 256):
-        block = centres[start:start + 256][:, None]
-        objective[start:start + 256] = np.sum(
-            counts[None, :] * np.abs(wrap_pm_pi(block - centres[None, :])), axis=1)
+        block = centres[start : start + 256][:, None]
+        objective[start : start + 256] = np.sum(
+            counts[None, :] * np.abs(wrap_pm_pi(block - centres[None, :])), axis=1
+        )
     coarse = float(centres[int(np.argmin(objective))])
     step = TWO_PI / bins
     inside = np.flatnonzero(np.abs(wrap_pm_pi(phi - coarse)) <= step)
     if inside.size == 0:
         return float(np.mod(coarse, TWO_PI)), 0.0, 1
     if inside.size > candidates:
-        inside = inside[np.argsort(np.abs(wrap_pm_pi(phi[inside] - coarse)),
-                                   kind="stable")[:candidates]]
+        inside = inside[
+            np.argsort(np.abs(wrap_pm_pi(phi[inside] - coarse)), kind="stable")[
+                :candidates
+            ]
+        ]
     cand = phi[inside]
-    values = np.array([float(np.sum(weight * np.abs(wrap_pm_pi(angle - phi))))
-                       for angle in cand])
+    values = np.array(
+        [float(np.sum(weight * np.abs(wrap_pm_pi(angle - phi)))) for angle in cand]
+    )
     best = float(values.min())
     spread = float(np.max(np.abs(wrap_pm_pi(cand - cand[int(np.argmin(values))]))))
     minimisers = int(np.count_nonzero(values <= best + 1e-12))
@@ -1035,7 +1204,7 @@ def _smooth_bins(values, sigma_bins):
     kernel = np.exp(-0.5 * (offsets / sigma_bins) ** 2)
     kernel /= kernel.sum()
     padded = np.concatenate([array[-half:], array, array[:half]])
-    return np.convolve(padded, kernel, mode="same")[half:half + n]
+    return np.convolve(padded, kernel, mode="same")[half : half + n]
 
 
 # --------------------------------------------------------------------------- #
@@ -1052,11 +1221,18 @@ def pair_cross_talk(q_rad_px_list, lambda_nm, nm_per_px):
     records = []
     for first in range(len(q_rad_px_list)):
         for second in range(first + 1, len(q_rad_px_list)):
-            delta = ((np.asarray(q_rad_px_list[first], dtype=float)
-                      - np.asarray(q_rad_px_list[second], dtype=float)) / scale)
+            delta = (
+                np.asarray(q_rad_px_list[first], dtype=float)
+                - np.asarray(q_rad_px_list[second], dtype=float)
+            ) / scale
             separation = float(np.hypot(*delta))
-            records.append({"q_i": first, "q_j": second,
-                            "separation_rad_per_nm": separation,
-                            "threshold_rad_per_nm": 2.0 / float(lambda_nm),
-                            "cross_talk": bool(separation < 2.0 / float(lambda_nm))})
+            records.append(
+                {
+                    "q_i": first,
+                    "q_j": second,
+                    "separation_rad_per_nm": separation,
+                    "threshold_rad_per_nm": 2.0 / float(lambda_nm),
+                    "cross_talk": bool(separation < 2.0 / float(lambda_nm)),
+                }
+            )
     return records
