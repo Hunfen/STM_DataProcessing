@@ -110,6 +110,9 @@ ShardSpec(
    既有落盘函数发布产物 —— 产物写入仍然只走 `io.h5_convention`。
 5. **调用**：`run_shards(spec, n_workers=..., checkpoint_dir=..., resume=...)`，
    把返回码映射成调用方的语义（CLI 退出码或异常）；`--dry-run` 直接给 `dry_run=True`。
+   默认 `start_method="spawn"`，所以**调用脚本本身必须放在 `if __name__ == "__main__":`
+   之下**：否则子解释器重新导入该脚本会再次执行顶层代码，worker 以错误收场——驱动打印
+   worker traceback 并返回 4。这是 spawn 的通用约束，不是本驱动的缺陷。
 6. **回归**：像 `tests/regression/check_lindhard_re_chi.py`、`check_qpi_parallel.py`
    那样加检查：产物字节幂等、resume 复用、外来签名拒绝、中断后只重算缺失分片。
 
