@@ -83,11 +83,10 @@ def ang_diff_deg(a, b):
     return float(np.degrees(wrap_pm_pi(np.radians(a - b))))
 
 
-def dist_to_ladder_deg(angle_deg, ladder_deg):
-    """Circular distance of an angle to the nearest value of a ladder."""
-    ladder = np.asarray(ladder_deg, dtype=float)
-    diff = (angle_deg - ladder + 180.0) % 360.0 - 180.0
-    return float(np.min(np.abs(diff)))
+def dist_to_deg(angle_deg, reference_deg):
+    """Absolute circular distance of an angle to one reference angle, in degrees."""
+    diff = (float(angle_deg) - float(reference_deg) + 180.0) % 360.0 - 180.0
+    return abs(diff)
 
 
 # --------------------------------------------------------------------------- #
@@ -333,7 +332,7 @@ def deconvolve_fwhm_deg(fwhm, sigma_deg):
     """Remove the smoothing kernel from an FWHM (Gaussian-equivalent width).
 
     The reported FWHM is the width of the *smoothed* histogram, i.e. the sample
-    width folded with the smoothing kernel: ``FWHM_obs^2 = FWHM_true^2 +
+    width convolved with the smoothing kernel: ``FWHM_obs^2 = FWHM_true^2 +
     (2.3548 sigma_smooth)^2`` for Gaussian shapes.  The deconvolved value is a
     Gaussian-equivalent estimate, not an assumption-free one; it is undefined
     (NaN) when the observed width is not larger than the kernel width.

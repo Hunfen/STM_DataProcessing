@@ -6,7 +6,7 @@ The stage order mirrors the topographic phase pipeline of the analysis:
           -> ring radii -> the (1x1, r3) ring pair identified by the radius ratio
           -> per-reflection Gaussian-window demodulation (the local-q-map engine)
           -> theta(r) = arg(psi_q(r))                     (no q.r ramp)
-          -> amplitude gate -> phase statistics -> lattice-referenced gauge fix
+          -> phase statistics over every valid pixel -> lattice-referenced gauge fix
           -> paper-style pairwise phase differences of two reflections
 
 Phase convention
@@ -60,24 +60,43 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from phasemath import TWO_PI, circ_mean, linear_median_fwhm, weighted_stats, wrap_pm_pi
+from phasemath import TWO_PI, circ_mean, linear_median_fwhm, weighted_stats
 
-# The demodulation engine of the sibling skill ``local-q-map`` is used as delivered,
-# by path (the two skills are installed side by side under ``skills/``).
-_LOCAL_Q_MAP_SCRIPTS = Path(__file__).resolve().parents[2] / "local-q-map" / "scripts"
+_HERE = Path(__file__).resolve()
+
+
+def local_q_map_scripts():
+    """Directory holding the engine of the sibling skill ``local-q-map``.
+
+    The two skills are installed side by side, so the engine sits either next to
+    this skill directory (``<skills>/phase-analysis/scripts`` -> ``<skills>``,
+    which covers a repository checkout *and* the installed library
+    ``~/.agents/skills``) or in the installed library while this skill runs from a
+    copy somewhere else (a staging or scratch tree).  Both are searched; nothing
+    is copied and the engine itself is never modified.
+    """
+    candidates = [
+        _HERE.parents[2] / "local-q-map" / "scripts",
+        Path.home() / ".agents" / "skills" / "local-q-map" / "scripts",
+    ]
+    for candidate in candidates:
+        if (candidate / "localqmap.py").is_file():
+            return candidate
+    raise ModuleNotFoundError(
+        "the demodulation engine localqmap.py of the sibling skill local-q-map "
+        "was not found; looked in "
+        + ", ".join(str(candidate) for candidate in candidates)
+    )
+
+
+# The demodulation engine of the sibling skill ``local-q-map`` is used as delivered.
+_LOCAL_Q_MAP_SCRIPTS = local_q_map_scripts()
 if str(_LOCAL_Q_MAP_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_LOCAL_Q_MAP_SCRIPTS))
 
 import localqmap  # noqa: E402  (needs the path insert above)
 
 SQRT3 = float(np.sqrt(3.0))
-LADDER_120 = (0.0, 120.0, 240.0)
-
-
-def pm_dist(angle_deg):
-    """Circular distance of an angle to the 0/120/240 ladder (mirror invariant)."""
-    diff = (angle_deg - np.asarray(LADDER_120) + 180.0) % 360.0 - 180.0
-    return float(np.min(np.abs(diff)))
 
 
 # --------------------------------------------------------------------------- #
@@ -319,57 +338,43 @@ def theta_field(psi):
     return np.mod(np.angle(np.asarray(psi)), TWO_PI)
 
 
-def gate_mask(amp, valid, gate):
-    """Amplitude gate used for the phase histogram (``p50`` = pipeline default)."""
-    if gate in (None, "none"):
-        return valid.copy()
-    if isinstance(gate, str) and gate.startswith("p"):
-        threshold = float(np.percentile(amp[valid], float(gate[1:])))
-    elif isinstance(gate, (int, float)):
-        threshold = float(np.percentile(amp[valid], float(gate)))
-    else:
-        raise ValueError(f"unsupported gate {gate!r}")
-    return valid & (amp > threshold)
+def sample_mask(amp, valid):
+    """The single sample of every per-reflection estimator: all valid pixels.
 
-
-def reflection_stats(theta, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
-    """Phase and amplitude statistics of one reflection.
-
-    Two phase conventions are reported per reflection:
-
-    ``gated``    the pipeline default (``valid & amp > p50(amp)``): the phase of
-                 the brighter half of the field of view, i.e. of the regions that
-                 carry that reflection strongly.
-    ``ungated``  the same estimator over every valid pixel, weighted by the local
-                 amplitude; this is exactly ``arg sum_r psi(r)`` and, because the
-                 engine's window has ``k = 0`` weight one, it equals
-                 ``arg sum_r T(r) exp(-i q.r)`` -- the reflection's global phase,
-                 independent of the window width.
-
-    Amplitude statistics are reported ungated on purpose: under a ``p50`` gate the
-    amplitude median is the gate threshold by construction and carries no extra
-    information.
+    ``valid`` is the canvas validity (``isfinite`` of the input CSV, i.e. every
+    pixel the geometry correction did not turn into NaN).  The only pixels removed
+    here are those that carry no weight at all -- a non-finite or exactly zero
+    demodulated amplitude, which contributes nothing to an amplitude-weighted
+    estimator.  There is no percentile, no threshold and no selection rule: the
+    sample is fixed by the data, and the maps of the atlas are drawn with exactly
+    this mask, so the visible pixels of a figure and the pixels of its statistics
+    are one and the same set.
     """
-    good = gate_mask(amp, valid, gate)
-    gated = weighted_stats(theta[good], amp[good], bins=bins, smooth_deg=smooth_deg)
-    allpix = weighted_stats(theta[valid], amp[valid], bins=bins, smooth_deg=smooth_deg)
-    amp_median, amp_fwhm, _ = linear_median_fwhm(amp[valid])
-    amp_gated_median, amp_gated_fwhm, _ = linear_median_fwhm(amp[good])
-    _gmean, g_r, _ = circ_mean(theta[good], amp[good])
-    _umean, u_r, _ = circ_mean(theta[valid], amp[valid])
+    amp = np.asarray(amp, dtype=float)
+    return np.asarray(valid, dtype=bool) & np.isfinite(amp) & (amp > 0.0)
+
+
+def reflection_stats(theta, amp, valid, bins=3600, smooth_deg=2.0):
+    """Phase and amplitude statistics of one reflection on the single sample.
+
+    The sample is ``sample_mask(amp, valid)``: every valid pixel, weighted by the
+    local demodulated amplitude ``|psi(r)|``.  The amplitude-weighted circular mean
+    over that sample equals ``arg sum_r T(r) exp(-i q.r)`` (the engine's window has
+    ``k = 0`` weight one, so the mean does not depend on the window width), while
+    the median / IQR / FWHM / clusters describe the shape of that same sample.
+    """
+    sample = sample_mask(amp, valid)
+    phase = weighted_stats(theta[sample], amp[sample], bins=bins, smooth_deg=smooth_deg)
+    amp_median, amp_fwhm, _ = linear_median_fwhm(amp[sample])
+    _mean, resultant, _total = circ_mean(theta[sample], amp[sample])
+    count = int(np.count_nonzero(sample))
     return {
-        "gate_fraction": float(
-            np.count_nonzero(good) / max(np.count_nonzero(valid), 1)
-        ),
-        "phase_ungated": allpix,
-        "phase_gated": gated,
-        "amp_mean": float(np.mean(amp[valid])),
+        "phase": phase,
+        "n_samples": count,
+        "amp_mean": float(np.mean(amp[sample])) if count else float("nan"),
         "amp_median": float(amp_median),
         "amp_fwhm": float(amp_fwhm),
-        "amp_gated_median": float(amp_gated_median),
-        "amp_gated_fwhm": float(amp_gated_fwhm),
-        "R_ungated": float(u_r),
-        "R_gated": float(g_r),
+        "resultant_R": float(resultant),
     }
 
 
@@ -377,11 +382,6 @@ def reflection_stats(theta, amp, valid, gate="p50", bins=3600, smooth_deg=2.0):
 # paper-style pairwise phase-difference analysis
 # --------------------------------------------------------------------------- #
 WITHIN_PAIRS = ((0, 1), (2, 3), (4, 5))
-# Two ring_r3 peaks can sit at the same angular distance from a ring_1x1 peak (the
-# two rings are 30 degrees apart in the hexagonal geometry), so the nearest-angle
-# rule needs an explicit tie tolerance: distances closer than this count as equal
-# and the smallest ring_r3 index wins.
-ANGLE_TIE = 1e-9
 
 
 def pair_phase_diff_field(psi_j, psi_k):
@@ -415,65 +415,34 @@ def pair_weight_field(psi_j, psi_k):
     )
 
 
-def pair_histogram(
-    phase_diff, amp_diff, mask, weight, bins_phase=180, bins_amplitude=100
-):
-    """2D histogram of ``(|D| mod pi, a)`` over the pair's effective pixels.
-
-    ``x`` folds the phase difference onto ``[0, pi]`` (the modulo-``pi`` folding
-    that ``D`` and its Friedel counterpart share), ``y`` is the normalised
-    amplitude difference in ``[-1, 1]``.  Returns
-    ``(counts, x_edges, y_edges, n_valid)``; ``counts[i, j]`` is the ``|psi_j
-    psi_k|``-weighted count of samples with ``x`` in bin ``i`` and ``y`` in bin
-    ``j``.
-    """
-    good = np.asarray(mask, dtype=bool)
-    x = np.mod(np.abs(np.asarray(phase_diff, dtype=float)), np.pi)
-    y = np.asarray(amp_diff, dtype=float)
-    keep = good & np.isfinite(x) & np.isfinite(y)
-    counts, x_edges, y_edges = np.histogram2d(
-        x[keep],
-        y[keep],
-        bins=[int(bins_phase), int(bins_amplitude)],
-        range=[[0.0, np.pi], [-1.0, 1.0]],
-        weights=np.asarray(weight, dtype=float)[keep],
-    )
-    return counts.astype(float), x_edges, y_edges, int(np.count_nonzero(keep))
-
-
 def pair_analysis(
     psi_j,
     psi_k,
     valid_j,
     valid_k,
-    bins_phase=180,
-    bins_amplitude=100,
     bins=3600,
     smooth_deg=2.0,
 ):
     """The three fields and the statistics of one reflection pair.
 
-    The effective pixels of a pair are the intersection of the two validity masks.
-    The phase-difference statistics use the circular estimators of ``phasemath``
-    with the weight ``|psi_j psi_k|``; the amplitude-difference statistic is the
-    weighted linear median of ``a_jk`` over the same pixels.
+    The sample of a pair is the intersection of the two validity masks, restricted
+    to pixels with a non-zero weight ``|psi_j psi_k|`` (``sample_mask``).  The
+    phase-difference statistics use the circular estimators of ``phasemath`` with
+    that weight; the amplitude-difference statistic is the weighted linear median
+    of ``a_jk`` over the same sample.  The pair histogram is a one-dimensional
+    circular histogram of ``D`` itself over ``(-pi, pi]`` and is built by the atlas
+    from the returned field, weight and mask, so the drawn distribution and the
+    statistics are the same sample.
     """
-    mask = np.asarray(valid_j, dtype=bool) & np.asarray(valid_k, dtype=bool)
+    weight = pair_weight_field(psi_j, psi_k)
+    overlap = np.asarray(valid_j, dtype=bool) & np.asarray(valid_k, dtype=bool)
+    mask = sample_mask(weight, overlap)
     phase_diff = pair_phase_diff_field(psi_j, psi_k)
     amp_diff = pair_amplitude_diff_field(psi_j, psi_k)
-    weight = pair_weight_field(psi_j, psi_k)
     stats = weighted_stats(
         phase_diff[mask], weight[mask], bins=bins, smooth_deg=smooth_deg
     )
     amp_median, amp_fwhm, _ = linear_median_fwhm(amp_diff[mask], weight[mask])
-    counts, x_edges, y_edges, n_valid = pair_histogram(
-        phase_diff,
-        amp_diff,
-        mask,
-        weight,
-        bins_phase=bins_phase,
-        bins_amplitude=bins_amplitude,
-    )
     return {
         "phase_diff": phase_diff,
         "amp_diff": amp_diff,
@@ -483,13 +452,14 @@ def pair_analysis(
         "phase_diff_median_deg": float(stats["median_deg"]),
         "phase_diff_R": float(stats["resultant_R"]),
         "phase_diff_fwhm_deg": float(stats["fwhm_deg"]),
+        "phase_diff_fwhm_deconv_deg": float(stats["fwhm_deconv_deg"]),
+        "phase_diff_iqr_deg": float(stats["iqr_deg"]),
+        "phase_diff_circ_std_deg": float(stats["circ_std_deg"]),
         "phase_diff_n_clusters": int(stats["n_clusters"]),
+        "phase_diff_clusters": stats["clusters"],
         "amp_diff_median": float(amp_median),
         "amp_diff_fwhm": float(amp_fwhm),
-        "n_valid": int(n_valid),
-        "hist_counts": counts,
-        "hist_x_edges": x_edges,
-        "hist_y_edges": y_edges,
+        "n_valid": int(np.count_nonzero(mask)),
     }
 
 
@@ -503,28 +473,6 @@ def within_ring_pairs(records, expect=6):
     independent pair observable.
     """
     return [(j, k) for j, k in WITHIN_PAIRS if k < len(records)]
-
-
-def cross_ring_pairs(records_1x1, records_r3):
-    """For every ``ring_1x1`` peak, the ``ring_r3`` peak closest in polar angle.
-
-    The polar-angle distance of two peaks of the two rings is generally not unique
-    (the hexagonal geometry puts a ``ring_1x1`` peak between two ``ring_r3`` peaks
-    whenever the rings are 30 degrees apart), so distances that differ by less than
-    ``ANGLE_TIE`` count as equal and the smallest ``ring_r3`` index is used.
-    """
-    pairs = []
-    for j, left in enumerate(records_1x1):
-        angle_left = np.arctan2(left["q_px"][1], left["q_px"][0])
-        best, best_distance = None, np.inf
-        for k, right in enumerate(records_r3):
-            angle_right = np.arctan2(right["q_px"][1], right["q_px"][0])
-            distance = abs(float(wrap_pm_pi(angle_left - angle_right)))
-            if distance < best_distance - ANGLE_TIE:
-                best, best_distance = k, distance
-        if best is not None:
-            pairs.append((j, best))
-    return pairs
 
 
 def friedel_pairs(peaks_q):
@@ -581,7 +529,6 @@ def analyse_ring(
     ring,
     lambda_nm,
     nm_per_px,
-    gate="p50",
     bins=3600,
     smooth_deg=2.0,
     expect=6,
@@ -615,9 +562,7 @@ def analyse_ring(
         psi = gaussian_field(topo, (qx, qy), lambda_nm, nm_per_px)
         theta = theta_field(psi)
         amp = np.abs(psi)
-        stats = reflection_stats(
-            theta, amp, valid, gate=gate, bins=bins, smooth_deg=smooth_deg
-        )
+        stats = reflection_stats(theta, amp, valid, bins=bins, smooth_deg=smooth_deg)
         records.append(
             {
                 "name": name,
@@ -635,7 +580,7 @@ def analyse_ring(
     return records, fields, psi_map
 
 
-def pair_summary(records, key="phase_gated", quantity="mean_deg"):
+def pair_summary(records, key="phase", quantity="mean_deg"):
     """Friedel pair sums and their deviation from 360 degrees."""
     qs = [record["q_px"] for record in records]
     out = []
@@ -662,19 +607,22 @@ def triple_summary(
     records,
     fields,
     valid,
-    key="phase_gated",
+    key="phase",
     quantity="mean_deg",
     bins=3600,
     smooth_deg=2.0,
-    gate="p50",
 ):
     """Scalar triple sum and the per-pixel triple-product phase of one ring.
 
     ``scalar``  the three per-reflection phases added as angles
                 (``= 3 * Phi_bar`` in the mixture model, exactly gauge invariant
                 when the three wavevectors sum to zero).
-    ``field``   the per-pixel sum of the three demodulated phase fields, the
-                estimator the existing pipeline calls the triple product.
+    ``field``   the per-pixel sum of the three demodulated phase fields, weighted by
+                the product of the three amplitudes: the estimator this skill calls
+                the triple product.  Both are computed on every valid pixel; only
+                the mean, the median, R, the FWHM and the cluster count are kept in
+                the JSON (the triple-product map and its distribution are no longer
+                drawn).
     """
     qs = [record["q_px"] for record in records]
     combo, q_sum_norm = triple_selection(qs)
@@ -687,12 +635,9 @@ def triple_summary(
         phi_sum = phi_sum + fields[name][1]
         amp_prod = amp_prod * fields[name][2]
     theta = np.mod(phi_sum, TWO_PI)
-    good = gate_mask(amp_prod, valid, gate)
-    gated = weighted_stats(
-        theta[good], amp_prod[good], bins=bins, smooth_deg=smooth_deg
-    )
-    allpix = weighted_stats(
-        theta[valid], amp_prod[valid], bins=bins, smooth_deg=smooth_deg
+    sample = sample_mask(amp_prod, valid)
+    field = weighted_stats(
+        theta[sample], amp_prod[sample], bins=bins, smooth_deg=smooth_deg
     )
     # Friedel conjugates are exact negatives, so the antipodal triple is the mirror
     mirror_scalar = float((-scalar) % 360.0)
@@ -704,15 +649,9 @@ def triple_summary(
         "q_sum_norm_px": q_sum_norm,
         "scalar_sum_deg": scalar,
         "scalar_sum_mirror_deg": mirror_scalar,
-        "scalar_sum_mod120_deg": float(scalar % 120.0),
-        "scalar_ladder_dist_deg": float(pm_dist(scalar)),
-        "scalar_sum_3x_deg": float(3.0 * scalar % 360.0),
-        "field_gated": gated,
-        "field_ungated": allpix,
-        "field_mirror_mean_deg": float((-gated["mean_deg"]) % 360.0),
-        "field_ladder_dist_deg": float(pm_dist(gated["mean_deg"])),
-        "field_mean_3x_mod360_deg": float(3.0 * gated["mean_deg"] % 360.0),
-        "field_mean_3x_mirror_deg": float(3.0 * (-gated["mean_deg"]) % 360.0),
+        "field": field,
+        "field_mirror_mean_deg": float((-field["mean_deg"]) % 360.0),
+        "field_n_samples": int(np.count_nonzero(sample)),
         "theta_field": theta,
         "amp_product": amp_prod,
     }
@@ -775,7 +714,7 @@ def ring_wave(n, vectors, phase_rad):
 
 
 def independent_triple(vectors):
-    """Three of the six ring vectors with 120 degree spacing (q1+q2+q3 = 0).
+    """Three of the six ring vectors whose wavevector sum is zero.
 
     Ordered by polar angle in ``[0, 2 pi)``; this is the triple that carries the
     phase ``Phi`` in the synthetic generator, its antipodal partner carries

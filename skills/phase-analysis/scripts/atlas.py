@@ -11,7 +11,7 @@ else, without OCR.
 Contract of one figure (``Atlas.add``):
 
     file        PNG inside the atlas directory (basename only)
-    group       ``ring_1x1``, ``ring_r3`` or ``cross``
+    group       ``ring_1x1`` or ``ring_r3``
     kind        ``per_peak`` (one reflection), ``summary`` (one ring) or
                 ``pairwise`` (one reflection pair)
     peak        peak index for ``per_peak`` figures, ``None`` otherwise
@@ -20,13 +20,38 @@ Contract of one figure (``Atlas.add``):
     annotation  {field: value} -- the numbers *as printed* (rounded)
     paths       {field: JSON path} -- where the exact value lives in
                 ``phase_stats.json`` (dotted path with list indices)
+    panels      the panels of the figure, left to right (row by row in a grid)
+    mappable    True when the figure draws a 2D map / density image
+    colorbars   number of colour bars of the figure
+    norm        the colour scale of a mappable figure, as a machine readable
+                record ``{scale, kind, vmin, vmax[, linthresh, linscale]}``
     title       ``label`` + ``" | "`` + rendering of ``annotation``
+
+Two layout rules of this module are enforced programmatically, not just followed
+by hand:
+
+* every map / density figure carries at least one colour bar (``Atlas.add``
+  raises when a mappable figure has none);
+* every colour bar lives **outside** every data axes of its figure, i.e. the
+  intersection area of the colour-bar axes rectangle and any data axes rectangle
+  is exactly zero (``Atlas.add`` raises otherwise, ``check_manifest`` re-audits it
+  from the manifest);
+
+and one colour-scale rule:
+
+* the colour scales are global, not per figure: every theta(r) map spans
+  ``[0, 2 pi]``, all amplitude maps of the whole atlas share one symmetric-log
+  scale (one ``vmax`` and one ``linthresh`` over all twelve demodulated fields),
+  every ``D(r)`` map spans ``[-pi, pi]`` and every ``a(r)`` map spans ``[-1, 1]``
+  (``check_manifest`` compares the recorded scale of every figure with the global
+  declaration in ``phase_stats.json``).
 
 ``check_manifest`` re-derives the title from ``label`` + ``annotation``, compares
 every annotated number with the exact value found at its JSON path (within half a
-unit in the last printed place) and re-reads the PNG (existence, size, PIL
-openability, embedded annotation).  ``python atlas.py --check MANIFEST.json``
-runs exactly that check, so a third party can re-audit a delivered atlas.
+unit in the last printed place), re-reads the PNG (existence, size, PIL
+openability, embedded annotation) and re-checks the colour-bar and colour-scale
+rules.  ``python atlas.py --check MANIFEST.json`` runs exactly that check, so a
+third party can re-audit a delivered atlas.
 
 No physical statement is made anywhere in this module: rings, wavevectors,
 phases and statistics only.
@@ -44,14 +69,34 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LinearSegmentedColormap, SymLogNorm
+from matplotlib.colors import LinearSegmentedColormap, Normalize, SymLogNorm
 
 BAD_COLOR = "#b0b0b0"
-LADDER_ANGLES_DEG = (0.0, 120.0, 240.0)
-LADDER_RAD = tuple(np.radians(a) for a in LADDER_ANGLES_DEG)
-GROUPS = ("ring_1x1", "ring_r3", "cross")
-FIGURES = ("ring_1x1", "ring_r3")
+GROUPS = ("ring_1x1", "ring_r3")
 KINDS = ("per_peak", "summary", "pairwise")
+# Font size of the figure-level title (the manifest title, rendered wrapped, so a
+# long annotation stays inside the canvas instead of stretching it).
+TITLE_FONTSIZE_MAP = 8
+TITLE_FONTSIZE_DIST = 9
+TITLE_FONTSIZE_GRID = 11
+# A saved figure is refused when the top strip of its pixels carries no ink at all:
+# that is exactly the defect of a figure written without any title (its title band
+# was pure white while the manifest still declared a title).
+TITLE_BAND_FRACTION = 0.10
+TITLE_BAND_MIN_INK = 20
+TITLE_BAND_MAX_LUMINANCE = 220
+
+# The global colour scales of the whole atlas.  They are constants of the skill,
+# so any two figures of a run can be compared by eye.
+THETA_VMIN = 0.0
+THETA_VMAX = 2.0 * np.pi
+PHASE_DIFF_VMIN = -np.pi
+PHASE_DIFF_VMAX = np.pi
+AMP_DIFF_VMIN = -1.0
+AMP_DIFF_VMAX = 1.0
+AMPLITUDE_LINSCALE = 0.5
+FFT2_VMIN = 0.0
+FFT2_VMAX = 1.0
 
 # Decimals used when a field is printed.  ``annotate`` rounds to these, so the
 # printed number and the compared number are the same object by construction.
@@ -73,7 +118,6 @@ FIELD_DECIMALS = {
     "n_valid": 0,
     "q_sum_px": 4,
     "theta_deg": 3,
-    "ladder_dist_deg": 3,
     "ratio": 6,
     "sqrt3_dev_pct": 4,
     "rms_deg": 4,
@@ -104,7 +148,6 @@ FIELD_ORDER = (
     "n_clusters",
     "R",
     "theta_deg",
-    "ladder_dist_deg",
     "q_sum_px",
     "ref_dev_rms_deg",
     "rms_deg",
@@ -178,6 +221,114 @@ def load_colormap(stm_lib=None):
 
 
 # --------------------------------------------------------------------------- #
+# global colour scales
+# --------------------------------------------------------------------------- #
+def theta_norm():
+    """Colour scale of every theta(r) map: ``[0, 2 pi]``, global."""
+    return Normalize(vmin=THETA_VMIN, vmax=THETA_VMAX)
+
+
+def phase_diff_norm():
+    """Colour scale of every ``D(r)`` map: ``[-pi, pi]``, global."""
+    return Normalize(vmin=PHASE_DIFF_VMIN, vmax=PHASE_DIFF_VMAX)
+
+
+def amp_diff_norm():
+    """Colour scale of every ``a(r)`` map: ``[-1, 1]``, global."""
+    return Normalize(vmin=AMP_DIFF_VMIN, vmax=AMP_DIFF_VMAX)
+
+
+def fft2_norm():
+    """Colour scale of the q-space figure: the clipped ``[0, 1]`` log amplitude."""
+    return Normalize(vmin=FFT2_VMIN, vmax=FFT2_VMAX)
+
+
+def amplitude_norm(vmax, linthresh):
+    """The one symmetric-log scale shared by all twelve amplitude maps.
+
+    ``vmin = 0`` and ``vmax`` = the largest valid ``|psi|`` of the whole run, and
+    ``linthresh`` = the **pooled median of the positive valid** ``|psi|`` **of the
+    whole run**: one global statistic over every positive sample value of the twelve
+    demodulated fields (not the minimum of those values), so the two ends of the
+    scale are global numbers.  Every amplitude figure of a run is drawn with this one
+    norm, so the twelve maps can be compared directly.
+    """
+    return SymLogNorm(
+        linthresh=float(linthresh),
+        linscale=AMPLITUDE_LINSCALE,
+        vmin=0.0,
+        vmax=float(vmax),
+    )
+
+
+def theta_cmap():
+    """The colour map of every theta(r) map: ``hsv`` with a visible bad colour.
+
+    ``set_bad`` paints the pixels that carry no value (the NaN padding of the
+    corrected canvas and the pixels outside the sample) in the same grey the
+    amplitude maps use, so a reader sees where the analysis stops instead of a
+    transparent hole.
+    """
+    cmap = plt.get_cmap("hsv").copy()
+    cmap.set_bad(color=BAD_COLOR)
+    return cmap
+
+
+def norm_record(scale, norm):
+    """Machine readable record of one colour scale (the manifest and JSON share it).
+
+    ``scale`` names the global scale (``theta`` / ``amplitude`` / ``phase_diff`` /
+    ``amp_diff`` / ``fft2``); ``check_manifest`` compares every figure record with
+    the declaration of that name inside ``phase_stats.json``, so "all theta maps
+    use the same span" is a checked statement, not a comment.
+    """
+    record = {
+        "scale": str(scale),
+        "kind": "symlog" if isinstance(norm, SymLogNorm) else "linear",
+        "vmin": float(norm.vmin),
+        "vmax": float(norm.vmax),
+    }
+    if isinstance(norm, SymLogNorm):
+        record["linthresh"] = float(norm.linthresh)
+        # SymLogNorm does not expose ``linscale`` again, so the constant of this
+        # module (the one every amplitude map was built with) is recorded instead.
+        record["linscale"] = float(getattr(norm, "linscale", AMPLITUDE_LINSCALE))
+    return record
+
+
+# --------------------------------------------------------------------------- #
+# colour-bar placement audit
+# --------------------------------------------------------------------------- #
+def bbox_overlap_area(first, second):
+    """Area of the intersection of two rectangles in figure coordinates."""
+    width = min(first.x1, second.x1) - max(first.x0, second.x0)
+    height = min(first.y1, second.y1) - max(first.y0, second.y0)
+    if width <= 0.0 or height <= 0.0:
+        return 0.0
+    return float(width * height)
+
+
+def colorbar_layout(data_axes, colorbar_axes):
+    """Audit one figure: ``(colorbars, outside, worst_overlap_area)``.
+
+    ``outside`` is True when the rectangle of every colour bar is disjoint from the
+    rectangle of every data axes; the return value is what ``Atlas.add`` asserts
+    and what the manifest records, so the rule "the colour bar is drawn outside the
+    data area" is a property of the delivered files.
+    """
+    overlaps = [
+        bbox_overlap_area(axes.get_position(), bar.get_position())
+        for bar in colorbar_axes
+        for axes in data_axes
+    ]
+    return (
+        len(list(colorbar_axes)),
+        all(area <= 0.0 for area in overlaps),
+        float(max(overlaps)) if overlaps else 0.0,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # annotation contract
 # --------------------------------------------------------------------------- #
 def round_fields(values):
@@ -219,6 +370,120 @@ def title_for(label, annotation):
     return f"{label} | {annotate(annotation)}"
 
 
+# --------------------------------------------------------------------------- #
+# canvas title contract
+# --------------------------------------------------------------------------- #
+def rendered_title_texts(fig):
+    """Every text a figure really renders as a title, read back from the canvas.
+
+    Collected from the artist objects that matplotlib will draw: the figure-level
+    title (``fig._suptitle``), the centre / left / right title of every axes, and
+    the free figure texts.  This is the function the gate of ``Atlas.add`` uses, so
+    "the figure carries its title" is a statement about the canvas and not about
+    the manifest.
+    """
+    out = []
+    suptitle = getattr(fig, "_suptitle", None)
+    texts = []
+    if suptitle is not None:
+        texts.append(suptitle)
+    for axes in fig.axes:
+        for text in (
+            getattr(axes, "title", None),
+            getattr(axes, "_left_title", None),
+            getattr(axes, "_right_title", None),
+        ):
+            if text is not None:
+                texts.append(text)
+    texts.extend(fig.texts)
+    for text in texts:
+        value = text.get_text()
+        if value and value not in out:  # the figure title is also in fig.texts
+            out.append(value)
+    return out
+
+
+def require_canvas_title(fig, title):
+    """Assert that the canvas carries exactly ``title`` as a rendered title.
+
+    Raised when the figure has no title at all, when its title is a different
+    string (a typo, a renamed label, an annotation rendered from other numbers), or
+    when it only declares the title in the manifest / PNG text chunk while the
+    canvas stays empty.
+    """
+    rendered = rendered_title_texts(fig)
+    if title not in rendered:
+        raise AssertionError(
+            f"the canvas does not carry the manifest title {title!r}; rendered "
+            f"title text(s): {rendered if rendered else 'none'}"
+        )
+    return rendered
+
+
+def set_canvas_title(fig, title, fontsize=TITLE_FONTSIZE_MAP):
+    """Draw the manifest title on the canvas as a wrapped figure-level title.
+
+    ``wrap=True`` keeps the long annotation inside the canvas (matplotlib wraps it
+    at draw time) while ``Text.get_text`` still returns the one-line string, so the
+    text that the gate compares is exactly the string of the manifest.
+    """
+    fig.suptitle(title, fontsize=fontsize, wrap=True)
+    return fig._suptitle
+
+
+def axes_title_texts(axes_list):
+    """The non-empty title texts of the given axes (centre / left / right).
+
+    This is what a *data axis* draws on its own, as opposed to the figure-level
+    title: a single-axes figure must not carry any of these (the user asked for one
+    title line per figure), while every panel of a multi-panel grid carries its own
+    identifier here.
+    """
+    out = []
+    for axes in axes_list:
+        for text in (
+            getattr(axes, "title", None),
+            getattr(axes, "_left_title", None),
+            getattr(axes, "_right_title", None),
+        ):
+            if text is not None and text.get_text():
+                out.append(text.get_text())
+    return out
+
+
+def title_strip_px(fig, data_axes, dpi):
+    """Height in pixels of the saved region above the topmost data axes.
+
+    That strip is the room a figure has for its titles; measured from the tight
+    bounding box that ``savefig(bbox_inches="tight")`` will use, so the recorded
+    number is the length the checker has to look at in the saved PNG.  A figure
+    written with no title above its axes leaves this strip empty.
+    """
+    try:
+        renderer = fig.canvas.get_renderer()
+        bbox = fig.get_tightbbox(renderer)  # inches
+        top_inch = max(
+            (axes.get_position().y1 for axes in data_axes), default=0.9
+        ) * fig.get_figheight()
+        return max(0, int(round((bbox.y1 - top_inch) * float(dpi))))
+    except Exception:  # pragma: no cover - a renderer-less canvas falls back
+        return max(1, int(round(TITLE_BAND_FRACTION * fig.get_figheight() * float(dpi))))
+
+
+def title_band_ink(image, rows=None):
+    """Number of dark pixels in the top ``rows`` of a saved PNG (the title strip).
+
+    A figure written without any title above its data axes leaves that strip pure
+    white; the counter is the pixel-level counterpart of the canvas-title gate, read
+    back from the file instead of from the manifest.
+    """
+    array = np.asarray(image.convert("L"))
+    if rows is None:
+        rows = max(1, int(array.shape[0] * TITLE_BAND_FRACTION))
+    band = array[: max(1, int(rows)), :]
+    return int(np.count_nonzero(band < TITLE_BAND_MAX_LUMINANCE))
+
+
 def json_path(root, path):
     """Value at a dotted path (``a.b.0.c``) inside a nested dict/list structure."""
     current = root
@@ -232,7 +497,6 @@ def check_manifest(
     stats_path=None,
     expected_figures=None,
     expected_per_ring=None,
-    expected_cross=None,
     verbose=True,
 ):
     """Re-audit an atlas manifest.  Returns ``(ok, failures, lines)``.
@@ -240,9 +504,12 @@ def check_manifest(
     Checks per figure: the file exists and is non-empty, PIL opens it with the
     recorded pixel size, the embedded ``stm-atlas`` text equals the manifest
     entry, the recorded title is exactly the rendering of the recorded numbers,
-    the ``kind`` / ``peak`` / ``pair`` triple is self-consistent, and (when
-    ``stats_path`` is given) every annotated number equals the exact value at its
-    JSON path within half a unit in the last printed place.
+    the title band of the saved pixels carries ink (a figure saved without a title
+    has a pure white top strip), the ``kind`` / ``peak`` / ``pair`` triple is
+    self-consistent, a map / density figure carries a colour bar that is disjoint
+    from every data axes, and (when ``stats_path`` is given) every annotated number
+    equals the exact value at its JSON path within half a unit in the last printed
+    place and every recorded colour scale equals the global declaration.
     """
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text())
@@ -256,6 +523,7 @@ def check_manifest(
         if verbose:
             print(text)
 
+    declared_norms = ((stats or {}).get("atlas") or {}).get("norms") or {}
     seen = set()
     counts = {}
     for entry in figures:
@@ -281,20 +549,92 @@ def check_manifest(
             image.load()
             size = list(image.size)
             embedded = image.text.get("stm-atlas") if hasattr(image, "text") else None
+            band_ink = title_band_ink(image, entry.get("title_strip_px"))
         if size != list(entry["size_px"]):
             failures.append(f"{name}: size {size} != manifest {entry['size_px']}")
+        if not entry.get("title_strip_px"):
+            failures.append(
+                f"{name}: the manifest records no title strip above the data axes"
+            )
+        elif band_ink < TITLE_BAND_MIN_INK:
+            failures.append(
+                f"{name}: the {entry['title_strip_px']} px strip above the data axes "
+                f"carries {band_ink} ink pixel(s) (< {TITLE_BAND_MIN_INK}): the figure "
+                f"was written without a title on the canvas"
+            )
         if not embedded:
             failures.append(f"{name}: no stm-atlas text chunk")
         else:
             payload = json.loads(embedded)
-            for key in ("title", "label", "annotation", "panels"):
+            for key in (
+                "title",
+                "canvas_title",
+                "axes_titles",
+                "panel_axes",
+                "title_strip_px",
+                "title_band_ink",
+                "label",
+                "annotation",
+                "panels",
+                "mappable",
+                "colorbars",
+                "colorbar_outside",
+                "norm",
+            ):
                 if payload.get(key) != entry.get(key):
                     failures.append(f"{name}: embedded {key} differs from the manifest")
         rebuilt = title_for(entry["label"], entry["annotation"])
         if rebuilt != entry["title"]:
             failures.append(f"{name}: title is not the rendering of the annotation")
+        panel_axes = entry.get("panel_axes")
+        axes_titles = entry.get("axes_titles")
+        if not isinstance(axes_titles, list) or not isinstance(panel_axes, int):
+            failures.append(f"{name}: the manifest records no axes-title accounting")
+        elif panel_axes == 1 and axes_titles:
+            failures.append(
+                f"{name}: a single-axes figure must carry one title line only, but "
+                f"the data axis draws {axes_titles!r}"
+            )
+        elif panel_axes > 1 and len(axes_titles) != panel_axes:
+            failures.append(
+                f"{name}: {panel_axes} panels but {len(axes_titles)} panel "
+                f"title(s): {axes_titles!r}"
+            )
+        if entry.get("canvas_title") != entry["title"]:
+            failures.append(
+                f"{name}: the recorded canvas title {entry.get('canvas_title')!r} is "
+                f"not the manifest title; the figure was written without its title "
+                f"on the canvas"
+            )
         if not entry.get("panels"):
             failures.append(f"{name}: no panel list in the manifest")
+        if "mappable" not in entry:
+            failures.append(f"{name}: no map/density flag in the manifest")
+        if entry.get("mappable") and not entry.get("colorbars"):
+            failures.append(f"{name}: map / density figure without a colour bar")
+        if entry.get("mappable") and not entry.get("colorbar_outside"):
+            failures.append(
+                f"{name}: colour bar overlaps a data axes "
+                f"(overlap area {entry.get('colorbar_overlap')})"
+            )
+        if entry.get("mappable") and not entry.get("norm"):
+            failures.append(f"{name}: map / density figure without a colour scale")
+        norm = entry.get("norm") or {}
+        if norm:
+            scale = norm.get("scale")
+            expected = declared_norms.get(scale)
+            if expected is None:
+                failures.append(
+                    f"{name}: colour scale {scale!r} is not declared in "
+                    f"phase_stats.json (declared: {sorted(declared_norms)})"
+                )
+            else:
+                for key in ("kind", "vmin", "vmax", "linthresh", "linscale"):
+                    if key in expected and norm.get(key) != expected[key]:
+                        failures.append(
+                            f"{name}: colour scale {scale} {key} = {norm.get(key)} "
+                            f"vs the global declaration {expected[key]}"
+                        )
         kind = entry.get("kind")
         if group not in GROUPS:
             failures.append(f"{name}: unknown group {group!r}")
@@ -328,14 +668,6 @@ def check_manifest(
                         f"{name}: {field} printed {value} vs {exact} at "
                         f"{where} (tolerance {tolerance:g})"
                     )
-    reference_lines = manifest.get("reference_lines_deg")
-    if reference_lines != [0.0, 120.0, 240.0]:
-        failures.append(
-            f"manifest: reference_lines_deg is {reference_lines}, expected "
-            f"the 2 pi k / 3 ladder [0, 120, 240]"
-        )
-    if not manifest.get("reference_lines_note"):
-        failures.append("manifest: no reference_lines_note for the histogram lines")
     for group, info in (manifest.get("per_group") or {}).items():
         if counts.get(group, 0) != info.get("figures"):
             failures.append(
@@ -347,17 +679,12 @@ def check_manifest(
             f"{len(figures)} figures in total vs {expected_figures} declared"
         )
     if expected_per_ring is not None:
-        for group in FIGURES:
+        for group in GROUPS:
             if counts.get(group, 0) != expected_per_ring:
                 failures.append(
                     f"group {group}: {counts.get(group, 0)} figures vs "
                     f"{expected_per_ring} expected"
                 )
-    if expected_cross is not None and counts.get("cross", 0) != expected_cross:
-        failures.append(
-            f"group cross: {counts.get('cross', 0)} figures vs "
-            f"{expected_cross} expected"
-        )
     report(f"manifest: {manifest_path}")
     report(
         f"figures checked: {len(figures)} (per group: "
@@ -395,26 +722,65 @@ class Atlas:
         peak=None,
         pair=None,
         panels=None,
+        mappable=False,
+        data_axes=(),
+        colorbar_axes=(),
+        norm=None,
     ):
         """Save ``fig`` as ``name`` and register its annotation contract.
 
         ``panels`` names every panel of the figure left to right (and row by row
         for a grid), so the manifest states what a file actually contains.
+        ``mappable`` marks a figure that draws a 2D map or density image; such a
+        figure must carry a colour bar, and the colour bar must be disjoint from
+        every data axes -- both are asserted here, before the file is written.
         """
         annotation = round_fields(values)
         title = title_for(label, annotation)
-        path = self.outdir / name
-        fig.savefig(path, dpi=self.dpi, bbox_inches="tight")
-        plt.close(fig)
-        entry = self._embed(
-            path,
-            {
-                "title": title,
-                "label": label,
-                "annotation": annotation,
-                "panels": list(panels or []),
-            },
+        rendered = require_canvas_title(fig, title)
+        axes_titles = axes_title_texts(list(data_axes))
+        if len(data_axes) == 1 and axes_titles:
+            raise AssertionError(
+                f"{name}: a single-axes figure carries the figure-level annotation "
+                f"title only; this data axis still draws its own short title "
+                f"{axes_titles!r}"
+            )
+        if len(data_axes) > 1 and len(axes_titles) != len(data_axes):
+            raise AssertionError(
+                f"{name}: every panel of a multi-panel figure must keep its own "
+                f"identifier title; {len(data_axes)} panels but "
+                f"{len(axes_titles)} panel title(s): {axes_titles!r}"
+            )
+        colorbars, outside, overlap = colorbar_layout(
+            list(data_axes), list(colorbar_axes)
         )
+        if mappable and colorbars == 0:
+            raise AssertionError(
+                f"{name}: a map / density figure must carry a colour bar"
+            )
+        if mappable and not outside:
+            raise AssertionError(
+                f"{name}: the colour bar overlaps a data axes "
+                f"(intersection area {overlap:g} in figure coordinates)"
+            )
+        path = self.outdir / name
+        strip = title_strip_px(fig, list(data_axes), self.dpi)
+        payload = {
+            "title": title,
+            "canvas_title": title,
+            "axes_titles": list(axes_titles),
+            "panel_axes": int(len(data_axes)),
+            "title_strip_px": int(strip),
+            "label": label,
+            "annotation": annotation,
+            "panels": list(panels or []),
+            "mappable": bool(mappable),
+            "colorbars": int(colorbars),
+            "colorbar_outside": bool(outside),
+            "colorbar_overlap": float(overlap),
+            "norm": dict(norm) if norm else None,
+        }
+        entry = self._embed(path, payload, fig, strip)
         entry.update(
             {
                 "group": group,
@@ -427,63 +793,98 @@ class Atlas:
         self.figures.append(entry)
         return entry
 
-    def _embed(self, path, payload):
+    def _embed(self, path, payload, fig, strip):
         from PIL import Image, PngImagePlugin
 
+        fig.savefig(path, dpi=self.dpi, bbox_inches="tight")
+        plt.close(fig)
         with Image.open(path) as image:
             image.load()
             size = list(image.size)
+            ink = title_band_ink(image, strip)
+            payload["title_band_ink"] = int(ink)
             info = PngImagePlugin.PngInfo()
             for key, value in (image.info or {}).items():
                 if isinstance(value, str) and key not in ("stm-atlas",):
                     info.add_text(key, value)
             info.add_text("stm-atlas", json.dumps(payload, sort_keys=True))
             image.save(path, format="PNG", pnginfo=info)
+        if strip <= 0 or ink < TITLE_BAND_MIN_INK:
+            raise AssertionError(
+                f"{path.name}: the saved canvas leaves {strip} px above its data axes "
+                f"carrying {ink} ink pixel(s) (< {TITLE_BAND_MIN_INK}): the title is "
+                f"not drawn inside the canvas"
+            )
         return {"file": path.name, "size_px": size, **payload}
 
     # -- panels ------------------------------------------------------------ #
-    def _hist_panel(self, ax, hist, edges, xlabel, ylabel, label):
-        """One phase-distribution panel; the dashed lines are the 2 pi k / 3 ladder.
+    def titled(self, fig, label, values, fontsize=TITLE_FONTSIZE_MAP):
+        """Draw this figure's manifest title on the canvas and return the text.
 
-        The axis label spells the convention out (``2 pi k / 3, k = 0, 1, 2`` in
-        radians and ``0/120/240 deg``), so the reference lines of every histogram
-        in the atlas are self-describing.
+        The string is ``title_for(label, round_fields(values))`` -- the same one
+        ``add`` stores in the manifest and embeds in the PNG -- rendered wrapped so
+        a long annotation stays inside the canvas.  ``add`` re-derives that string
+        and refuses a figure that does not carry it, so a drawing method cannot
+        quietly produce a titleless figure.
         """
-        ax.plot((edges[:-1] + edges[1:]) / 2.0, hist, color="steelblue", lw=1.4)
-        for angle in LADDER_RAD:
-            ax.axvline(angle, color="0.35", ls="--", lw=1.0)
-        ax.set_xlabel(
-            f"{xlabel}   [dashed: 2 pi k / 3, k = 0,1,2  =  0/120/240 deg]", fontsize=11
-        )
+        title = title_for(label, round_fields(values))
+        set_canvas_title(fig, title, fontsize=fontsize)
+        return title
+
+    def _distribution_panel(
+        self, ax, hist, edges, xlabel, ylabel, label, show_title=False
+    ):
+        """One phase-distribution panel with plain phase ticks.
+
+        The panel carries the distribution and the phase ticks only: there is no
+        reference-line overlay and no second, re-scaled axis.  ``show_title`` draws
+        the panel's own identifier (used by the multi-panel grids); a single-axes
+        figure leaves it off, because its figure-level annotation title is already
+        the identifying line.
+        """
+        edges = np.asarray(edges, dtype=float)
+        centres = 0.5 * (edges[:-1] + edges[1:])
+        ax.plot(centres, hist, color="steelblue", lw=1.4)
+        ax.set_xlim(float(edges[0]), float(edges[-1]))
+        if edges[0] < 0.0:
+            ticks = [-np.pi, -np.pi / 2.0, 0.0, np.pi / 2.0, np.pi]
+            labels = ["-pi", "-pi/2", "0", "pi/2", "pi"]
+        else:
+            ticks = [
+                0.0,
+                np.pi / 2.0,
+                np.pi,
+                3.0 * np.pi / 2.0,
+                2.0 * np.pi,
+            ]
+            labels = ["0", "pi/2", "pi", "3pi/2", "2pi"]
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels, fontsize=11)
+        ax.set_xlabel(f"{xlabel} (phase angle)", fontsize=11)
         ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_title(label, fontsize=12)
-        ax.set_xticks([*list(LADDER_RAD), np.pi])
-        ax.set_xticklabels(["0", "2pi/3", "4pi/3", "pi"], fontsize=11)
+        if show_title:
+            ax.set_title(label, fontsize=12)
+
+    def _colorbar(self, fig, mappable, ax, **kwargs):
+        """Draw a colour bar in its own axes and return that axes."""
+        return fig.colorbar(mappable, ax=ax, **kwargs).ax
 
     # -- per-reflection figures -------------------------------------------- #
-    def amplitude_map(self, amp, valid, label, values, paths, group, name, peak):
-        """``|psi(r)|`` map of one reflection on a logarithmic colour scale."""
-        sample = np.asarray(amp)[np.asarray(valid, dtype=bool)]
+    def amplitude_map(
+        self, amp, sample, norm, label, values, paths, group, name, peak
+    ):
+        """``|psi(r)|`` map of one reflection on the shared symmetric-log scale."""
         cmap = self.cmap.copy()
         cmap.set_bad(color=BAD_COLOR)
-        norm = None
-        if sample.size and sample.max() > 0:
-            positive = sample[sample > 0]
-            linear = positive.min() if positive.size else sample.max()
-            norm = SymLogNorm(
-                linthresh=max(float(linear), np.finfo(float).tiny),
-                linscale=0.5,
-                vmin=0.0,
-                vmax=float(sample.max()),
-            )
         fig, ax = plt.subplots(figsize=(6.5, 6))
         image = ax.imshow(
-            np.where(valid, amp, np.nan), cmap=cmap, origin="lower", norm=norm
+            np.where(sample, amp, np.nan), cmap=cmap, origin="lower", norm=norm
         )
-        ax.set_title(f"{label} - amplitude (log)", fontsize=13)
+        # single-axes figure: the figure-level annotation title is the only title
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+        bar = self._colorbar(fig, image, ax, fraction=0.046, pad=0.04)
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_MAP)
         fig.tight_layout()
         return self.add(
             fig,
@@ -494,32 +895,34 @@ class Atlas:
             group,
             "per_peak",
             peak,
-            panels=["amplitude |psi(r)| (log scale)"],
+            panels=["amplitude |psi(r)| (global symlog scale)"],
+            mappable=True,
+            data_axes=[ax],
+            colorbar_axes=[bar],
+            norm=norm_record("amplitude", norm),
         )
 
-    def theta_map(self, theta, good, label, values, paths, group, name, peak):
-        """``theta(r)`` map of one reflection plus the amplitude gate mask."""
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-        image = axes[0].imshow(
-            np.where(good, theta, np.nan),
-            cmap="hsv",
+    def theta_map(self, theta, sample, label, values, paths, group, name, peak):
+        """``theta(r)`` map of one reflection over the single sample.
+
+        One panel, no other content: the visible pixels of this map are exactly the
+        pixels the statistics of that reflection use (``pixels`` in the title is the
+        size of that sample, read from ``phase_stats.json`` by the checker).
+        """
+        cmap = theta_cmap()
+        fig, ax = plt.subplots(figsize=(6.5, 6))
+        image = ax.imshow(
+            np.where(sample, theta, np.nan),
+            cmap=cmap,
             origin="lower",
-            vmin=0.0,
-            vmax=2 * np.pi,
+            vmin=THETA_VMIN,
+            vmax=THETA_VMAX,
         )
-        axes[0].set_title(f"{label} - theta(r) map", fontsize=13)
-        fig.colorbar(image, ax=axes[0], fraction=0.046, pad=0.04)
-        axes[1].imshow(
-            np.asarray(good, dtype=float),
-            cmap="gray",
-            origin="lower",
-            vmin=0.0,
-            vmax=1.0,
-        )
-        axes[1].set_title(f"{label} - amplitude gate mask", fontsize=13)
-        for ax in axes:
-            ax.set_xticks([])
-            ax.set_yticks([])
+        # single-axes figure: the figure-level annotation title is the only title
+        ax.set_xticks([])
+        ax.set_yticks([])
+        bar = self._colorbar(fig, image, ax, fraction=0.046, pad=0.04)
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_MAP)
         fig.tight_layout()
         return self.add(
             fig,
@@ -530,42 +933,25 @@ class Atlas:
             group,
             "per_peak",
             peak,
-            panels=["theta(r) map", "amplitude gate mask"],
+            panels=["theta(r) map over the sample of the statistics"],
+            mappable=True,
+            data_axes=[ax],
+            colorbar_axes=[bar],
+            norm=norm_record("theta", theta_norm()),
         )
 
-    def theta_distribution(
-        self,
-        theta,
-        good,
-        hist,
-        edges,
-        folded,
-        folded_edges,
-        label,
-        values,
-        paths,
-        group,
-        name,
-        peak,
-    ):
-        """Amplitude-weighted theta distribution and its mod 120 deg folding."""
-        fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
-        self._hist_panel(
-            axes[0],
+    def theta_distribution(self, hist, edges, label, values, paths, group, name, peak):
+        """Amplitude-weighted theta distribution of one reflection (one panel)."""
+        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        self._distribution_panel(
+            ax,
             hist,
             edges,
             "theta (rad)",
             "amplitude-weighted density",
-            f"{label} - theta (gated)",
+            label,
         )
-        self._hist_panel(
-            axes[1],
-            folded,
-            folded_edges,
-            "3 x (theta mod 120 deg) (rad)",
-            "density",
-            f"{label} - theta folded mod 120 deg",
-        )
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_DIST)
         fig.tight_layout()
         return self.add(
             fig,
@@ -576,19 +962,24 @@ class Atlas:
             group,
             "per_peak",
             peak,
-            panels=[
-                "theta distribution (gated)",
-                "theta distribution folded mod 120 deg",
-            ],
+            panels=["theta distribution over the sample of the statistics"],
+            data_axes=[ax],
         )
 
     # -- ring summaries ---------------------------------------------------- #
     def grid_theta_histograms(self, items, label, values, paths, group, name):
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
         for ax, item in zip(axes.ravel(), items, strict=True):
-            self._hist_panel(
-                ax, item["hist"], item["edges"], "theta (rad)", "density", item["label"]
+            self._distribution_panel(
+                ax,
+                item["hist"],
+                item["edges"],
+                "theta (rad)",
+                "density",
+                item["label"],
+                show_title=True,
             )
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_GRID)
         fig.tight_layout()
         return self.add(
             fig,
@@ -599,25 +990,53 @@ class Atlas:
             group,
             "summary",
             panels=["six theta distributions (2x3)"],
+            data_axes=list(axes.ravel()),
         )
 
     def grid_theta_maps(self, items, label, values, paths, group, name):
+        """The six theta(r) maps of one ring on one shared global scale.
+
+        The colour bar of a grid is placed by hand in the strip that is carved out
+        of the right edge of the grid, so "outside the data area" holds for a
+        multi-axes figure as well (the automatic placement of matplotlib overlaps
+        the last column, which the audit of ``Atlas.add`` refuses).
+        """
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
         image = None
         for ax, item in zip(axes.ravel(), items, strict=True):
             image = ax.imshow(
-                np.where(item["good"], item["theta"], np.nan),
-                cmap="hsv",
+                np.where(item["sample"], item["theta"], np.nan),
+                cmap=theta_cmap(),
                 origin="lower",
-                vmin=0.0,
-                vmax=2 * np.pi,
+                vmin=THETA_VMIN,
+                vmax=THETA_VMAX,
             )
             ax.set_title(item["label"], fontsize=12)
             ax.set_xticks([])
             ax.set_yticks([])
-        if image is not None:
-            fig.colorbar(image, ax=axes, fraction=0.02, pad=0.02)
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_GRID)
         fig.tight_layout()
+        flat = list(axes.ravel())
+        positions = [ax.get_position() for ax in flat]
+        left = min(position.x0 for position in positions)
+        right = max(position.x1 for position in positions)
+        bottom = min(position.y0 for position in positions)
+        top = max(position.y1 for position in positions)
+        span, keep = right - left, 0.86
+        for ax in flat:
+            position = ax.get_position()
+            ax.set_position(
+                [
+                    left + (position.x0 - left) * keep,
+                    position.y0,
+                    position.width * keep,
+                    position.height,
+                ]
+            )
+        bar = fig.add_axes(
+            [left + span * (keep + 0.02), bottom, span * 0.06, top - bottom]
+        )
+        fig.colorbar(image, cax=bar)
         return self.add(
             fig,
             name,
@@ -626,42 +1045,11 @@ class Atlas:
             paths,
             group,
             "summary",
-            panels=["six theta(r) maps (2x3)"],
-        )
-
-    def theta_field(
-        self, theta, good, amp, hist, edges, label, values, paths, group, name
-    ):
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-        image = axes[0].imshow(
-            np.where(good, theta, np.nan),
-            cmap="hsv",
-            origin="lower",
-            vmin=0.0,
-            vmax=2 * np.pi,
-        )
-        axes[0].set_title(f"{label} - theta(r) map", fontsize=13)
-        axes[0].set_xticks([])
-        axes[0].set_yticks([])
-        fig.colorbar(image, ax=axes[0], fraction=0.046, pad=0.04)
-        self._hist_panel(
-            axes[1],
-            hist,
-            edges,
-            "theta (rad)",
-            "amplitude-weighted density",
-            f"{label} - theta distribution",
-        )
-        fig.tight_layout()
-        return self.add(
-            fig,
-            name,
-            label,
-            values,
-            paths,
-            group,
-            "summary",
-            panels=["theta(r) map", "theta distribution"],
+            panels=["six theta(r) maps (2x3), one shared global scale"],
+            mappable=True,
+            data_axes=flat,
+            colorbar_axes=[bar],
+            norm=norm_record("theta", theta_norm()),
         )
 
     def ring_members(self, fft2, centres, label, values, paths, group, name):
@@ -677,7 +1065,9 @@ class Atlas:
         span = np.log(1.0 + hi) - np.log(1.0 + lo)
         norm = np.clip((logged - np.log(1.0 + lo)) / span, 0.0, 1.0)
         fig, ax = plt.subplots(figsize=(6.5, 6))
-        ax.imshow(norm, cmap="inferno", origin="lower")
+        image = ax.imshow(
+            norm, cmap="inferno", origin="lower", vmin=FFT2_VMIN, vmax=FFT2_VMAX
+        )
         centre_q = (fft2.shape[1] / 2.0, fft2.shape[0] / 2.0)
         for index, (qx, qy) in enumerate(centres):
             ax.plot(
@@ -707,6 +1097,10 @@ class Atlas:
         ax.set_ylim(0, fft2.shape[0])
         ax.set_xticks([])
         ax.set_yticks([])
+        bar = self._colorbar(
+            fig, image, ax, fraction=0.046, pad=0.04, label="normalised log |FFT2|"
+        )
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_GRID)
         fig.tight_layout()
         return self.add(
             fig,
@@ -720,29 +1114,34 @@ class Atlas:
                 "FFT2 log amplitude with the six ring members "
                 "(p0-p5 labelled at the rims)"
             ],
+            mappable=True,
+            data_axes=[ax],
+            colorbar_axes=[bar],
+            norm=norm_record("fft2", fft2_norm()),
         )
 
     # -- pairwise figures -------------------------------------------------- #
-    def pair_field(self, field, good, label, values, paths, group, name, pair, kind):
+    def pair_field(self, field, sample, label, values, paths, group, name, pair, kind):
         """``D(r)`` or ``a(r)`` map of one reflection pair."""
         if kind == "phase_diff":
-            cmap, vmin, vmax = "seismic", -np.pi, np.pi
-            panels = ["D(r) = wrap(arg psi_j - arg psi_k)"]
+            cmap, norm = "seismic", phase_diff_norm()
+            panel = "D(r) = wrap(arg psi_j - arg psi_k)"
         else:
-            cmap, vmin, vmax = "coolwarm", -1.0, 1.0
-            panels = ["a(r) = (|psi_j| - |psi_k|) / (|psi_j| + |psi_k|)"]
+            cmap, norm = "coolwarm", amp_diff_norm()
+            panel = "a(r) = (|psi_j| - |psi_k|) / (|psi_j| + |psi_k|)"
         fig, ax = plt.subplots(figsize=(6.5, 6))
         image = ax.imshow(
-            np.where(good, field, np.nan),
+            np.where(sample, field, np.nan),
             cmap=cmap,
             origin="lower",
-            vmin=vmin,
-            vmax=vmax,
+            vmin=float(norm.vmin),
+            vmax=float(norm.vmax),
         )
-        ax.set_title(label, fontsize=13)
+        # single-axes figure: the figure-level annotation title is the only title
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+        bar = self._colorbar(fig, image, ax, fraction=0.046, pad=0.04)
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_MAP)
         fig.tight_layout()
         return self.add(
             fig,
@@ -754,26 +1153,30 @@ class Atlas:
             "pairwise",
             None,
             pair,
-            panels=panels,
+            panels=[panel],
+            mappable=True,
+            data_axes=[ax],
+            colorbar_axes=[bar],
+            norm=norm_record(kind, norm),
         )
 
-    def pair_2dhist(
-        self, counts, x_edges, y_edges, label, values, paths, group, name, pair
-    ):
-        """2D histogram of ``(|D| mod pi, a)`` with the weighted counts."""
-        fig, ax = plt.subplots(figsize=(8, 6))
-        mesh = ax.pcolormesh(
-            np.asarray(x_edges),
-            np.asarray(y_edges),
-            np.asarray(counts).T,
-            cmap="inferno",
-            shading="auto",
+    def pair_phase_diff_dist(self, hist, edges, label, values, paths, group, name, pair):
+        """Amplitude-weighted circular histogram of ``D`` itself over ``(-pi, pi]``.
+
+        The weight of a sample is ``|psi_j psi_k|``; the axis is the signed
+        difference, so this panel shows where the two reflections actually sit
+        relative to each other instead of a re-scaled axis.
+        """
+        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        self._distribution_panel(
+            ax,
+            hist,
+            edges,
+            "D = wrap(arg psi_j - arg psi_k) (rad)",
+            "amplitude-weighted density",
+            label,
         )
-        ax.set_xlabel("|D| mod pi (rad), folded onto [0, pi]", fontsize=12)
-        ax.set_ylabel("a = (|psi_j| - |psi_k|) / (|psi_j| + |psi_k|)", fontsize=12)
-        ax.axhline(0.0, color="w", lw=0.8, ls="--")
-        ax.set_title(label, fontsize=13)
-        fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04, label="weighted count")
+        self.titled(fig, label, values, fontsize=TITLE_FONTSIZE_DIST)
         fig.tight_layout()
         return self.add(
             fig,
@@ -785,36 +1188,8 @@ class Atlas:
             "pairwise",
             None,
             pair,
-            panels=["2D histogram (x = |D| mod pi, y = amplitude difference)"],
-        )
-
-    def pair_grid(self, items, label, values, paths, group, name):
-        """The six cross-pair ``D(r)`` maps in one 2x3 grid."""
-        fig, axes = plt.subplots(2, 3, figsize=(16, 9))
-        image = None
-        for ax, item in zip(axes.ravel(), items, strict=True):
-            image = ax.imshow(
-                np.where(item["good"], item["field"], np.nan),
-                cmap="seismic",
-                origin="lower",
-                vmin=-np.pi,
-                vmax=np.pi,
-            )
-            ax.set_title(item["label"], fontsize=12)
-            ax.set_xticks([])
-            ax.set_yticks([])
-        if image is not None:
-            fig.colorbar(image, ax=axes, fraction=0.02, pad=0.02)
-        fig.tight_layout()
-        return self.add(
-            fig,
-            name,
-            label,
-            values,
-            paths,
-            group,
-            "summary",
-            panels=["six cross-pair D(r) maps (2x3)"],
+            panels=["D distribution over the pair sample, weight |psi_j psi_k|"],
+            data_axes=[ax],
         )
 
     # -- manifest ---------------------------------------------------------- #
@@ -829,11 +1204,14 @@ class Atlas:
                     "per_peak": 0,
                     "summary": 0,
                     "pairwise": 0,
+                    "mappable": 0,
                     "peaks": 0,
                     "pairs": 0,
                 },
             )
             info["figures"] += 1
+            if entry["mappable"]:
+                info["mappable"] += 1
             if entry["kind"] == "per_peak":
                 info["per_peak"] += 1
                 info["peaks"] = max(info["peaks"], int(entry["peak"]) + 1)
@@ -845,11 +1223,21 @@ class Atlas:
         for group, keys in pair_keys.items():
             per_group[group]["pairs"] = len(keys)
         payload = {
-            "atlas_version": 2,
-            "producer": "stm_phase_analysis.py (skill phase-analysis v3)",
+            "atlas_version": 4,
+            "producer": "stm_phase_analysis.py (skill phase-analysis v4)",
             "groups": list(GROUPS),
             "per_group": per_group,
             "total_figures": len(self.figures),
+            "colorbar_rule": (
+                "every map / density figure carries at least one colour bar and "
+                "every colour bar axes is disjoint from every data axes "
+                "(intersection area 0); re-audited per figure by check_manifest"
+            ),
+            "colour_scale_rule": (
+                "global scales: theta maps [0, 2 pi]; all twelve amplitude maps one "
+                "symmetric-log scale with a shared vmax and linthresh; D maps "
+                "[-pi, pi]; a maps [-1, 1]"
+            ),
             "figures": self.figures,
         }
         if extra:
@@ -868,18 +1256,17 @@ def main(argv=None):
     parser.add_argument(
         "--stats",
         default=None,
-        help="phase_stats.json to compare the annotated numbers with",
+        help="phase_stats.json to compare the annotated numbers and the colour "
+        "scales with",
     )
     parser.add_argument("--expected-figures", type=int, default=None)
     parser.add_argument("--expected-per-ring", type=int, default=None)
-    parser.add_argument("--expected-cross", type=int, default=None)
     args = parser.parse_args(argv)
     ok, failures, _ = check_manifest(
         args.check,
         stats_path=args.stats,
         expected_figures=args.expected_figures,
         expected_per_ring=args.expected_per_ring,
-        expected_cross=args.expected_cross,
     )
     if ok:
         print("ATLAS CHECK PASSED")

@@ -8,11 +8,18 @@ both, the script measures the demodulated phase field of every reflection
 
 with the Gaussian-window engine of the sibling ``local-q-map`` skill
 (``--lambda-nm``, default 3.0 nm), plus the lattice-referenced gauge fix that makes
-the two rings comparable, plus the paper-style pairwise analysis of two
-reflections at a time (phase-difference field, normalised amplitude-difference
-field, 2D histogram), and it writes the complete figure atlas together with one
-JSON that carries every number (a drawn number is the JSON number by
-construction; see ``atlas.py``).
+the two rings comparable, plus the pairwise analysis of two reflections at a time
+(phase-difference field, its amplitude-weighted circular histogram, and the
+normalised amplitude-difference field), and it writes the complete figure atlas
+together with one JSON that carries every number (a drawn number is the JSON
+number by construction; see ``atlas.py``).
+
+One sample rule holds everywhere, for every estimator and for every figure: the
+sample of a reflection is **every valid pixel of the corrected canvas** (all
+pixels the correction did not turn into NaN), weighted by the demodulated
+amplitude ``|psi(r)|``; the sample of a pair is the intersection of the two
+validity masks, weighted by ``|psi_j psi_k|``.  There is no percentile, no
+threshold and no other selection rule anywhere in this skill.
 
 The rings are named
 
@@ -33,7 +40,7 @@ Usage:
     MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 \
         .venv/bin/python <this script> CORRECTED.csv -o OUT_DIR -L <field of view nm> \
         [--anchor auto|strongest|outer|inner|radius] [--reference-radius-px R] \
-        [--detector auto|package|builtin] [--lambda-nm 3.0] [--gate p50] [--no-figures]
+        [--detector auto|package|builtin] [--lambda-nm 3.0] [--no-figures]
 """
 
 from __future__ import annotations
@@ -55,36 +62,29 @@ import atlas as at  # noqa: E402
 import phasemath as pm  # noqa: E402
 import phasepipe as pp  # noqa: E402
 
-SKILL_VERSION = "3.0"
-LADDER_DEG = (0.0, 120.0, 240.0)
+SKILL_VERSION = "4.0"
 PER_PEAK_FIGURES = ("amplitude", "theta_map", "theta_dist")
 SUMMARY_FIGURES = (
     "theta_hist_summary",
     "theta_map_summary",
-    "theta_field",
     "ring_members_qspace",
 )
-PAIR_FIGURES = ("phase_diff", "amp_diff", "2dhist")
-CROSS_SUMMARY_FIGURES = ("cross_pair_phase_diff_grid",)
+PAIR_FIGURES = ("phase_diff", "phase_diff_dist", "amp_diff")
 PEAKS_PER_RING = 6
 WITHIN_PAIRS_PER_RING = 3
-CROSS_PAIRS = 6
 FIGURES_PER_RING = (
     PEAKS_PER_RING * len(PER_PEAK_FIGURES)
     + len(SUMMARY_FIGURES)
     + WITHIN_PAIRS_PER_RING * len(PAIR_FIGURES)
 )
-CROSS_FIGURES = CROSS_PAIRS * len(PAIR_FIGURES) + len(CROSS_SUMMARY_FIGURES)
-TOTAL_FIGURES = 2 * FIGURES_PER_RING + CROSS_FIGURES
+TOTAL_FIGURES = 2 * FIGURES_PER_RING
 
-# The two rings that are analysed; the atlas groups additionally contain "cross"
-# (see atlas.GROUPS) for the pairs that join one reflection of each ring.
+# The two rings that are analysed; the atlas groups are exactly these two (the
+# atlas figures every reflection of a ring and every pair inside a ring).
 RING_TAGS = ("ring_1x1", "ring_r3")
 
-# Bins of the atlas histograms: the phase histograms use 0.1 deg over the circle,
-# the folded (mod 120 deg) histogram is drawn with the same resolution.
+# Bins of the atlas phase histograms: 0.1 deg over the circle.
 HISTOGRAM_BINS = 361
-FOLDED_BINS = 360
 
 # The annotated numbers of a pairwise figure and the JSON keys they are read from.
 PAIR_ANNOTATION = {
@@ -92,13 +92,35 @@ PAIR_ANNOTATION = {
     "median_deg": "phase_diff_median",
     "R": "phase_diff_R",
     "fwhm_deg": "phase_diff_fwhm_deg",
+    "n_clusters": "phase_diff_n_clusters",
     "amp_median": "amp_diff_median",
     "n_valid": "n_valid",
 }
 PAIR_FIGURE_FIELDS = {
     "phase_diff": ("mean_deg", "median_deg", "R", "fwhm_deg", "n_valid"),
+    "phase_diff_dist": (
+        "mean_deg",
+        "median_deg",
+        "R",
+        "fwhm_deg",
+        "n_clusters",
+        "n_valid",
+    ),
     "amp_diff": ("amp_median", "n_valid"),
-    "2dhist": ("mean_deg", "median_deg", "R", "fwhm_deg", "amp_median", "n_valid"),
+}
+
+# Options that were removed before v4; passing one is an explicit error instead of
+# a silent "analysed something else".
+REMOVED_OPTIONS = {
+    "--gate": (
+        "the amplitude-threshold sample selection was removed in v4: the sample of "
+        "every statistic and of every map is every valid (non-NaN) pixel of the "
+        "corrected canvas, weighted by |psi(r)|; there is no threshold to set"
+    ),
+    "--pct": (
+        "the percentile option of the removed hard-mask engine was already gone in "
+        "v3; the local-q-map Gaussian window needs no percentile"
+    ),
 }
 
 # One "field of view <value> nm" occurrence of a correction log
@@ -119,7 +141,24 @@ FOV_FROM_LOG_HELP = (
 # --------------------------------------------------------------------------- #
 # command line and small helpers
 # --------------------------------------------------------------------------- #
+def reject_removed_options(argv):
+    """Fail loudly when an option that this version removed is passed.
+
+    A removed option must never be silently ignored: the run would then produce a
+    different analysis than the caller asked for.  Every entry of
+    ``REMOVED_OPTIONS`` produces its own message and a non-zero exit code.
+    """
+    for token in list(argv):
+        name = token.split("=", 1)[0]
+        if name in REMOVED_OPTIONS:
+            raise SystemExit(f"error: {name} is not an option of this script: "
+                             f"{REMOVED_OPTIONS[name]}")
+
+
 def parse_args(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    reject_removed_options(argv)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "input", help="corrected topography CSV (square, may contain NaN)"
@@ -166,25 +205,6 @@ def parse_args(argv=None):
         default=3.0,
         help="Gaussian window width of the local-q-map demodulation "
         "engine in nm (default 3.0)",
-    )
-    parser.add_argument(
-        "--pair-bins-x",
-        type=int,
-        default=180,
-        help="bins of the pairwise 2D histogram along |D| mod pi (default 180)",
-    )
-    parser.add_argument(
-        "--pair-bins-y",
-        type=int,
-        default=100,
-        help="bins of the pairwise 2D histogram along the normalized "
-        "amplitude difference (default 100)",
-    )
-    parser.add_argument(
-        "--gate",
-        default="p50",
-        help="amplitude gate of the phase histogram: pNN percentile, "
-        "'none' for every valid pixel (default p50)",
     )
     parser.add_argument(
         "--anchor",
@@ -394,19 +414,6 @@ def fmt(value, decimals=3):
     return f"{value:.{decimals}f}"
 
 
-def fold_to_120(phi, weights):
-    """Statistics of the distribution folded onto the 120 degree interval.
-
-    ``phi mod 120 deg`` is mapped back onto the full circle (times 3) so the
-    ordinary circular estimators apply unchanged; this distribution is invariant
-    under a global 120 degree relabelling of the phases.
-    """
-    folded = np.mod(np.degrees(phi), 120.0)
-    return pm.weighted_stats(
-        np.radians(3.0 * folded), weights, bins=360, smooth_deg=2.0
-    )
-
-
 def cluster_widths(phi, weights, clusters, window_deg=15.0):
     """Amplitude-weighted circular standard deviation of each cluster's samples."""
     widths = []
@@ -517,7 +524,6 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
         ring,
         lambda_nm,
         nm_per_px,
-        gate=args.gate,
         bins=args.bins,
         smooth_deg=args.smooth_deg,
         prefix=tag + "_",
@@ -528,9 +534,9 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
     for index, (record, detected) in enumerate(zip(records, detections, strict=True)):
         name = record["name"]
         stats = record["stats"]
-        ungated, gated = stats["phase_ungated"], stats["phase_gated"]
+        phase = stats["phase"]
         theta_peak, amp = np.asarray(fields[name][1]), np.asarray(fields[name][2])
-        folded = fold_to_120(theta_peak[valid], amp[valid])
+        sample = pp.sample_mask(amp, valid)
         peaks.append(
             {
                 "name": name,
@@ -543,40 +549,37 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
                 "radius_px": float(record["radius_px"]),
                 "snr": float(record["snr"]),
                 "fft_amplitude": float(record["fft_amplitude"]),
-                "phase_ungated_mean_deg": float(ungated["mean_deg"]),
-                "phase_ungated_median_deg": float(ungated["median_deg"]),
-                "phase_ungated_R": float(ungated["resultant_R"]),
-                "phase_ungated_circ_std_deg": float(ungated["circ_std_deg"]),
-                "phase_gated_mean_deg": float(gated["mean_deg"]),
-                "phase_gated_median_deg": float(gated["median_deg"]),
-                "phase_gated_R": float(gated["resultant_R"]),
-                "phase_gated_fwhm_deg": float(gated["fwhm_deg"]),
-                "phase_gated_fwhm_deconv_deg": float(gated["fwhm_deconv_deg"]),
-                "phase_gated_iqr_deg": float(gated["iqr_deg"]),
-                "phase_gated_median_span_deg": float(gated["median_span_deg"]),
-                "n_clusters": int(gated["n_clusters"]),
+                "n_samples": int(stats["n_samples"]),
+                "n_zero_weight_px": int(
+                    np.count_nonzero(np.asarray(valid, dtype=bool) & ~sample)
+                ),
+                "phase_mean_deg": float(phase["mean_deg"]),
+                "phase_median_deg": float(phase["median_deg"]),
+                "phase_R": float(phase["resultant_R"]),
+                "phase_circ_std_deg": float(phase["circ_std_deg"]),
+                "phase_fwhm_deg": float(phase["fwhm_deg"]),
+                "phase_fwhm_deconv_deg": float(phase["fwhm_deconv_deg"]),
+                "phase_iqr_deg": float(phase["iqr_deg"]),
+                "phase_median_span_deg": float(phase["median_span_deg"]),
+                "phase_kappa": float(phase["kappa"]),
+                "n_clusters": int(phase["n_clusters"]),
                 "cluster_centres_deg": [
-                    float(c["centre_deg"]) for c in gated["clusters"]
+                    float(c["centre_deg"]) for c in phase["clusters"]
                 ],
                 "cluster_weight_fractions": [
-                    float(c["weight_fraction"]) for c in gated["clusters"]
+                    float(c["weight_fraction"]) for c in phase["clusters"]
                 ],
                 "cluster_widths_deg": cluster_widths(
-                    theta_peak[valid], amp[valid], gated["clusters"]
+                    theta_peak[sample], amp[sample], phase["clusters"]
                 ),
+                "amp_mean": float(stats["amp_mean"]),
                 "amp_median": float(stats["amp_median"]),
                 "amp_fwhm": float(stats["amp_fwhm"]),
-                "gate_fraction": float(stats["gate_fraction"]),
-                "folded120_median_deg": float(folded["median_deg"]),
-                "folded120_mean_deg": float(folded["mean_deg"]),
-                "folded120_R": float(folded["resultant_R"]),
-                "folded120_fwhm_deg": float(folded["fwhm_deg"]),
-                "folded120_n_clusters": int(folded["n_clusters"]),
             }
         )
 
     friedel = {}
-    for row in pp.pair_summary(records, "phase_ungated", "mean_deg"):
+    for row in pp.pair_summary(records, "phase", "mean_deg"):
         for left, right in (row["pair"], tuple(reversed(row["pair"]))):
             friedel[left] = {
                 "partner": right,
@@ -588,27 +591,20 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
         records,
         fields,
         valid,
-        key="phase_ungated",
+        key="phase",
         quantity="mean_deg",
         bins=args.bins,
         smooth_deg=args.smooth_deg,
-        gate=args.gate,
     )
     by_name = {record["name"]: record for record in records}
     combo = list(triple["combo"])
     three = {
         "members": combo,
         "values_deg": [
-            float(by_name[name]["stats"]["phase_ungated"]["mean_deg"]) for name in combo
-        ],
-        "values_mod120_deg": [
-            float(by_name[name]["stats"]["phase_ungated"]["mean_deg"] % 120.0)
-            for name in combo
+            float(by_name[name]["stats"]["phase"]["mean_deg"]) for name in combo
         ],
         "sum_deg": float(triple["scalar_sum_deg"]),
-        "sum_mod120_deg": float(triple["scalar_sum_mod120_deg"]),
         "mirror_sum_deg": float(triple["scalar_sum_mirror_deg"]),
-        "ladder_distance_deg": float(triple["scalar_ladder_dist_deg"]),
         "q_sum_detected_px": q_sum_detected,
         "q_sum_used_px": float(
             np.hypot(
@@ -620,12 +616,12 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
     }
     theta = np.asarray(triple["theta_field"])
     amp_product = np.asarray(triple["amp_product"])
-    good_theta = pp.gate_mask(amp_product, valid, args.gate)
+    sample_theta = pp.sample_mask(amp_product, valid)
     hist, edges = np.histogram(
-        theta[good_theta],
-        bins=361,
+        theta[sample_theta],
+        bins=HISTOGRAM_BINS,
         range=(0.0, 2 * np.pi),
-        weights=amp_product[good_theta],
+        weights=amp_product[sample_theta],
         density=True,
     )
     return {
@@ -652,14 +648,15 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
         "triple_product": {
             "members": combo,
             "q_sum_px": three["q_sum_used_px"],
-            "theta_mean_deg": float(triple["field_gated"]["mean_deg"]),
-            "theta_median_deg": float(triple["field_gated"]["median_deg"]),
-            "theta_R": float(triple["field_gated"]["resultant_R"]),
-            "theta_fwhm_deg": float(triple["field_gated"]["fwhm_deg"]),
-            "theta_n_clusters": int(triple["field_gated"]["n_clusters"]),
-            "theta_ladder_distance_deg": float(triple["field_ladder_dist_deg"]),
+            "n_samples": int(triple["field_n_samples"]),
+            "theta_mean_deg": float(triple["field"]["mean_deg"]),
+            "theta_median_deg": float(triple["field"]["median_deg"]),
+            "theta_R": float(triple["field"]["resultant_R"]),
+            "theta_fwhm_deg": float(triple["field"]["fwhm_deg"]),
+            "theta_fwhm_deconv_deg": float(triple["field"]["fwhm_deconv_deg"]),
+            "theta_n_clusters": int(triple["field"]["n_clusters"]),
+            "theta_circ_std_deg": float(triple["field"]["circ_std_deg"]),
             "theta_mirror_mean_deg": float(triple["field_mirror_mean_deg"]),
-            "theta_mean_3x_mod360_deg": float(triple["field_mean_3x_mod360_deg"]),
             "antipodal_members": [
                 [-float(by_name[name]["q_px"][0]), -float(by_name[name]["q_px"][1])]
                 for name in combo
@@ -679,16 +676,15 @@ def analyse_ring(tag, ring, topo, valid, lambda_nm, nm_per_px, args):
 
 
 # --------------------------------------------------------------------------- #
-# pairwise phase-difference analysis (three groups of pairs)
+# pairwise phase-difference analysis (the three pairs inside one ring)
 # --------------------------------------------------------------------------- #
-def pairwise_group(analysis, json_group, fig_group, pairs, args):
-    """All pairs of one group, with the three fields, the statistics and the paths.
+def pairwise_group(analysis, json_group, pairs, args):
+    """All pairs of one group, with the fields, the statistics and the JSON paths.
 
     ``json_group`` is the key of the group inside ``phase_stats.json``
-    (``within_1x1`` / ``within_r3`` / ``cross``); ``fig_group`` is the ``group``
-    recorded in the atlas manifest (``ring_1x1`` / ``ring_r3`` / ``cross``).
-    ``pairs`` is a list of ``((ring_j, index_j), (ring_k, index_k))`` whose position
-    is the number used in the JSON paths.
+    (``within_1x1`` / ``within_r3``), which is also the ``group`` recorded in the
+    atlas manifest; ``pairs`` is a list of ``((ring_j, index_j), (ring_k, index_k))``
+    whose position is the number used in the JSON paths.
     """
     entries = []
     for index, (left, right) in enumerate(pairs):
@@ -703,15 +699,10 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
             psi_k,
             analysis[tag_j]["valid"],
             analysis[tag_k]["valid"],
-            bins_phase=args.pair_bins_x,
-            bins_amplitude=args.pair_bins_y,
             bins=args.bins,
             smooth_deg=args.smooth_deg,
         )
         base = f"pairwise.groups.{json_group}.pairs.{index}"
-        prefix = (
-            f"cross_pair_{j}" if json_group == "cross" else f"{fig_group}_pair_{j}_{k}"
-        )
         entries.append(
             {
                 "index": index,
@@ -722,7 +713,7 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
                 "pair": {
                     "j": record_j["name"],
                     "k": record_k["name"],
-                    "group": fig_group,
+                    "group": json_group,
                     "key": f"{record_j['name']}+{record_k['name']}",
                 },
                 "q_j": [float(record_j["q_px"][0]), float(record_j["q_px"][1])],
@@ -732,14 +723,16 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
                 "phase_diff_R": result["phase_diff_R"],
                 "phase_diff_fwhm_deg": result["phase_diff_fwhm_deg"],
                 "phase_diff_n_clusters": result["phase_diff_n_clusters"],
+                "phase_diff_fwhm_deconv_deg": result["phase_diff_fwhm_deconv_deg"],
+                "phase_diff_iqr_deg": result["phase_diff_iqr_deg"],
+                "phase_diff_circ_std_deg": result["phase_diff_circ_std_deg"],
+                "phase_diff_cluster_centres_deg": [
+                    float(cluster["centre_deg"])
+                    for cluster in result["phase_diff_clusters"]
+                ],
                 "amp_diff_median": result["amp_diff_median"],
                 "amp_diff_fwhm": result["amp_diff_fwhm"],
                 "n_valid": result["n_valid"],
-                "hist_counts": [
-                    [round(value) for value in row] for row in result["hist_counts"]
-                ],
-                "hist_x_edges": [float(value) for value in result["hist_x_edges"]],
-                "hist_y_edges": [float(value) for value in result["hist_y_edges"]],
                 "paths": {
                     name: f"{base}.{name}"
                     for name in (
@@ -749,11 +742,12 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
                         "phase_diff_median",
                         "phase_diff_R",
                         "phase_diff_fwhm_deg",
+                        "phase_diff_n_clusters",
                         "amp_diff_median",
                         "n_valid",
                     )
                 },
-                "figure_prefix": prefix,
+                "figure_prefix": f"{json_group.replace('within_', 'ring_')}_pair_{j}_{k}",
                 "field": {
                     "phase_diff": result["phase_diff"],
                     "amp_diff": result["amp_diff"],
@@ -766,12 +760,12 @@ def pairwise_group(analysis, json_group, fig_group, pairs, args):
 
 
 def pairwise_analysis(analysis, args):
-    """The three groups of pairs: within ring_1x1, within ring_r3 and cross.
+    """The pairs inside each ring: (p0,p1), (p2,p3), (p4,p5) of the clockwise order.
 
-    Within a ring the pairs are (p0,p1), (p2,p3), (p4,p5) of the clockwise peak
-    numbering, i.e. three reflections 60 degrees apart that deliberately avoid the
-    Friedel pairs.  Across the rings every ``ring_1x1`` peak is paired with the
-    ``ring_r3`` peak closest to it in polar angle, six pairs in total.
+    These three pairs join reflections 60 degrees apart and deliberately avoid the
+    Friedel pairs, whose difference field is a trivial function of one field.  Pairs
+    that join one reflection of each ring are not analysed: the atlas of this
+    version reports every quantity inside a ring.
     """
     within_1x1 = [
         (("ring_1x1", j), ("ring_1x1", k))
@@ -781,32 +775,22 @@ def pairwise_analysis(analysis, args):
         (("ring_r3", j), ("ring_r3", k))
         for j, k in pp.within_ring_pairs(analysis["ring_r3"]["records"])
     ]
-    cross = [
-        (("ring_1x1", j), ("ring_r3", k))
-        for j, k in pp.cross_ring_pairs(
-            analysis["ring_1x1"]["records"], analysis["ring_r3"]["records"]
-        )
-    ]
     groups = {}
-    for json_group, fig_group, pairs in (
-        ("within_1x1", "ring_1x1", within_1x1),
-        ("within_r3", "ring_r3", within_r3),
-        ("cross", "cross", cross),
-    ):
+    for json_group, pairs in (("within_1x1", within_1x1), ("within_r3", within_r3)):
         groups[json_group] = {
             "group": json_group,
-            "figure_group": fig_group,
+            "figure_group": json_group.replace("within_", "ring_"),
             "n_pairs": len(pairs),
-            "pairs": pairwise_group(analysis, json_group, fig_group, pairs, args),
+            "pairs": pairwise_group(analysis, json_group, pairs, args),
         }
     return groups
 
 
 def ring_summary(analysis):
     """Headline scalars of one ring (atlas annotations and comparison table)."""
-    medians = np.radians([row["phase_gated_median_deg"] for row in analysis["peaks"]])
+    medians = np.radians([row["phase_median_deg"] for row in analysis["peaks"]])
     mean, resultant, _ = pm.circ_mean(medians)
-    fwhms = [row["phase_gated_fwhm_deg"] for row in analysis["peaks"]]
+    fwhms = [row["phase_fwhm_deg"] for row in analysis["peaks"]]
     finite = [value for value in fwhms if np.isfinite(value)]
     return {
         "mean_deg": float(np.degrees(mean) % 360.0),
@@ -853,10 +837,14 @@ def weighted_histogram(values, weights, bins, span=(0.0, 2 * np.pi)):
     return hist, edges
 
 
-def folded_histogram(theta, weights, bins=FOLDED_BINS):
-    """Density of ``theta mod 120 deg`` mapped back onto the full circle (x3)."""
-    folded = np.radians(3.0 * np.mod(np.degrees(np.asarray(theta, dtype=float)), 120.0))
-    return weighted_histogram(folded, weights, bins)
+def pair_d_histogram(phase_diff, mask, weight, bins=HISTOGRAM_BINS):
+    """Amplitude-weighted circular histogram of ``D`` over ``(-pi, pi]``."""
+    return weighted_histogram(
+        np.asarray(phase_diff, dtype=float)[mask],
+        np.asarray(weight, dtype=float)[mask],
+        bins,
+        span=(-np.pi, np.pi),
+    )
 
 
 def pair_annotation(entry, kind):
@@ -869,16 +857,100 @@ def pair_annotation(entry, kind):
     return values, paths
 
 
-def build_atlas(
-    outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detector, emit
-):
-    """Render the complete atlas (31 figures per ring + 19 cross-ring) and register it.
+def global_amplitudes(analysis):
+    """The one symmetric-log scale of all twelve amplitude maps.
 
-    Per ring: 3 figures for each of the six reflections, 4 summaries and 3 pairwise
-    figures for each of the three within-ring pairs; then the three figures of each
-    of the six cross-ring pairs plus their grid, 81 figures in total.
+    ``vmax`` is the largest valid ``|psi(r)|`` of the twelve demodulated fields of
+    the run (six reflections of each ring) and ``linthresh`` is the **pooled median
+    of their positive valid amplitudes**: both are global numbers that two
+    amplitude figures of the same run share, so the maps stay directly comparable.
+
+    The linear region is deliberately a *global statistic* and not the minimum of
+    the positive values: the minimum positive ``|psi|`` of a 2117 x 2117 canvas is
+    several decades below the bulk of the data, which squeezed the whole map into
+    the top ~15 % of the colour bar (measured t_med 0.87-0.96) and made the weak and
+    the strong reflections look alike.  Centring the linear region on the pooled
+    median keeps the same global ``vmin``/``vmax`` while spreading the bulk of the
+    data over the middle of the bar.
+    """
+    maxima = []
+    total = 0
+    for tag in RING_TAGS:
+        ring = analysis[tag]
+        valid = ring["valid"]
+        for record in ring["records"]:
+            amp = np.asarray(ring["fields"][record["name"]][2], dtype=float)
+            sample = pp.sample_mask(amp, valid)
+            if not np.any(sample):
+                continue
+            values = amp[sample]
+            maxima.append(float(values.max()))
+            total += int(np.count_nonzero(values > 0.0))
+    if not maxima:
+        raise SystemExit("no valid demodulated amplitude: cannot set a colour scale")
+    if total == 0:
+        raise SystemExit("no positive demodulated amplitude: cannot set a colour scale")
+    # one preallocated buffer instead of twelve copies plus a concatenation: the
+    # pooled median is taken over every positive valid sample value of the run
+    pooled = np.empty(total, dtype=float)
+    offset = 0
+    for tag in RING_TAGS:
+        ring = analysis[tag]
+        valid = ring["valid"]
+        for record in ring["records"]:
+            amp = np.asarray(ring["fields"][record["name"]][2], dtype=float)
+            sample = pp.sample_mask(amp, valid)
+            if not np.any(sample):
+                continue
+            positive = amp[sample]
+            positive = positive[positive > 0.0]
+            pooled[offset : offset + positive.size] = positive
+            offset += positive.size
+    linthresh = float(np.median(pooled, overwrite_input=True))
+    del pooled
+    return max(maxima), linthresh
+
+
+def build_atlas(outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detector):
+    """Render ``FIGURES_PER_RING`` figures per ring (60 in total) and register them.
+
+    Per ring: 3 figures for each of the six reflections (amplitude, theta map, theta
+    distribution), 3 ring summaries (theta histogram grid, theta map grid, q-space
+    ring members) and 3 figures for each of the three pairs inside the ring
+    (D(r), the D distribution, a(r)) -- 18 + 3 + 9 = 30, i.e. 60 for both rings.
     """
     book = at.Atlas(outdir, cmap, dpi=args.dpi)
+    lines = []
+
+    def emit(text=""):
+        print(text)
+        lines.append(text)
+
+    amp_vmax, amp_linthresh = global_amplitudes(analysis)
+    amps = at.amplitude_norm(amp_vmax, amp_linthresh)
+    norms = {
+        "amplitude": at.norm_record("amplitude", amps),
+        "theta": at.norm_record("theta", at.theta_norm()),
+        "phase_diff": at.norm_record("phase_diff", at.phase_diff_norm()),
+        "amp_diff": at.norm_record("amp_diff", at.amp_diff_norm()),
+        "fft2": at.norm_record("fft2", at.fft2_norm()),
+    }
+    emit(
+        f"# atlas colour scales (global, one per quantity class): theta maps "
+        f"[{at.THETA_VMIN:g}, {at.THETA_VMAX:.6f}] rad; the {len(RING_TAGS) * PEAKS_PER_RING} "
+        f"amplitude maps share one symlog scale vmin 0, vmax {amp_vmax:.6e} (the largest "
+        f"valid |psi| of the run), linthresh {amp_linthresh:.6e} (the pooled median of "
+        f"the positive valid |psi| of the run), linscale {at.AMPLITUDE_LINSCALE:g}; "
+        f"D maps [{-np.pi:.6f}, {np.pi:.6f}] rad; a maps [-1, 1]"
+    )
+    emit(
+        "# atlas titles: every figure carries its manifest title on the canvas "
+        "(wrapped, figure-level) and the writer refuses a figure without it"
+    )
+    emit(
+        "# atlas colour bars: every map / density figure carries its own colour bar "
+        "axes, disjoint from every data axes (asserted per figure before writing)"
+    )
 
     def peak_values(row):
         return {
@@ -887,10 +959,11 @@ def build_atlas(
             "qy_px": row["qy_px"],
             "radius_px": row["radius_px"],
             "snr": row["snr"],
-            "median_deg": row["phase_gated_median_deg"],
-            "fwhm_deg": row["phase_gated_fwhm_deg"],
+            "pixels": row["n_samples"],
+            "median_deg": row["phase_median_deg"],
+            "fwhm_deg": row["phase_fwhm_deg"],
             "n_clusters": row["n_clusters"],
-            "R": row["phase_ungated_R"],
+            "R": row["phase_R"],
             "amp_median": row["amp_median"],
         }
 
@@ -902,10 +975,11 @@ def build_atlas(
             "qy_px": f"{base}.qy_px",
             "radius_px": f"{base}.radius_px",
             "snr": f"{base}.snr",
-            "median_deg": f"{base}.phase_gated_median_deg",
-            "fwhm_deg": f"{base}.phase_gated_fwhm_deg",
+            "pixels": f"{base}.n_samples",
+            "median_deg": f"{base}.phase_median_deg",
+            "fwhm_deg": f"{base}.phase_fwhm_deg",
             "n_clusters": f"{base}.n_clusters",
-            "R": f"{base}.phase_ungated_R",
+            "R": f"{base}.phase_R",
             "amp_median": f"{base}.amp_median",
         }
 
@@ -919,17 +993,12 @@ def build_atlas(
                 values, paths = pair_annotation(entry, kind)
                 name = f"{covers}_{kind}.png"
                 label = f"{label_prefix} {pair['j']} {pair['k']} {kind}"
-                if kind == "2dhist":
-                    book.pair_2dhist(
-                        entry["hist_counts"],
-                        entry["hist_x_edges"],
-                        entry["hist_y_edges"],
-                        label,
-                        values,
-                        paths,
-                        group,
-                        name,
-                        key,
+                if kind == "phase_diff_dist":
+                    hist, edges = pair_d_histogram(
+                        field["phase_diff"], field["mask"], field["weight"]
+                    )
+                    book.pair_phase_diff_dist(
+                        hist, edges, label, values, paths, group, name, key
                     )
                 else:
                     book.pair_field(
@@ -950,19 +1019,18 @@ def build_atlas(
         valid, fields = ring["valid"], ring["fields"]
         ring_radius = ring["radius_px"]
         summary = ring_summary(ring)
-        triple = ring["triple_product"]
 
         for row, record in zip(peaks, records, strict=True):
             number = row["index"]
             theta = np.asarray(fields[record["name"]][1])
             amp = np.asarray(fields[record["name"]][2])
-            good = pp.gate_mask(amp, valid, args.gate)
+            sample = pp.sample_mask(amp, valid)
             values, paths = peak_values(row), peak_paths(tag, row)
-            hist, edges = weighted_histogram(theta[good], amp[good], HISTOGRAM_BINS)
-            folded, folded_edges = folded_histogram(theta[good], amp[good])
+            hist, edges = weighted_histogram(theta[sample], amp[sample], HISTOGRAM_BINS)
             book.amplitude_map(
                 amp,
-                valid,
+                sample,
+                amps,
                 f"{tag} p{number} amplitude",
                 values,
                 paths,
@@ -972,7 +1040,7 @@ def build_atlas(
             )
             book.theta_map(
                 theta,
-                good,
+                sample,
                 f"{tag} p{number} theta(r)",
                 values,
                 paths,
@@ -981,12 +1049,8 @@ def build_atlas(
                 number,
             )
             book.theta_distribution(
-                theta,
-                good,
                 hist,
                 edges,
-                folded,
-                folded_edges,
                 f"{tag} p{number} theta distribution",
                 values,
                 paths,
@@ -1014,18 +1078,18 @@ def build_atlas(
         for row, record in zip(peaks, records, strict=True):
             theta = np.asarray(fields[record["name"]][1])
             amp = np.asarray(fields[record["name"]][2])
-            good = pp.gate_mask(amp, valid, args.gate)
-            hist, edges = weighted_histogram(theta[good], amp[good], HISTOGRAM_BINS)
+            sample = pp.sample_mask(amp, valid)
+            hist, edges = weighted_histogram(theta[sample], amp[sample], HISTOGRAM_BINS)
             hist_items.append(
                 {
                     "hist": hist,
                     "edges": edges,
                     "label": f"p{row['index']} (median "
-                    f"{row['phase_gated_median_deg']:.3f} deg)",
+                    f"{row['phase_median_deg']:.3f} deg)",
                 }
             )
             map_items.append(
-                {"theta": theta, "good": good, "label": f"p{row['index']} theta(r)"}
+                {"theta": theta, "sample": sample, "label": f"p{row['index']} theta(r)"}
             )
         book.grid_theta_histograms(
             hist_items,
@@ -1056,37 +1120,6 @@ def build_atlas(
             f"{tag}_theta_map_summary.png",
         )
 
-        theta_triple = np.asarray(ring["theta_field"])
-        amp_product = np.asarray(ring["amp_product"])
-        good_theta = pp.gate_mask(amp_product, valid, args.gate)
-        hist, edges = weighted_histogram(
-            theta_triple[good_theta], amp_product[good_theta], HISTOGRAM_BINS
-        )
-        book.theta_field(
-            theta_triple,
-            good_theta,
-            amp_product,
-            hist,
-            edges,
-            f"{tag} triple product theta(r)",
-            {
-                "theta_deg": triple["theta_mean_deg"],
-                "ladder_dist_deg": triple["theta_ladder_distance_deg"],
-                "R": triple["theta_R"],
-                "q_sum_px": triple["q_sum_px"],
-                "n_peaks": ring["n_peaks"],
-            },
-            {
-                "theta_deg": f"rings_analysis.{tag}.triple_product.theta_mean_deg",
-                "ladder_dist_deg": f"rings_analysis.{tag}.triple_product.theta_ladder_distance_deg",
-                "R": f"rings_analysis.{tag}.triple_product.theta_R",
-                "q_sum_px": f"rings_analysis.{tag}.triple_product.q_sum_px",
-                "n_peaks": f"rings_analysis.{tag}.n_peaks",
-            },
-            tag,
-            f"{tag}_theta_field.png",
-        )
-
         group_key = "within_1x1" if tag == "ring_1x1" else "within_r3"
         pair_figures(pairwise[group_key]["pairs"], tag, f"{tag} within-pair")
         emit(
@@ -1096,30 +1129,9 @@ def build_atlas(
             f"{WITHIN_PAIRS_PER_RING} pairs x {len(PAIR_FIGURES)})"
         )
 
-    cross = pairwise["cross"]["pairs"]
-    pair_figures(cross, "cross", "cross-pair")
-    book.pair_grid(
-        [
-            {
-                "field": entry["field"]["phase_diff"],
-                "good": entry["field"]["mask"],
-                "label": f"{entry['j']} {entry['k']}",
-            }
-            for entry in cross
-        ],
-        "cross-pair D(r) grid",
-        {"n_pairs": pairwise["cross"]["n_pairs"]},
-        {"n_pairs": "pairwise.groups.cross.n_pairs"},
-        "cross",
-        "cross_pair_phase_diff_grid.png",
-    )
-    emit(
-        f"# atlas: cross -> {CROSS_FIGURES} figures "
-        f"({CROSS_PAIRS} pairs x {len(PAIR_FIGURES)} + "
-        f"{len(CROSS_SUMMARY_FIGURES)} grid)"
-    )
+    emit(f"# atlas: {TOTAL_FIGURES} figures in total, no figure spans the two rings")
 
-    return book.manifest(
+    manifest = book.manifest(
         extra={
             "field_of_view_nm": float(size_nm),
             "detector": detector,
@@ -1128,21 +1140,17 @@ def build_atlas(
             "r0_px": [float(r0[0]), float(r0[1])],
             "c_deg": float(c0),
             "figures_per_ring": FIGURES_PER_RING,
-            "figures_cross": CROSS_FIGURES,
             "figures_total": TOTAL_FIGURES,
             "within_pairs": "p0-p1, p2-p3, p4-p5 per ring",
-            "cross_pairs": (
-                "every ring_1x1 peak with the ring_r3 peak closest in polar angle"
+            "sample": (
+                "every valid (non-NaN) pixel of the corrected canvas, weight |psi(r)|; "
+                "a pair sample is the intersection of the two validity masks with "
+                "weight |psi_j psi_k|"
             ),
-            "reference_lines_deg": [0.0, 120.0, 240.0],
-            "reference_lines_note": (
-                "2 pi k / 3, k = 0, 1, 2 "
-                "(0/120/240 deg): the dashed "
-                "lines of every phase "
-                "histogram in this atlas"
-            ),
+            "norms": norms,
         }
     )
+    return manifest, lines
 
 
 # --------------------------------------------------------------------------- #
@@ -1232,17 +1240,16 @@ def main(argv=None):
     emit(f"# detector: {detector} ({detector_detail})")
     emit(
         f"# engine: gaussian window via local-q-map (lambda = {args.lambda_nm:g} nm = "
-        f"{window:.3f} px); gate {args.gate}; histogram {args.bins} bins with "
-        f"{args.smooth_deg:g} deg smoothing"
+        f"{window:.3f} px); sample: every valid (non-NaN) pixel weighted by |psi(r)|; "
+        f"histogram {args.bins} bins with {args.smooth_deg:g} deg smoothing"
     )
     emit(
         "# phase definition: psi_q(r) = FFT^-1{ FFT[ T(r) exp(-i q.r) ] * "
         "exp(-lambda^2 |k|^2 / 2) }, theta_q(r) = arg(psi_q(r)) with NO q.(r - c) ramp "
         "and no per-reflection constant (theta ~ +phi of the reflection); the phase "
-        "VALUE of a reflection is the amplitude-weighted circular mean over all valid "
-        "pixels (ungated), equal to arg sum_r T(r) exp(-i q.r) exactly whatever the "
-        "window width is; median, FWHM and clusters describe the amplitude-gated "
-        "sample and always state the gate"
+        "VALUE of a reflection is the amplitude-weighted circular mean over every valid "
+        "pixel, equal to arg sum_r T(r) exp(-i q.r) exactly whatever the window width "
+        "is, and the median / IQR / FWHM / clusters describe that same sample"
     )
 
     rings = pp.group_rings(records, tol_frac=args.ring_cluster_tol, min_members=6)
@@ -1389,24 +1396,23 @@ def main(argv=None):
                 f"snr={row['snr']:10.1f}  radius={row['radius_px']:9.3f} px"
             )
             emit(
-                f"      phase (ungated circular mean) {row['phase_ungated_mean_deg']:9.4f}"
-                f" deg  R {row['phase_ungated_R']:.5f}  | median(ungated) "
-                f"{row['phase_ungated_median_deg']:9.4f} deg"
+                f"      phase (circular mean over {row['n_samples']} valid pixels) "
+                f"{row['phase_mean_deg']:9.4f} deg  R {row['phase_R']:.5f}  | median "
+                f"{row['phase_median_deg']:9.4f} deg"
             )
             emit(
-                f"      gated shape: median {row['phase_gated_median_deg']:9.4f} deg, "
-                f"fwhm {fmt(row['phase_gated_fwhm_deg'])} deg (deconvolved "
-                f"{fmt(row['phase_gated_fwhm_deconv_deg'])}), iqr "
-                f"{fmt(row['phase_gated_iqr_deg'])} deg, clusters {row['n_clusters']} "
+                f"      distribution shape: median {row['phase_median_deg']:9.4f} deg, "
+                f"fwhm {fmt(row['phase_fwhm_deg'])} deg (deconvolved "
+                f"{fmt(row['phase_fwhm_deconv_deg'])}), iqr "
+                f"{fmt(row['phase_iqr_deg'])} deg, clusters {row['n_clusters']} "
                 f"at {[round(c, 3) for c in row['cluster_centres_deg']]} widths "
                 f"{[None if not np.isfinite(w) else round(w, 3) for w in row['cluster_widths_deg']]}"
                 f" weights {[round(w, 4) for w in row['cluster_weight_fractions']]}"
             )
             emit(
                 f"      amplitude median {row['amp_median']:.4e}, fwhm "
-                f"{row['amp_fwhm']:.4e}; folded 120 deg: median "
-                f"{row['folded120_median_deg']:9.4f} deg, R {row['folded120_R']:.5f}, "
-                f"fwhm {fmt(row['folded120_fwhm_deg'])} deg"
+                f"{row['amp_fwhm']:.4e}; pixels dropped for a zero weight "
+                f"{row['n_zero_weight_px']} of {row['n_samples'] + row['n_zero_weight_px']}"
             )
         three = analysis[tag]["three_independent"]
         triple = analysis[tag]["triple_product"]
@@ -1419,22 +1425,19 @@ def main(argv=None):
         )
         emit(
             f"   three independent phases {three['members']}: values "
-            f"{[round(v, 4) for v in three['values_deg']]} mod 120 "
-            f"{[round(v, 4) for v in three['values_mod120_deg']]}, sum "
-            f"{three['sum_deg']:.4f} deg (mod 120 {three['sum_mod120_deg']:.4f}, mirror "
-            f"{three['mirror_sum_deg']:.4f}), distance to the 0/120/240 ladder "
-            f"{three['ladder_distance_deg']:.4f} deg"
+            f"{[round(v, 4) for v in three['values_deg']]}, sum "
+            f"{three['sum_deg']:.4f} deg (mirror {three['mirror_sum_deg']:.4f} deg)"
         )
         emit(
-            f"   per-pixel triple product theta: mean {triple['theta_mean_deg']:.4f} deg "
-            f"(mirror {triple['theta_mirror_mean_deg']:.4f}), ladder distance "
-            f"{triple['theta_ladder_distance_deg']:.4f} deg, R {triple['theta_R']:.5f}, "
+            f"   per-pixel triple product theta over {triple['n_samples']} valid pixels: "
+            f"mean {triple['theta_mean_deg']:.4f} deg (mirror "
+            f"{triple['theta_mirror_mean_deg']:.4f}), median "
+            f"{triple['theta_median_deg']:.4f} deg, R {triple['theta_R']:.5f}, "
             f"fwhm {fmt(triple['theta_fwhm_deg'])} deg, clusters "
-            f"{triple['theta_n_clusters']}, 3 theta mod 360 "
-            f"{triple['theta_mean_3x_mod360_deg']:.4f} deg"
+            f"{triple['theta_n_clusters']}"
         )
         emit(
-            f"   ring summary of the six gated medians: circular mean "
+            f"   ring summary of the six phase medians: circular mean "
             f"{summary['mean_deg']:.4f} deg, R {summary['R']:.5f}, max clusters "
             f"{summary['n_clusters_max']}, mean fwhm {fmt(summary['fwhm_mean_deg'])} deg"
         )
@@ -1442,9 +1445,7 @@ def main(argv=None):
     # ---- gauge fix: the six ring_1x1 reflections pin the lattice origin ---- #
     recs = analysis["ring_1x1"]["records"]
     qs = [record["q_px"] for record in recs]
-    phases = [
-        np.radians(record["stats"]["phase_ungated"]["mean_deg"]) for record in recs
-    ]
+    phases = [np.radians(record["stats"]["phase"]["mean_deg"]) for record in recs]
     best, minima = pm.fit_origin(qs, phases, n)
     r0, c0 = best["r0_px"], best["c_rad"]
     emit("")
@@ -1465,7 +1466,7 @@ def main(argv=None):
         fixed = (
             np.degrees(
                 pm.gauge_phase(
-                    np.radians(record["stats"]["phase_ungated"]["mean_deg"]),
+                    np.radians(record["stats"]["phase"]["mean_deg"]),
                     record["q_px"],
                     r0,
                     c0,
@@ -1474,7 +1475,7 @@ def main(argv=None):
             )
             % 360.0
         )
-        reference_deviations.append(float(pm.dist_to_ladder_deg(fixed, (0.0,))))
+        reference_deviations.append(float(pm.dist_to_deg(fixed, 0.0)))
     ref_rms = float(np.sqrt(np.mean(np.square(reference_deviations))))
     emit(
         f"# the six gauge-fixed ring_1x1 phases deviate from 0 by "
@@ -1534,16 +1535,6 @@ def main(argv=None):
             )
             for record in analysis["ring_r3"]["records"]
         ]
-        multiple_of_120 = bool(
-            all(
-                min(
-                    abs(np.radians(value)) % np.radians(120.0),
-                    np.radians(120.0) - abs(np.radians(value)) % np.radians(120.0),
-                )
-                < 1e-9
-                for value in shifts
-            )
-        )
         branch_table.append(
             {
                 "branch": index,
@@ -1557,7 +1548,6 @@ def main(argv=None):
                 ],
                 "lattice_translation_of_the_best_fit": lattice,
                 "induced_ring_r3_phase_shifts_deg": shifts,
-                "induced_shifts_are_multiples_of_120deg": multiple_of_120,
             }
         )
     lattice_branches = sum(
@@ -1568,21 +1558,12 @@ def main(argv=None):
         f"them direct-lattice translations of the best fit (bit-identical residual); a "
         f"translation shifts the ring_r3 phases by (2 pi / N) q.L per reflection"
     )
-    if any(
-        row["induced_shifts_are_multiples_of_120deg"]
-        for row in branch_table
-        if row["branch"] > 0
-    ):
-        emit(
-            "# those induced shifts happen to be multiples of 120 deg in this data set"
-        )
-    else:
-        emit(
-            "# those induced shifts are NOT multiples of 120 deg: the ring_r3 absolute "
-            "phases are comparable only after the r0 branch is stated explicitly, and "
-            "cross-peak differences and the position of the folded distribution move "
-            "with the branch; invariant are the closing sums and the per-peak shape"
-        )
+    emit(
+        "# the induced shifts are listed per branch in the JSON (gauge.branch_table): a "
+        "point-lattice translation of r0 moves the absolute ring_r3 phases, so a "
+        "single-peak absolute phase is comparable only after the branch is stated; the "
+        "closing sums and the per-peak distribution shape are invariant"
+    )
 
     for tag in ("ring_1x1", "ring_r3"):
         for row, record in zip(
@@ -1591,7 +1572,7 @@ def main(argv=None):
             fixed = (
                 np.degrees(
                     pm.gauge_phase(
-                        np.radians(row["phase_ungated_mean_deg"]),
+                        np.radians(row["phase_mean_deg"]),
                         record["q_px"],
                         r0,
                         c0,
@@ -1601,7 +1582,6 @@ def main(argv=None):
                 % 360.0
             )
             row["gauge_mean_deg"] = float(fixed)
-            row["gauge_mean_mod120_deg"] = float(fixed % 120.0)
             row["friedel_partner"] = analysis[tag]["friedel"][row["name"]]["partner"]
             row["friedel_sum_deg"] = analysis[tag]["friedel"][row["name"]]["sum_deg"]
             row["friedel_deviation_deg"] = analysis[tag]["friedel"][row["name"]][
@@ -1622,13 +1602,11 @@ def main(argv=None):
     )
     emit(
         f"# groups: within_1x1 {pairwise['within_1x1']['n_pairs']} pairs, within_r3 "
-        f"{pairwise['within_r3']['n_pairs']} pairs, cross "
-        f"{pairwise['cross']['n_pairs']} pairs; effective pixels = intersection of "
-        f"the two validity masks; weight |psi_j psi_k|; 2D histogram x = |D| mod pi "
-        f"in [0, pi] ({args.pair_bins_x} bins), y = a in [-1, 1] "
-        f"({args.pair_bins_y} bins)"
+        f"{pairwise['within_r3']['n_pairs']} pairs; sample = intersection of the two "
+        f"validity masks, weight |psi_j psi_k|; D distribution = amplitude-weighted "
+        f"circular histogram over (-pi, pi] with {HISTOGRAM_BINS} bins"
     )
-    for group_name in ("within_1x1", "within_r3", "cross"):
+    for group_name in ("within_1x1", "within_r3"):
         for entry in pairwise[group_name]["pairs"]:
             emit(
                 f"   [{group_name}] D({entry['j']} - {entry['k']}): mean "
@@ -1645,9 +1623,10 @@ def main(argv=None):
     emit(f"# colormap: {cmap_source}")
     if not args.no_figures:
         at.setup_style()
-        manifest = build_atlas(
-            outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detector, emit
+        manifest, atlas_lines = build_atlas(
+            outdir, analysis, pairwise, cmap, args, r0, c0, size_nm, detector
         )
+        log_lines.extend(atlas_lines)
 
     # ---- JSON ------------------------------------------------------------ #
     payload = {
@@ -1667,7 +1646,11 @@ def main(argv=None):
         "engine": "local-q-map gaussian window (theta = arg psi, no q.r ramp)",
         "lambda_nm": float(args.lambda_nm),
         "window_px": float(window),
-        "gate": args.gate,
+        "sample": (
+            "every valid (non-NaN) pixel of the corrected canvas, weight |psi(r)|; "
+            "a pair sample is the intersection of the two validity masks, weight "
+            "|psi_j psi_k|; there is no threshold anywhere"
+        ),
         "bins": args.bins,
         "smooth_deg": args.smooth_deg,
         "patch_half": args.patch_half,
@@ -1678,8 +1661,8 @@ def main(argv=None):
             "reference_ring": "ring_1x1",
             "definition": "gauge_phase(phi, q) = phi - (2 pi / N) q.r0 - c (mod 2 pi)",
             "sign_convention_note": "the opposite sign convention differs by a constant "
-            "rotation of every reported phase; shapes, "
-            "concentrations and ladder distances are identical",
+            "rotation of every reported phase; the shapes and "
+            "concentrations of the distributions are identical",
             "r0_px": [float(r0[0]), float(r0[1])],
             "c_deg": float(best["c_deg"]),
             "rms_deg": float(best["rms_deg"]),
@@ -1736,26 +1719,20 @@ def main(argv=None):
                 "arg(psi_j conj(psi_k)), in (-pi, pi]",
                 "amp_diff_field": "a_jk(r) = (|psi_j(r)| - |psi_k(r)|) / "
                 "(|psi_j(r)| + |psi_k(r)|), in [-1, 1]",
-                "effective_pixels": "intersection of the two validity masks",
+                "sample": "intersection of the two validity masks, restricted to the "
+                "pixels where |psi_j psi_k| > 0",
                 "weight": "|psi_j(r) psi_k(r)|",
-                "histogram_axes": {
-                    "x": "|D| mod pi, folded onto [0, pi] (rad)",
-                    "y": "a_jk in [-1, 1]",
-                },
-                "histogram_note": "hist_counts[i, j] is the weighted count of x in "
-                "bin i and y in bin j (shape [bins_x, bins_y])",
+                "d_distribution": "amplitude-weighted circular histogram of D itself "
+                "over (-pi, pi] (the histogram drawn by RING_pair_<j>_<k>_"
+                "phase_diff_dist.png)",
                 "within_pairs": "p0-p1, p2-p3, p4-p5 of the clockwise peak numbering "
                 "(60 deg apart; the Friedel pairs p0-p3, p1-p4, p2-p5 "
                 "are avoided because psi_{-q} = conj(psi_q) makes their "
                 "difference field a trivial function of one field)",
-                "cross_pairs": "every ring_1x1 peak paired with the ring_r3 peak "
-                "closest to it in polar angle (6 pairs)",
             },
             "bins": {
-                "x": int(args.pair_bins_x),
-                "y": int(args.pair_bins_y),
-                "x_range": [0.0, float(np.pi)],
-                "y_range": [-1.0, 1.0],
+                "d": int(HISTOGRAM_BINS),
+                "d_range": [-float(np.pi), float(np.pi)],
             },
             "groups": {
                 name: {
@@ -1783,22 +1760,20 @@ def main(argv=None):
                 "pairwise": WITHIN_PAIRS_PER_RING * len(PAIR_FIGURES),
                 "total": FIGURES_PER_RING,
             },
-            "declared_cross": {
-                "pairs": CROSS_PAIRS,
-                "pairwise": CROSS_PAIRS * len(PAIR_FIGURES),
-                "summary": len(CROSS_SUMMARY_FIGURES),
-                "total": CROSS_FIGURES,
-            },
             "declared_total": TOTAL_FIGURES,
         },
         "conventions": {
             "peak_order": "p0 is the reflection closest to +qy (12 o'clock), the "
             "following ones run clockwise in the (q_x, q_y) plane",
-            "phase_value": "amplitude-weighted circular mean over all valid pixels "
-            "(ungated) = arg sum_r psi_q(r) = arg sum_r T(r) "
+            "sample": "every valid (non-NaN) pixel of the corrected canvas, weight "
+            "|psi(r)|; a pair sample is the intersection of the two validity "
+            "masks with weight |psi_j psi_k|; the pixels excluded are exactly "
+            "those with a non-finite or zero weight",
+            "phase_value": "amplitude-weighted circular mean over the sample = "
+            "arg sum_r psi_q(r) = arg sum_r T(r) "
             "exp(-i q.r) (exact for every window width)",
-            "phase_shape": "median/FWHM/clusters of the amplitude-gated sample "
-            f"(gate {args.gate}, bins {args.bins}, smoothing "
+            "phase_shape": "median/IQR/FWHM/clusters of the same sample "
+            f"(bins {args.bins}, smoothing "
             f"{args.smooth_deg} deg)",
             "engine": "gaussian window demodulation from the sibling local-q-map skill: "
             "psi_q(r) = FFT^-1{ FFT[ T(r) exp(-i q.r) ] * "
@@ -1822,25 +1797,31 @@ def main(argv=None):
             "triangle_independent": "three reflections whose wavevectors sum to zero; "
             "the other triple is their antipodal mirror",
             "triple_product": "sum of the three independent per-pixel phase fields "
-            f"(wavevector sum projected to zero: {args.project_q})",
-            "folded_120": "per-pixel theta folded by mod 120 deg and mapped back onto "
-            "the circle; invariant under a global 120 deg relabelling",
+            f"(wavevector sum projected to zero: {args.project_q}); the "
+            "JSON keeps its mean/median/R/FWHM/cluster count, no figure "
+            "is drawn from it",
             "pairwise": "D_jk = wrap(arg psi_j - arg psi_k), a_jk = (|psi_j| - |psi_k|) "
-            "/ (|psi_j| + |psi_k|); the 2D histogram folds |D| onto "
-            "[0, pi] and spans a in [-1, 1]",
-            "ladder": "the three reference lines of every phase histogram are "
-            "2 pi k / 3 (0/120/240 deg), a mathematical ladder",
+            "/ (|psi_j| + |psi_k|); the pair figures are the D(r) map, the "
+            "amplitude-weighted circular histogram of D over (-pi, pi] and "
+            "the a(r) map on the pair sample",
+            "colour_scales": "global: every theta(r) map spans [0, 2 pi]; the twelve "
+            "amplitude maps share one symmetric-log scale (one vmax, one "
+            "linthresh); every D(r) map spans [-pi, pi]; every a(r) map "
+            "spans [-1, 1]; the records are in atlas.norms and are "
+            "compared with the manifest by atlas.py --check",
+            "colour_bars": "every map / density figure carries a colour bar in its own "
+            "axes, disjoint from every data axes (asserted while writing "
+            "and re-audited by atlas.py --check)",
             "gauge": "theta~ = theta - (2 pi / N) q.r0 - c with (r0, c) from the six "
             "ring_1x1 reflections; the solution set also contains every "
             "direct-lattice translation of r0 (identical residual), which "
-            "shifts the ring_r3 phases by (2 pi / N) q.L per reflection -- "
-            "generally not a multiple of 120 deg, so ring_r3 absolute phases "
-            "are comparable only after the r0 branch is stated",
+            "shifts the ring_r3 phases by (2 pi / N) q.L per reflection, so "
+            "ring_r3 absolute phases are comparable only after the r0 "
+            "branch is stated",
             "invariant_under_the_r0_choice": "Friedel pair sums, the three-independent "
             "sum and the per-pixel triple product, the "
             "per-peak distribution shape (R, FWHM, "
-            "cluster count and widths), amplitude and "
-            "coherence",
+            "cluster count and widths) and the pairwise fields",
             "single_peak_absolute_phase": "reference only: state which branch of r0 was "
             "used and attach the systematic band "
             "sigma_peak/3 derived from the reference-ring "
@@ -1883,7 +1864,7 @@ def main(argv=None):
                     tag: int(per_group.get(tag, {}).get("figures", 0))
                     for tag in RING_TAGS
                 },
-                "cross": int(per_group.get("cross", {}).get("figures", 0)),
+                "norms": {name: dict(record) for name, record in manifest["norms"].items()},
             }
         )
         (outdir / "atlas_manifest.json").write_text(
@@ -1921,8 +1902,8 @@ def main(argv=None):
                 "subject": "+".join(three["members"]),
                 "partner": "",
                 "value_deg": three["sum_deg"],
-                "deviation_deg": three["ladder_distance_deg"],
-                "note": f"= 3 Phi_bar (mod 360); distance to the 0/120/240 ladder; mirror "
+                "deviation_deg": "",
+                "note": f"= 3 Phi_bar (mod 360); mirror sum "
                 f"{three['mirror_sum_deg']:.4f} deg; |sum q| used "
                 f"{three['q_sum_used_px']:.4f} px",
             }
@@ -1934,7 +1915,7 @@ def main(argv=None):
                 "subject": "+".join(triple["members"]),
                 "partner": "",
                 "value_deg": triple["theta_mean_deg"],
-                "deviation_deg": triple["theta_ladder_distance_deg"],
+                "deviation_deg": "",
                 "note": f"theta(r) = 3 Phi_d inside a region; R = {triple['theta_R']:.5f}, "
                 f"fwhm {triple['theta_fwhm_deg']:.4f} deg, mirror "
                 f"{triple['theta_mirror_mean_deg']:.4f} deg",
@@ -1960,10 +1941,11 @@ def main(argv=None):
                     for info in analysis[tag]["friedel"].values()
                 ),
                 "three_sum_deg": three["sum_deg"],
-                "three_ladder_distance_deg": three["ladder_distance_deg"],
                 "theta_mean_deg": triple["theta_mean_deg"],
-                "theta_ladder_distance_deg": triple["theta_ladder_distance_deg"],
+                "theta_median_deg": triple["theta_median_deg"],
                 "theta_R": triple["theta_R"],
+                "theta_fwhm_deg": triple["theta_fwhm_deg"],
+                "theta_n_clusters": triple["theta_n_clusters"],
                 "q_sum_used_px": triple["q_sum_px"],
             }
         )
@@ -1972,30 +1954,30 @@ def main(argv=None):
     emit("")
     emit("== reading guide ==")
     emit(
-        "# phase value       -> amplitude-weighted circular mean (ungated) = "
-        "arg sum_r T(r) exp(-i q.r); it is window independent and carries no ramp"
+        "# phase value       -> amplitude-weighted circular mean over every valid "
+        "pixel = arg sum_r T(r) exp(-i q.r); it is window independent and carries no ramp"
     )
     emit(
         "# pairwise D / a    -> D_jk = wrap(arg psi_j - arg psi_k), a_jk = "
-        "(|psi_j| - |psi_k|)/(|psi_j| + |psi_k|); the histogram folds |D| onto "
-        "[0, pi] and spans a in [-1, 1]; the within-ring pairs avoid the Friedel "
-        "pairs, whose difference field is a trivial function of one field"
+        "(|psi_j| - |psi_k|)/(|psi_j| + |psi_k|) on the intersection of the two "
+        "validity masks; the D distribution is the amplitude-weighted circular "
+        "histogram of D over (-pi, pi]; the within-ring pairs avoid the Friedel pairs, "
+        "whose difference field is a trivial function of one field"
     )
     emit(
-        "# median/FWHM       -> shape of the GATED distribution; quoting them requires "
-        "the gate"
+        "# median/IQR/FWHM   -> shape of the same sample the maps are drawn from; the "
+        "sample is every valid pixel, so no condition has to be quoted with them"
     )
     emit(
-        "# cluster count     -> how many distinct phases are present (independent of "
-        "the 0/120/240 ladder)"
+        "# cluster count     -> how many distinct phases are present in the sample"
     )
     emit(
-        "# amplitude/coherence -> whether a reflection is still there (a balanced "
-        "mixture can cancel it)"
+        "# amplitude         -> whether a reflection is still there (a balanced mixture "
+        "can cancel it); the amplitude maps of a run share one colour scale"
     )
     emit(
-        "# three-phase sum   -> whether the weighted circular mean of the phases sits "
-        "near the ladder (a value-range test, not a count of regions)"
+        "# three-phase sum   -> the weighted circular mean of the phases of the three "
+        "independent reflections; a value-range statement, not a count of regions"
     )
     emit(
         "# Friedel pair sum  -> identity of a real image; a non-zero value means an "
@@ -2008,22 +1990,21 @@ def main(argv=None):
     emit(
         "# robust quantities -> Friedel pair sums, the three-independent sum, the "
         "per-pixel triple product, the per-peak distribution shape (R/FWHM/clusters/"
-        "widths) and the amplitude/coherence: these are the numbers to compare across "
+        "widths) and the pairwise D/a fields: these are the numbers to compare across "
         "conventions"
     )
     emit(
         "# reference only    -> a single-peak absolute phase changes with the r0 branch "
-        "(by (2 pi / N) q.L, generally not a multiple of 120 deg); quote it together "
-        "with the branch and the systematic band sigma_peak/3 printed above"
+        "(by (2 pi / N) q.L); quote it together with the branch and the systematic band "
+        "sigma_peak/3 printed above"
     )
     emit(
         "# mirror ambiguity  -> the other closing triple is antipodal, so a signed theta "
-        "and '3 theta mod 360' mirror around 0 while the distance to the 0/120/240 "
-        "ladder is unchanged; every theta line above prints both"
+        "mirrors around 0 (the mirror mean is printed next to every theta value)"
     )
     emit(
         "# two rings, one definition: every quantity above is computed with the same "
-        "estimator and the same gate for ring_1x1 and ring_r3"
+        "estimator and the same sample rule for ring_1x1 and ring_r3"
     )
     emit("")
     emit(
