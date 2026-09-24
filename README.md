@@ -149,7 +149,28 @@ dI_dV = btk.spectrum(E_min=-5, E_max=5, n_points=500, T=0)  # 零温
 dI_dV_T = btk.spectrum(T=4.2)  # 有限温度
 ```
 
-### 7. OpenMX 输出解析
+### 7. Usadel 扩散极限能隙 / STS 谱
+
+**脏极限**（`l << xi`）的 1D 稳态 Usadel 求解器：自洽能隙剖面 `Delta(x)`、局域态密度 `N(E,x)` 与 STS 隧道谱，和 §6 的**弹道** BTK 互补（判据是平均自由程 `l` 与相干长度 `xi` 的比较，两个极限不可互换）。数学规范见 [`docs/design/usadel_gap_model.md`](docs/design/usadel_gap_model.md)：
+
+```python
+import numpy as np
+from stm_data_processing.utils.usadel import Usadel1D
+
+u = Usadel1D(Delta0=1e-3, D=1e16)          # 能隙 1 meV，D = 1e16 nm^2/s（xi = 81 nm）
+x, delta_x = u.solve_gap(geometry="bulk")  # 自洽 Delta(x)（松原分支）
+
+V, dIdV = u.tunnel_spectrum(np.linspace(-3e-3, 3e-3, 401), T=4.2, Gamma=1e-5)
+N_edge = u.dos(0.0, position=200.0, geometry="sn", d=200.0, Gamma=1e-6)  # S/N 诱导 minigap
+```
+
+演示图集（5 张 PNG：BCS DOS 随 T、SN minigap 随 N 层厚度、跨界面 LDOS、STS 谱族、与 BTK 对照）：
+
+```bash
+.venv/bin/python scripts/usadel_sts_demo.py    # 输出到 var/usadel_demo/
+```
+
+### 8. OpenMX 输出解析
 
 ```python
 from stm_data_processing.dft.openmx.parser import OpenMX
@@ -160,7 +181,7 @@ bvecs = mx.read_bvecs_from_out("system.out")
 diff_cube_files("before.cube", "after.cube", "diff.cube")  # 势差分析
 ```
 
-### 8. FFT Bragg 峰检测与晶格精修
+### 9. FFT Bragg 峰检测与晶格精修
 
 在一张 FFT 图上尽可能多地检出 Bragg 点，给出亚像素 `q`、逐点不确定度与整数指数 `(h,k)`，并对晶格做带全局质量门的约束精修：
 
@@ -208,7 +229,7 @@ for peak in result.peaks[:3]:  # 亚像素 q 与不确定度（px）
 STM_DataProcessing/
 ├── .github/workflows/ci.yml   # CI：lint（含测量数据守卫）/ 核心导入 / 数据无关回归子集
 ├── src/stm_data_processing/   # 包本体（轻量核心，见下）
-├── tests/regression/          # 回归自检：9 个 check_*.py + pytest 入口
+├── tests/regression/          # 回归自检：12 个 check_*.py + pytest 入口
 ├── scripts/                   # 运维/服务器脚本（run_lindhard_re_chi_parallel.py、server/）
 ├── docs/                      # 接口文档、设计规格、使用指南
 ├── app/                       # Tauri 桌面应用（latticeSIM）
@@ -231,7 +252,8 @@ src/stm_data_processing/
 ├── io/                # IO 层：nanonis_loader / w90hr_loader / ek2d_io /
 │                      #        lattice_loader / qpi_io / susceptibility_io
 └── utils/             # lattice（高精度）/ lattice_operations / bragg_peak_detection /
-                       # lindhard1dfree / btk / miscellaneous / monitor / plot_funcs /
+                       # lindhard1dfree / btk（弹道 BTK）/ usadel（扩散极限 Usadel）/
+                       # miscellaneous / monitor / plot_funcs /
                        # nanonis_ppt_generator（自动 PPT 报告）
 ```
 

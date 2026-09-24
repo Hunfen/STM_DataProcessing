@@ -59,7 +59,8 @@
 | `lattice.py` | [utils/lattice.md](utils/lattice.md) |
 | `lattice_operations.py` | [utils/lattice_operations.md](utils/lattice_operations.md) |
 | `lindhard1dfree.py` | [utils/lindhard1dfree.md](utils/lindhard1dfree.md) |
-| `btk.py` | [utils/btk.md](utils/btk.md) |
+| `btk.py`（弹道极限 BTK） | [utils/btk.md](utils/btk.md) |
+| `usadel.py`（扩散极限 Usadel 能隙/STS 谱） | [utils/usadel.md](utils/usadel.md) |
 | `miscellaneous.py` | [utils/miscellaneous.md](utils/miscellaneous.md) |
 | `monitor.py` | [utils/monitor.md](utils/monitor.md) |
 | `plot_funcs.py` | [utils/plot_funcs.md](utils/plot_funcs.md) |
