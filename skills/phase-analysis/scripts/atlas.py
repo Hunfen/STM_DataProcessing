@@ -462,12 +462,13 @@ def title_strip_px(fig, data_axes, dpi):
     try:
         renderer = fig.canvas.get_renderer()
         bbox = fig.get_tightbbox(renderer)  # inches
-        top_inch = max(
-            (axes.get_position().y1 for axes in data_axes), default=0.9
-        ) * fig.get_figheight()
-        return max(0, int(round((bbox.y1 - top_inch) * float(dpi))))
+        top_inch = (
+            max((axes.get_position().y1 for axes in data_axes), default=0.9)
+            * fig.get_figheight()
+        )
+        return max(0, round((bbox.y1 - top_inch) * float(dpi)))
     except Exception:  # pragma: no cover - a renderer-less canvas falls back
-        return max(1, int(round(TITLE_BAND_FRACTION * fig.get_figheight() * float(dpi))))
+        return max(1, round(TITLE_BAND_FRACTION * fig.get_figheight() * float(dpi)))
 
 
 def title_band_ink(image, rows=None):
@@ -737,7 +738,7 @@ class Atlas:
         """
         annotation = round_fields(values)
         title = title_for(label, annotation)
-        rendered = require_canvas_title(fig, title)
+        require_canvas_title(fig, title)
         axes_titles = axes_title_texts(list(data_axes))
         if len(data_axes) == 1 and axes_titles:
             raise AssertionError(
@@ -769,7 +770,7 @@ class Atlas:
             "title": title,
             "canvas_title": title,
             "axes_titles": list(axes_titles),
-            "panel_axes": int(len(data_axes)),
+            "panel_axes": len(data_axes),
             "title_strip_px": int(strip),
             "label": label,
             "annotation": annotation,
@@ -870,9 +871,7 @@ class Atlas:
         return fig.colorbar(mappable, ax=ax, **kwargs).ax
 
     # -- per-reflection figures -------------------------------------------- #
-    def amplitude_map(
-        self, amp, sample, norm, label, values, paths, group, name, peak
-    ):
+    def amplitude_map(self, amp, sample, norm, label, values, paths, group, name, peak):
         """``|psi(r)|`` map of one reflection on the shared symmetric-log scale."""
         cmap = self.cmap.copy()
         cmap.set_bad(color=BAD_COLOR)
@@ -1160,7 +1159,9 @@ class Atlas:
             norm=norm_record(kind, norm),
         )
 
-    def pair_phase_diff_dist(self, hist, edges, label, values, paths, group, name, pair):
+    def pair_phase_diff_dist(
+        self, hist, edges, label, values, paths, group, name, pair
+    ):
         """Amplitude-weighted circular histogram of ``D`` itself over ``(-pi, pi]``.
 
         The weight of a sample is ``|psi_j psi_k|``; the axis is the signed

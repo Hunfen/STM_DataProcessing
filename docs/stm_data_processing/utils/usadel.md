@@ -122,8 +122,8 @@ from stm_data_processing.utils.usadel import Usadel1D, bcs_dos, bcs_gap
 
 # 1 meV 能隙、D = 1e16 nm^2/s 的脏超导体
 u = Usadel1D(Delta0=1e-3, D=1e16, T=0.0)
-print(u.xi)                       # 81.1 nm
-print(u.Tc)                       # 6.579 K（弱耦合反推）
+print(u.xi)  # 81.1 nm
+print(u.Tc)  # 6.579 K（弱耦合反推）
 
 # 均匀能隙剖面（松原分支，自洽）
 x, delta_x = u.solve_gap(geometry="bulk")

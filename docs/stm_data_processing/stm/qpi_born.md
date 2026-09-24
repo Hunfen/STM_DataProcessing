@@ -146,12 +146,14 @@ result = qpi.calculate(energy_range=np.linspace(-1.0, 1.0, 50), n_workers=4)
 ```python
 calc = BornQPI(ham, nk=256, eta=0.005)
 
-calc.calculate(energies, q_range=None)                     # 串行（默认，行为不变）
-calc.calculate(energies, q_range=None, n_workers=4)         # 并行，自动临时分片目录
-calc.calculate(energies, q_range=None, n_workers=4,
-               checkpoint_dir="var/born_ckpt")              # 并行，显式目录（保留）
-calc.calculate(energies, q_range=None, n_workers=4,
-               checkpoint_dir="var/born_ckpt", resume=True) # 只补缺失分片
+calc.calculate(energies, q_range=None)  # 串行（默认，行为不变）
+calc.calculate(energies, q_range=None, n_workers=4)  # 并行，自动临时分片目录
+calc.calculate(
+    energies, q_range=None, n_workers=4, checkpoint_dir="var/born_ckpt"
+)  # 并行，显式目录（保留）
+calc.calculate(
+    energies, q_range=None, n_workers=4, checkpoint_dir="var/born_ckpt", resume=True
+)  # 只补缺失分片
 ```
 
 ### 为什么能量轴是精确的分片键

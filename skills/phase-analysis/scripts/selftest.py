@@ -360,8 +360,7 @@ def test_engine_source_contract():
         )
     }
     hits = {
-        name: source_token_hits(text, REMOVED_ENGINE)
-        for name, text in sources.items()
+        name: source_token_hits(text, REMOVED_ENGINE) for name, text in sources.items()
     }
     hits = {name: found for name, found in hits.items() if found}
     check(
@@ -748,10 +747,7 @@ def test_gauge_layer(n, lambda_nm=3.0, nm_per_px=0.13):
         )
         best, _minima = pm.fit_origin(
             [record["q_px"] for record in records],
-            [
-                np.radians(record["stats"]["phase"]["mean_deg"])
-                for record in records
-            ],
+            [np.radians(record["stats"]["phase"]["mean_deg"]) for record in records],
             n,
         )
         exact[tag] = {
@@ -1329,9 +1325,7 @@ def test_pairwise_recovery(n, lambda_nm=3.0, nm_per_px=0.13):
 
     import stm_phase_analysis as spa
 
-    hist, edges = spa.pair_d_histogram(
-        np.zeros((n, n)), valid, np.ones((n, n))
-    )
+    hist, edges = spa.pair_d_histogram(np.zeros((n, n)), valid, np.ones((n, n)))
     check(
         "a constant pair sample lands in a single histogram bin",
         int(np.count_nonzero(hist)) == 1
@@ -1491,9 +1485,7 @@ def test_multi_component_boundary(n, lambda_nm=3.0, nm_per_px=0.13):
         f"{two['coherence']:.4f}",
         f"{THIRD_TURN_DEG / 2.0:.1f} deg",
     )
-    three = phasor(
-        [1 / 3, 1 / 3, 1 / 3], [0.0, THIRD_TURN_DEG, 2.0 * THIRD_TURN_DEG]
-    )
+    three = phasor([1 / 3, 1 / 3, 1 / 3], [0.0, THIRD_TURN_DEG, 2.0 * THIRD_TURN_DEG])
     check(
         "3 equal components evenly spaced cancel: the phase is undefined",
         three["coherence"] < 1e-12,
@@ -1504,9 +1496,7 @@ def test_multi_component_boundary(n, lambda_nm=3.0, nm_per_px=0.13):
     boundary = []
     for minority in (0.005, 0.01, 0.02, 0.03, 0.05, 0.10, 0.20, 0.35, 0.50):
         mixed = phasor([1.0 - minority, minority], [0.0, THIRD_TURN_DEG])
-        boundary.append(
-            (minority, mixed["triple_deviation_deg"], mixed["coherence"])
-        )
+        boundary.append((minority, mixed["triple_deviation_deg"], mixed["coherence"]))
     crossing = [row for row in boundary if row[1] >= 5.0]
     if crossing:
         index = boundary.index(crossing[0])
@@ -1663,9 +1653,8 @@ def colour_bar_figure():
 def test_colorbar_contract():
     """The colour-bar layout rule, and the audit that must catch a violation."""
     section("colour-bar contract (drawn outside the data area, and audited)")
-    import matplotlib.pyplot as plt
-
     import atlas as at
+    import matplotlib.pyplot as plt
 
     fig, ax, bar = colour_bar_figure()
     colorbars, outside, overlap = at.colorbar_layout([ax], [bar])
@@ -1677,7 +1666,7 @@ def test_colorbar_contract():
         "outside, area 0",
     )
     inside = at.bbox_overlap_area(ax.get_position(), ax.get_position())
-    moved = bar.get_position()
+    bar.get_position()
     bar.set_position(ax.get_position())
     colorbars_in, outside_in, overlap_in = at.colorbar_layout([ax], [bar])
     check(
@@ -1691,7 +1680,9 @@ def test_colorbar_contract():
     plt.close(fig)
 
     fig, ax, bar = colour_bar_figure()
-    book = at.Atlas(Path(tempfile.gettempdir()) / "stm-phase-colourbar-probe", at.load_colormap()[0])
+    book = at.Atlas(
+        Path(tempfile.gettempdir()) / "stm-phase-colourbar-probe", at.load_colormap()[0]
+    )
     at.set_canvas_title(fig, at.title_for("probe", {}))
     raised = ""
     try:
@@ -1746,7 +1737,9 @@ def test_global_amplitude_scale():
     }
     vmax, linthresh = spa.global_amplitudes(analysis)
     pooled = float(
-        np.median(np.concatenate([low.ravel(), high.ravel(), low.ravel(), high.ravel()]))
+        np.median(
+            np.concatenate([low.ravel(), high.ravel(), low.ravel(), high.ravel()])
+        )
     )
     smallest = float(min(low.min(), high.min()))
     check(
@@ -1779,9 +1772,8 @@ def test_global_amplitude_scale():
 def test_title_and_mask_gate(workdir):
     """The canvas-title gate and the visible mask colour, with counterexamples."""
     section("canvas title gate and visible mask colour")
-    import matplotlib.pyplot as plt
-
     import atlas as at
+    import matplotlib.pyplot as plt
     from PIL import Image
 
     probe_dir = Path(workdir) / "title_probe"
@@ -1812,7 +1804,8 @@ def test_title_and_mask_gate(workdir):
         raised = str(exc)
     check(
         "the gate turns red when the canvas carries no title at all",
-        "does not carry the manifest title" in raised and "rendered title text(s): none" in raised,
+        "does not carry the manifest title" in raised
+        and "rendered title text(s): none" in raised,
         f"the audit raised {raised!r} for a figure whose canvas has no title text",
         "an explicit AssertionError",
     )
@@ -2012,8 +2005,10 @@ def test_title_and_mask_gate(workdir):
 
 
 def test_pipeline_contract(n, workdir, stm_lib):
-    section("end-to-end pipeline: 60 figures, colour bars and colour scales, "
-            "determinism, the not-found branch")
+    section(
+        "end-to-end pipeline: 60 figures, colour bars and colour scales, "
+        "determinism, the not-found branch"
+    )
     env = dict(os.environ)
     env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -2107,8 +2102,16 @@ def test_pipeline_contract(n, workdir, stm_lib):
     ):
         removed = run_script(
             "stm_phase_analysis.py",
-            [str(csv_path), "-o", str(workdir / "pipeline" / "out_removed"), "-L",
-             str(field_of_view), "--detector", "builtin", *option],
+            [
+                str(csv_path),
+                "-o",
+                str(workdir / "pipeline" / "out_removed"),
+                "-L",
+                str(field_of_view),
+                "--detector",
+                "builtin",
+                *option,
+            ],
             env,
         )
         if option[0] == "--" + "gate":
@@ -2264,8 +2267,7 @@ def test_pipeline_contract(n, workdir, stm_lib):
     }
     check(
         "each ring has the three figures of each pair inside the ring",
-        actual_pair_files == expected_pair_files
-        and len(actual_pair_files) == 18,
+        actual_pair_files == expected_pair_files and len(actual_pair_files) == 18,
         f"{len(actual_pair_files)} pairwise figures against the {len(expected_pair_files)} "
         f"expected names (3 pairs x {len(PAIR_FIGURE_KINDS)} kinds x 2 rings); "
         f"missing: {sorted(expected_pair_files - actual_pair_files)}, "
@@ -2383,14 +2385,14 @@ def test_pipeline_contract(n, workdir, stm_lib):
     from PIL import Image as _Image
 
     canvas_ok = [
-        entry for entry in manifest["figures"] if entry.get("canvas_title") == entry["title"]
+        entry
+        for entry in manifest["figures"]
+        if entry.get("canvas_title") == entry["title"]
     ]
     bands = {}
     for entry in manifest["figures"]:
         with _Image.open(outdir / entry["file"]) as image:
-            bands[entry["file"]] = at.title_band_ink(
-                image, entry.get("title_strip_px")
-            )
+            bands[entry["file"]] = at.title_band_ink(image, entry.get("title_strip_px"))
     ring_level = [
         f"{tag}_{name}.png"
         for tag in ("ring_1x1", "ring_r3")
@@ -2404,8 +2406,12 @@ def test_pipeline_contract(n, workdir, stm_lib):
         f"refuses a figure that does not carry it",
         f"{TOTAL_FIGURES} figures",
     )
-    single_axes = [entry for entry in manifest["figures"] if entry.get("panel_axes") == 1]
-    multi_axes = [entry for entry in manifest["figures"] if entry.get("panel_axes", 0) > 1]
+    single_axes = [
+        entry for entry in manifest["figures"] if entry.get("panel_axes") == 1
+    ]
+    multi_axes = [
+        entry for entry in manifest["figures"] if entry.get("panel_axes", 0) > 1
+    ]
     check(
         "every single-axes figure carries one title line only",
         len(single_axes) == TOTAL_FIGURES - 4
@@ -2518,7 +2524,9 @@ def test_pipeline_contract(n, workdir, stm_lib):
         for entry in manifest["figures"]
         if entry["file"].endswith("_amplitude.png")
     ]
-    amplitude_norms = {json.dumps(entry["norm"], sort_keys=True) for entry in amplitude_entries}
+    amplitude_norms = {
+        json.dumps(entry["norm"], sort_keys=True) for entry in amplitude_entries
+    }
     check(
         "all twelve amplitude maps share one colour scale",
         len(amplitude_entries) == 12
@@ -2673,7 +2681,11 @@ def test_pipeline_contract(n, workdir, stm_lib):
         "no removed-staircase token in the delivered product",
         not source_token_hits(
             product_text.lower(),
-            [token.lower() for token in REMOVED_STAIRCASE if token != STAIRCASE_NUMBER_DEG],
+            [
+                token.lower()
+                for token in REMOVED_STAIRCASE
+                if token != STAIRCASE_NUMBER_DEG
+            ],
         ),
         "the log and phase_stats.json of a real run carry no token of the removed "
         "phase-axis layer; the label the inbound detector reports for its own "
@@ -2710,7 +2722,9 @@ def test_pipeline_contract(n, workdir, stm_lib):
             for key, path in entry.get("paths", {}).items():
                 if path != f"pairwise.groups.{group_name}.pairs.{entry['index']}.{key}":
                     entry_ok = False
-                    entry_detail = f"{group_name} pair {entry['index']}: {key} -> {path}"
+                    entry_detail = (
+                        f"{group_name} pair {entry['index']}: {key} -> {path}"
+                    )
     check(
         "the pair statistics are the statistics of the drawn sample",
         counts_ok and entry_ok,
@@ -2859,6 +2873,7 @@ def test_pipeline_contract(n, workdir, stm_lib):
         f"{'present' if 'r3 ring is NOT reported' in log else 'MISSING'}",
         "exit code 2, message present, 0 figures",
     )
+
 
 def test_field_of_view_from_log(n, workdir, stm_lib):
     """--size-nm-from-log must read the corrected canvas, not the input canvas."""

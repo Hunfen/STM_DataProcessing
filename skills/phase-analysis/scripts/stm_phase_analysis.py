@@ -151,8 +151,10 @@ def reject_removed_options(argv):
     for token in list(argv):
         name = token.split("=", 1)[0]
         if name in REMOVED_OPTIONS:
-            raise SystemExit(f"error: {name} is not an option of this script: "
-                             f"{REMOVED_OPTIONS[name]}")
+            raise SystemExit(
+                f"error: {name} is not an option of this script: "
+                f"{REMOVED_OPTIONS[name]}"
+            )
 
 
 def parse_args(argv=None):
@@ -1864,7 +1866,9 @@ def main(argv=None):
                     tag: int(per_group.get(tag, {}).get("figures", 0))
                     for tag in RING_TAGS
                 },
-                "norms": {name: dict(record) for name, record in manifest["norms"].items()},
+                "norms": {
+                    name: dict(record) for name, record in manifest["norms"].items()
+                },
             }
         )
         (outdir / "atlas_manifest.json").write_text(
@@ -1968,9 +1972,7 @@ def main(argv=None):
         "# median/IQR/FWHM   -> shape of the same sample the maps are drawn from; the "
         "sample is every valid pixel, so no condition has to be quoted with them"
     )
-    emit(
-        "# cluster count     -> how many distinct phases are present in the sample"
-    )
+    emit("# cluster count     -> how many distinct phases are present in the sample")
     emit(
         "# amplitude         -> whether a reflection is still there (a balanced mixture "
         "can cancel it); the amplitude maps of a run share one colour scale"

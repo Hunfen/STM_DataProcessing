@@ -157,11 +157,13 @@ dI_dV_T = btk.spectrum(T=4.2)  # 有限温度
 import numpy as np
 from stm_data_processing.utils.usadel import Usadel1D
 
-u = Usadel1D(Delta0=1e-3, D=1e16)          # 能隙 1 meV，D = 1e16 nm^2/s（xi = 81 nm）
+u = Usadel1D(Delta0=1e-3, D=1e16)  # 能隙 1 meV，D = 1e16 nm^2/s（xi = 81 nm）
 x, delta_x = u.solve_gap(geometry="bulk")  # 自洽 Delta(x)（松原分支）
 
 V, dIdV = u.tunnel_spectrum(np.linspace(-3e-3, 3e-3, 401), T=4.2, Gamma=1e-5)
-N_edge = u.dos(0.0, position=200.0, geometry="sn", d=200.0, Gamma=1e-6)  # S/N 诱导 minigap
+N_edge = u.dos(
+    0.0, position=200.0, geometry="sn", d=200.0, Gamma=1e-6
+)  # S/N 诱导 minigap
 ```
 
 演示图集（5 张 PNG：BCS DOS 随 T、SN minigap 随 N 层厚度、跨界面 LDOS、STS 谱族、与 BTK 对照）：
