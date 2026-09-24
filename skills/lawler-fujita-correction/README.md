@@ -15,7 +15,7 @@
 | `scripts/stm_lf_apply.py` | **第二段**：把包里的稠密位移场（从 bundle 的 `.h5` 读）套用到同一扫描的另一张图（同网格逐位复现；不同像素数按物理位移重采样；目标图无需有晶格；`identity_fallback` 包原样复制 + WARNING），并写出与拟合段同名的 `<stem>_corrected.h5` |
 | `scripts/lf_lib.py` | 自包含辅助模块：lock-in（q 空间高斯掩码）、最小二乘（Poisson/DCT）相位解缠、位移场求解、按场重采样、场的网格重采样、绘图样式与 gwyddion 色图、环聚类 |
 | `scripts/h5io.py` | 自包含 HDF5 writer：仓库统一 h5 约定（`SCHEMA_VERSION = 1`、`gzip`/4、显式 chunk ≤ 1 MiB、root `schema_version`/`generator`/`creation_date`、`units` 属性），**不 import `stm_data_processing`** |
-| `scripts/selftest.py` | **一键自我验证**（**20 项**：拟合产物与契约行、h5 约定与数组逐位一致、已知位移场恢复（原始与去仿射规范）、环质量、第三方向一致性、包迁移（同网格/不同网格）、无晶格回退） |
+| `scripts/selftest.py` | **一键自我验证**（**23 项**：拟合产物与契约行、h5 约定与数组逐位一致、已知位移场恢复（原始与去仿射规范）、环质量、第三方向一致性、包迁移（同网格/不同网格）、无晶格回退、written 登记 corrected_h5、n_px 根属性、环检测容差记录） |
 | `SKILL.md` | 完整方法学：模型与符号约定、lock-in 与可解性条件 `\|∇u\| < 2π/(\|K\|λ)`、参考六方、规范自由度、有效掩码与边界、输出契约、h5 数据集与 `units`、迁移约束、自检与限制 |
 
 ## 依赖
@@ -34,7 +34,7 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 .venv/bin/python skills/lawler-fujita-correction/scripts/stm_lf_correct.py \
     INPUT.csv -L 50 --a 0.246 --lambda-nm 30 -o OUT --save-transform OUT/bundle.json
 
-# 一键 self-test（20 项）
+# 一键 self-test（23 项）
 .venv/bin/python skills/lawler-fujita-correction/scripts/selftest.py \
     --workdir var/lf_selftest --keep
 ```
@@ -64,7 +64,7 @@ lock-in 只保留满足 `|∇u| < 2π/(|K|λ)` 的畸变结构，`|K| = 4π/(√
 
 `<stem>_corrected.h5` 是仓库 h5 约定的数组产物：数据集 `corrected`（`float64`，与 CSV 同一数组）
 与 `fft2`（`complex128`，与 `.npy` 同一数组），root 有 `schema_version = 1` / `generator` /
-`creation_date`，逐数据集显式 chunk + `gzip`/4 + `track_times=False`。
+`creation_date` / `n_px`（int，填充后画布边长），逐数据集显式 chunk + `gzip`/4 + `track_times=False`。
 **`<stem>_corrected_fft2.npy` 同时保留**：`skills/phase-analysis/` 用它做 `--fft2` 输入
 （phase-analysis 不在本次产物迁移范围）。CSV/PNG/log 名称与内容不变。
 

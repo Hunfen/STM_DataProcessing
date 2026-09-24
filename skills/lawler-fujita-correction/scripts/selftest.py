@@ -630,6 +630,55 @@ def main(argv=None):
         "root attrs + gzip/4 + convention chunks + units, arrays bit-exact",
     )
 
+    # ------------------------------------------------------ new fix checks  #
+    section("fix verification (written / n_px / ring tolerances)")
+    # Check 21: written contains corrected_h5 and the file exists on disk.
+    written = report.get("written", {})
+    corrected_h5_path = Path(written.get("corrected_h5", ""))
+    check(
+        "written registers corrected_h5 and the file exists",
+        "corrected_h5" in written and corrected_h5_path.is_file(),
+        f"key present {'corrected_h5' in written}, path {corrected_h5_path.name} "
+        f"exists {corrected_h5_path.is_file()}",
+        "written.corrected_h5 is a real file",
+    )
+    # Check 22: n_px root attribute of _corrected.h5 matches the dataset shape
+    # (read back from the file, not from the report).
+    n_px_attr = None
+    n_px_shape_corrected = None
+    n_px_shape_fft2 = None
+    if corrected_h5.is_file():
+        with h5py.File(corrected_h5, "r") as handle:
+            n_px_attr = handle.attrs.get("n_px")
+            if "corrected" in handle:
+                n_px_shape_corrected = handle["corrected"].shape[0]
+            if "fft2" in handle:
+                n_px_shape_fft2 = handle["fft2"].shape[0]
+    n_px_ok = bool(
+        n_px_attr is not None
+        and n_px_shape_corrected is not None
+        and n_px_shape_fft2 is not None
+        and int(n_px_attr) == int(n_px_shape_corrected) == int(n_px_shape_fft2)
+    )
+    check(
+        "corrected h5 root n_px matches the dataset shapes (read back)",
+        n_px_ok,
+        f"n_px attr = {n_px_attr}, corrected.shape[0] = {n_px_shape_corrected}, "
+        f"fft2.shape[0] = {n_px_shape_fft2}",
+        "all three agree and are non-None",
+    )
+    # Check 23: ring_cluster_tol recorded in the report equals the value used.
+    # The fit stage was called without --ring-cluster-tol, so it must be the default 0.02.
+    reported_rct = report.get("ring_cluster_tol")
+    reported_rt = report.get("ring_tol")
+    check(
+        "report records ring_cluster_tol and ring_tol",
+        reported_rct == 0.02 and reported_rt == 0.10,
+        f"ring_cluster_tol = {reported_rct} (expected 0.02), "
+        f"ring_tol = {reported_rt} (expected 0.10)",
+        "both equal the CLI defaults when not overridden",
+    )
+
     # ------------------------------------------------------------ recovery  #
     section("known displacement recovery")
     mask = np.asarray(h5_read(artifacts_h5, "mask")).astype(bool)
@@ -708,7 +757,7 @@ def main(argv=None):
         f"{interior_rms if interior_rms is None else round(interior_rms, 4)} deg inside "
         f"the {third.get('interior_margin_px')} px border margin "
         f"({third.get('interior_margin_rule')}), {round(float(third.get('wrapped_rms_deg', float('nan'))), 4)} deg "
-        f"over the full mask; Q_a + Q_b + Q_c = 0 exactly",
+        f"over the entire canvas (including invalid pixels); Q_a + Q_b + Q_c = 0 exactly",
         f"< {THIRD_DIRECTION_INTERIOR_TOL_DEG:g} deg (interior)",
     )
 

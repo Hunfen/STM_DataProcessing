@@ -693,7 +693,7 @@ def main(argv=None):
             }
             emit(
                 f"# third-direction consistency: theta_a + theta_b + theta_c wrapped "
-                f"RMS {residual:.4f} deg (full mask); "
+                f"RMS {residual:.4f} deg (entire canvas, including invalid pixels); "
                 f"{interior_rms:.4f} deg inside a {margin} px border margin "
                 f"({LAMBDA_BORDER_MARGIN:g} x lambda)"
             )
@@ -750,10 +750,11 @@ def main(argv=None):
         emit("# residual self-check: no 1x1 ring re-detected on the corrected image")
     else:
         ring_after = after_quality["ring_1x1"]
+        radius_ideal_after = float(after_quality["ideal_radius_px"])
         emit(
             f"# residual self-check: 1x1 ring radius {ring_after['radius_px']:.4f} px "
             f"({100 * ring_after['deviation_from_ideal']:+.4f} % from the ideal "
-            f"{radius_ideal:.4f} px), radius spread {ring_after['min_radius_px']:.4f} .. "
+            f"{radius_ideal_after:.4f} px), radius spread {ring_after['min_radius_px']:.4f} .. "
             f"{ring_after['max_radius_px']:.4f} px "
             f"(anisotropy {100 * ring_after['anisotropy']:.4f} %)"
         )
@@ -794,6 +795,7 @@ def main(argv=None):
         generator=Path(__file__).name,
         extra={
             "input": str(csv_path),
+            "n_px": int(n_out),
             "field_of_view_nm": float(size_out),
             "nm_per_px": float(size_out / n_out),
         },
@@ -852,6 +854,8 @@ def main(argv=None):
         "a_nm": float(args.a),
         "ideal_radius_px": float(radius_ideal),
         "ideal_radius_nm_inv": float(2 * np.pi * radius_ideal / args.size_nm),
+        "ring_cluster_tol": float(args.ring_cluster_tol),
+        "ring_tol": float(args.ring_tol),
         "lambda_nm": float(args.lambda_nm),
         "amplitude_fraction": float(args.amplitude_fraction),
         "gauge": gauge,
@@ -966,6 +970,7 @@ def main(argv=None):
         "lf_artifacts": artifacts,
         "written": {
             "corrected_csv": str(out_csv),
+            "corrected_h5": str(out_h5),
             "corrected_fft2_npy": str(out_fft2),
             "corrected_png": str(out_png),
             "corrected_fft_png": str(out_fft_png),

@@ -113,6 +113,8 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 - **边界**：FFT 把图像当周期函数，靠近边界的解调相位会混入对面边缘的数据，实测污染深度约
   `0.65 λ` px。因此**边界不作硬性剔除**（那会在大 λ 时把整幅图判死），而是在第三方向诊断里
   剔除 `0.65 λ` 的边界带（报告中 `wrapped_rms_deg_interior` 与 `wrapped_rms_deg` 都给）。
+  注意：`wrapped_rms_deg` 是**整个画布（含 mask=0 的无效像素）**的平均，不是仅掩码内；
+  边界污染主导该值，因此它通常远大于 `wrapped_rms_deg_interior`。
   **λ 必须远小于视场 L**：λ = 30 nm 配 50 nm 视场时，只有中心区域可信。
 - **带宽自检**：参考波矢（理想半径）与**测得**峰位之间总有偏移
   `offset = |q_measured − q_ref|/L`（来自数据的平均应变）。lock-in 掩码半径是 `1/λ`，
@@ -127,7 +129,7 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 | 产物 | 说明 |
 | --- | --- |
 | `<stem>_corrected.csv` | 矫正后拓扑（正方形，`%.10e` 逗号分隔，NaN 填充） |
-| `<stem>_corrected.h5` | HDF5 数组产物：`corrected`（`float64`，与 CSV 同一数组）+ `fft2`（`complex128`，与 `.npy` 同一数组）；本 skill 自包含的 `scripts/h5io.py` 按仓库 h5 约定写出（`schema_version = 1`、`generator`、`creation_date`，显式 chunk ≤ 1 MiB + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`） |
+| `<stem>_corrected.h5` | HDF5 数组产物：`corrected`（`float64`，与 CSV 同一数组）+ `fft2`（`complex128`，与 `.npy` 同一数组）；本 skill 自包含的 `scripts/h5io.py` 按仓库 h5 约定写出（`schema_version = 1`、`generator`、`creation_date`、`n_px`（int，填充后画布边长），显式 chunk ≤ 1 MiB + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`） |
 | `<stem>_corrected_fft2.npy` | 复数 FFT2（`complex128`，fftshift，Hanning 窗 + NaN 平面填充，与 affine skill 同口径）。**保留**：`skills/phase-analysis/` 通过 `--fft2` 读它，phase-analysis 不在本次迁移范围 |
 | `<stem>_corrected.png` / `<stem>_corrected_fft.png` | gwyddion 拓扑图 / inferno 对数 FFT 图 |
 | `correction.log` | 控制台报告（含下面两条契约行） |
@@ -164,18 +166,19 @@ lock-in 方向、间距 60°、不存在第三方向。核心产物 `_corrected.
 | --- | --- |
 | `skill` / `skill_version` / `input` / `canvas_px` / `field_of_view_nm` / `nm_per_px` | 溯源 |
 | `a_nm` / `ideal_radius_px` / `ideal_radius_nm_inv` | 参考环 |
+| `ring_cluster_tol` / `ring_tol` | 环聚类与锚定匹配容差（CLI 传入值，默认 0.02 / 0.10） |
 | `rings_before` / `anchor_ring` | 检测到的环表与锚定环 |
 | `q_a_px` / `q_b_px` / `q_c_px` / `q_*_nm_inv` / `q_matrix_px` / `q_measured_px` | 参考波矢（px 与 rad/nm）与测得峰位 |
 | `hexagon_orientation_deg` / `hexagon_member_deviation_deg` | 参考取向与成员偏离 120° 的量 |
 | `lambda_nm` / `amplitude_fraction` / `lockin.*` | λ、幅度阈值、`amplitude_threshold`、`mask_coverage_fraction`、`max_phase_step_rad` |
 | `gauge` | 规范说明（θ̄ = 0） |
 | `displacement.u_stats_nm` | u_x/u_y/norm 的 rms 与 max（nm，有效像素上） |
-| `third_direction.*` | `wrapped_rms_deg`（全掩码）、`wrapped_rms_deg_interior`、`interior_margin_px`、`interior_margin_rule`、`interior_pixels`；60° 配对时 `available = false` + `reason` |
+| `third_direction.*` | `wrapped_rms_deg`（**整个画布含无效像素**）、`wrapped_rms_deg_interior`、`interior_margin_px`、`interior_margin_rule`、`interior_pixels`；60° 配对时 `available = false` + `reason` |
 | `residual_self_check.before/after` | 矫正前后重检测的 1x1 环各向异性（min/max 半径）与 1x1/r3 环对比值 |
 | `canvas_growth_px` / `max_displacement_px` / `n_out` / `corrected_field_of_view_nm` / `corrected_nm_per_px` / `nan_fraction` | 画布与产物 |
 | `method` / `fallback` / `fallback_reason` | `lawler_fujita`，或 `identity_fallback` + 原因 |
 | `lf_artifacts` | 每张 LF 图的登记项：`h5`（`<stem>_lf.h5` 路径）+ `dataset`（数据集名）+ `png`（预览路径） |
-| `written` / `transfer_constraints` | 核心产物路径与迁移约束说明 |
+| `written` / `transfer_constraints` | 核心产物路径（含 `corrected_h5`）与迁移约束说明 |
 
 **回退语义**：找不到可用 1x1 环、或有效掩码占比低于 `--min-coverage`（默认 0.50）时，
 `method = "identity_fallback"`、`fallback = true`：**不做任何矫正**，把输入原样（在其自身画布与
@@ -218,7 +221,7 @@ h5 内容（`scripts/h5io.py`，仓库 h5 约定）：`u_x`、`u_y`（nm，参�
 | 掩码传递 | `valid` 随场一起重采样；无效像素不施加位移 |
 | 回退包 | `method = "identity_fallback"` 时目标图原样复制 + log WARNING |
 
-## 5 一键 self-test（20 项）
+## 5 一键 self-test（23 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -233,7 +236,8 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差是半径的 2–3 %，因此 `|∇u|` 必须 ≲ 2 %；
 在 50 nm 视场内 1.0 nm 变化已经接近该上限（实测 `|∇u|` 到 0.025 仍可检出、0.03 起环碎裂）。
 
-覆盖与验收阈值（实测 **20/20** 通过）：
+覆盖与验收阈值（实测 **23/23** 通过）。下表 # 列为分组内序号（既有约定）；运行时按全局计数，
+#17/#18/#19 对应运行时的第 21/22/23 条。
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -250,13 +254,16 @@ Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差
 | 9 | 该检查非平凡 | 注入 rms > 阈值（实测 0.184 nm > 0.10 nm） |
 | 10 | 矫正后 1x1 环各向异性不劣于输入 | after ≤ 1.05 × before（实测 1.72 % → 0.012 %） |
 | 11 | 1x1/r3 环对比值回到理想 √3 | 偏差 ≤ 1 %（实测 −0.0009 %） |
-| 12 | 第三方向一致性（θ_a+θ_b+θ_c mod 2π） | 边界带（0.65λ）以内 wrapped rms < 2°（实测 0.18°；全掩码 7.41°，由边界污染主导） |
+| 12 | 第三方向一致性（θ_a+θ_b+θ_c mod 2π） | 边界带（0.65λ）以内 wrapped rms < 2°（实测 0.18°；整个画布含无效像素 7.41°，由边界污染主导） |
 | 13 | 可迁移包 JSON + u 场 **h5** 写出 | schema/schema_version 正确 + h5 约定合规 + `u_field_file` 指向 `.h5` + 无 `.npz` 遗留 |
 | 13b | `<stem>_lf.h5` 与包 h5 的 `u_x`/`u_y`/`mask` 逐位相同 | 三组 `np.array_equal` 全真 |
 | 14 | 同网格 apply 复现拟合段 | `allclose(rtol=atol=1e-10)` 且 NaN 掩码相同（实测 max|Δ| = 0） |
 | 14b | apply 段自身写出的 `<stem>_corrected.h5` 约定合规，且 `corrected`/`fft2` 与拟合段**逐字节**相同 | h5 约定 + `tobytes()` 字节比较（dtype 相同） |
 | 15 | 不同像素数（800）apply 重采样位移场 | 退出码 0、`n_px = 800`、`u_field_rescaled = true`、契约行在 |
 | 16 | 无晶格输入 → 回退 | `fallback = true`、`method = identity_fallback`、log 含 WARNING、输入原样复制 |
+| 17 | `written` 登记 `corrected_h5` 且文件存在 | `written.corrected_h5` 键在 + `Path.is_file()` |
+| 18 | `_corrected.h5` 根属性 `n_px` 与数据集 shape 一致（从文件读回） | `attrs['n_px'] == corrected.shape[0] == fft2.shape[0]` |
+| 19 | 报告记录 `ring_cluster_tol` / `ring_tol` 等于 CLI 值 | 默认运行 = 0.02 / 0.10 |
 
 另有 1 条 **informational** 输出：默认 λ = 30 nm 在合成数据上只保留 0.117 nm（63.7 %）的位移，
 说明默认低通对应的是远小于 1 % 应变的畸变（不参与判定）。
@@ -285,6 +292,11 @@ CSV/PNG 名称与字节不变；`correction_report.json` 只有 `lf_artifacts` �
 （`npy` 键 → `h5` + `dataset` 键），log 只有 `# LF artifacts:` 一行把过时的 `(npy+png)` 改成
 `(h5+png) ... in <stem>_lf.h5`（其余字段、图、契约行与逐行数值都逐字节不变）。
 self-test 17 → 20 项。见 `CHANGES.md`。
+2026-09（登记/措辞/h5 尺寸修正）：(1) `written` 补登记 `corrected_h5`；(2) 报告新增
+`ring_cluster_tol` / `ring_tol` 字段；(3) log 的 `wrapped_rms_deg` 措辞由 `(full mask)` 改为
+`(entire canvas, including invalid pixels)`，residual self-check 行的 ideal 半径改用矫正后画布值；
+(4) `_corrected.h5` 根属性新增 `n_px`（int，填充后画布边长）。self-test 20 → 23 项。
+见 `CHANGES.md`。
 2026-09（v1.0）：首个版本。Fujita et al., PNAS 2014 SI §4 的双（三）方向 lock-in 位移场矫正：
 最小二乘相位解缠、理想半径 + 数据取向的参考六方、`θ̄ = 0` 规范、按 u 重采样（画布 `n + 2(⌈max|u|⌉ + pad)`、
 矫正后视场 `L·n_out/n`）、相位/幅度/位移/掩码 9 张 npy+png 产物、边界带内第三方向一致性诊断、

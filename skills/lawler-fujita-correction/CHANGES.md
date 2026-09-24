@@ -1,5 +1,27 @@
 # CHANGES — lawler-fujita-correction
 
+## 2026-09（修正）：登记/措辞/h5 尺寸 4 处缺陷修复
+
+独立验证（t2）发现 4 处登记/措辞缺陷，本次逐一修复并加 self-test 断言。
+
+1. **`written` 补登记 `corrected_h5`**：报告 `written` 字典此前缺少 `_corrected.h5` 的路径，
+   新增键 `corrected_h5`，值为该文件的绝对路径。
+2. **报告记录环检测容差**：顶层新增 `ring_cluster_tol`（默认 0.02）与 `ring_tol`（默认 0.10），
+   数值等于 CLI 传入值；不传参时写默认值。
+3. **第三方向措辞如实**：log 行 `wrapped_rms_deg` 的标注由 `(full mask)` 改为
+   `(entire canvas, including invalid pixels)`，明确它是整个画布的平均（含 mask=0 像素）。
+   JSON 字段名 `wrapped_rms_deg` 保持不变以向后兼容。同时修正 residual self-check 行的
+   ideal 半径：此前误用矫正前的 `radius_ideal`，现改用矫正后画布的
+   `2*size_out/(sqrt(3)*a)`，使同行的百分比与 ideal 数值同基准。
+4. **`_corrected.h5` 根属性新增 `n_px`**：int，填充后画布边长（= `n_out`）。
+   `n_px` 取决于矫正后画布大小（由 max|u| + pad 决定），因此随运行参数变化：
+   实测 1024²/50 nm/`--ring-cluster-tol 0.03`/`--lambda-nm 3` → `n_px = 1066`；
+   `--lambda-nm 30` → `n_px = 1064`；`--amplitude-fraction 0.5` → `n_px = 1060`。
+
+self-test 20 → **23** 项（§5 表分组序号 #17/#18/#19，运行时为第 21/22/23 条：
+written.corrected_h5、n_px 读回核对、ring tol 记录），全部通过、退出码 0。
+反向对照：去掉 `n_px` 属性后运行时第 22 条 FAIL、退出码 1。
+
 ## 2026-09（修正）：bundle h5 的 `nm_per_px` units 由 `'nm'` 改为 `'nm/px'`
 
 `t2` 的独立验证（`var/verify_skills_h5/report.md` §14.2.1）指出：`--save-transform` 的 bundle
@@ -163,7 +185,7 @@ h5 里 `nm_per_px` 被写成 `units = "nm"`，而它是**像素尺度**（nm per
 - **LF 附加产物**（各 npy + 预览 png）：`theta_a/b/c`（解缠相位，弧度；png 折叠到 (−180,180] 度）、
   `amplitude_a/b/c`、`u_x`/`u_y`（nm）、`mask`。
 - 报告含：Q_a/Q_b/Q_c（px 与 nm⁻¹）、测得峰位、参考六方取向与成员偏差、λ、幅度阈值、掩码覆盖率、
-  `gauge`（θ̄ = 0）、u 统计（rms/max nm）、第三方向一致性（全掩码 + 边界带内）、
+  `gauge`（θ̄ = 0）、u 统计（rms/max nm）、第三方向一致性（v1.0 历史旧措辞「全掩码」，现已改为「整个画布含无效像素」 + 边界带内）、
   矫正前后重检测的 1x1 环各向异性与 1x1/r3 环对比值、画布/视场/NaN 比例、`method/fallback`。
 - 边界：解调相位在边界约 `0.65λ` 带内被周期化 FFT 污染（实测污染剖面），**不作硬性剔除**（大 λ 时
   会判死整幅图），而在第三方向诊断里剔除该带并同时报告两个数字（0.18° vs 7.41°）。
