@@ -10,13 +10,13 @@ jobs:
     name: lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Guard against committed measurement data
         run: |
           if git ls-files | grep -iE '\.(sxm|3ds|dat|ibw|spm|stp|nid|sm4|npy|npz|h5|hdf5|mat)$'; then
             echo "::error::measurement data must not be tracked"; exit 1;
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Install ruff
@@ -85,8 +85,8 @@ jobs:
     name: core import (no extras)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Install the package without extras
@@ -99,8 +99,8 @@ jobs:
     name: regression (data-independent subset)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Install dev and ppt extras
