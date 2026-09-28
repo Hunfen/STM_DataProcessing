@@ -16,6 +16,7 @@ from matplotlib.animation import FuncAnimation
 try:
     from .plot_funcs import (
         angle_def,
+        file_lacks_channels,
         get_divider,
         img_rotate_for_box,
         plot_linecut,
@@ -24,12 +25,14 @@ try:
         plot_qpi_bias,
         plot_sts,
         plot_sxm_topo,
+        read_grid,
         subtractMeanPlane,
         update_frame_from_dir,
     )
 except ImportError:  # allow running as a standalone script
     from plot_funcs import (
         angle_def,
+        file_lacks_channels,
         get_divider,
         img_rotate_for_box,
         plot_linecut,
@@ -38,6 +41,7 @@ except ImportError:  # allow running as a standalone script
         plot_qpi_bias,
         plot_sts,
         plot_sxm_topo,
+        read_grid,
         subtractMeanPlane,
         update_frame_from_dir,
     )
@@ -79,7 +83,7 @@ def read_all_files(folder_path: Path):
     return [file for file in folder_path.rglob("*") if file.is_file()]
 
 
-def sort_files(files):
+def sort_files(files, work_dir):
     dat_files, sxm_files, linecut_files, map_files = [], [], [], []
     for each in files:
         if each.suffix == ".dat":
@@ -91,7 +95,9 @@ def sort_files(files):
         elif each.suffix == ".sxm":
             sxm_files.append(each)
         elif each.suffix == ".3ds":
-            raw = nap.read.Grid(str(each))
+            raw = read_grid(each)
+            if raw is None:
+                continue
             try:
                 data = raw.signals["LI Demod 1 X (A)"]
             except Exception:
@@ -143,6 +149,99 @@ def add_section_header(slide, title):
     line = slide.shapes.add_shape(1, Cm(0), Cm(1.33), Cm(25.4), Cm(0.25))
     line.fill.solid()
     line.fill.fore_color.rgb = RGBColor(0, 0, 255)
+
+
+# ---------- dI/dV channel selection ----------
+
+_DIDV_PROMPT_HEADER = (
+    "dI/dV channel selection: the indices below are 0-based positions in each "
+    "file's signal list, and the same index set is applied to the .dat spectra "
+    "and to the .3ds map/QPI/linecut files. Enter one or more integers separated "
+    "by commas; when several channels are selected their arithmetic mean is used "
+    "as the single dI/dV curve/image."
+)
+
+
+def parse_channel_answer(answer: str, n_channels: int):
+    """Parse the comma-separated 0-based dI/dV channel answer.
+
+    Returns the selected indices in the order given, with duplicates removed
+    (a warning names them). Raises ValueError for an empty answer, an entry
+    that is not an integer, or an index outside [0, n_channels - 1]; the caller
+    turns that into a non-zero exit before anything is rendered.
+    """
+    answer = str(answer).strip()
+    if not answer:
+        raise ValueError(
+            "no dI/dV channel index entered (an empty answer/Enter is not "
+            "accepted); enter one or more 0-based integers separated by commas"
+        )
+    indices = []
+    for token in answer.split(","):
+        token = token.strip()
+        if not token.lstrip("+-").isdigit():
+            raise ValueError(
+                f"{token!r} is not an integer; the dI/dV channel answer must be "
+                "one or more 0-based integers separated by commas"
+            )
+        index = int(token)
+        if not 0 <= index < n_channels:
+            raise ValueError(
+                f"dI/dV channel index {index} is out of range; valid 0-based "
+                f"indices are [0, {n_channels - 1}]"
+            )
+        indices.append(index)
+    unique = []
+    for index in indices:
+        if index not in unique:
+            unique.append(index)
+    if len(unique) != len(indices):
+        logger.warning(
+            "duplicate dI/dV channel index in %r; using %s",
+            answer,
+            ", ".join(str(i) for i in unique),
+        )
+    return unique
+
+
+def ask_didv_channels(dat_reference, grid_reference):
+    """Print the 0-based channel tables and ask once for the dI/dV channels.
+
+    ``dat_reference`` and ``grid_reference`` are (path, signal-names) pairs of
+    the reference files of the first folder that needs the selection; either
+    may be None. Both tables are printed when both file kinds exist, so the
+    index alignment between them is visible. Returns
+    (channels, dat_names, grid_names); an unusable answer terminates the run
+    with a non-zero exit code.
+    """
+    logger.info("\n%s", _DIDV_PROMPT_HEADER)
+    dat_names = [] if dat_reference is None else list(dat_reference[1])
+    grid_names = [] if grid_reference is None else list(grid_reference[1])
+    n_channels = max(len(dat_names), len(grid_names))
+    if dat_reference is not None:
+        logger.info("Reference .dat file (%s), signals in order:", dat_reference[0])
+        for i, name in enumerate(dat_names):
+            logger.info("  [%2d] %s", i, name)
+    if grid_reference is not None:
+        logger.info("Reference .3ds file (%s), signals in order:", grid_reference[0])
+        for i, name in enumerate(grid_names):
+            logger.info("  [%2d] %s", i, name)
+    logger.info(
+        "Which channels should be used as dI/dV? Enter one or more 0-based "
+        "indices separated by commas (valid range [0, %d], several channels are "
+        "averaged into one curve/image):",
+        n_channels - 1,
+    )
+    try:
+        answer = input("> ")
+    except EOFError:
+        sys.exit("Error: no dI/dV channel answer (input closed), script terminated.")
+    try:
+        channels = parse_channel_answer(answer, n_channels)
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
+    logger.info("dI/dV channels: %s", ", ".join(str(i) for i in channels))
+    return channels, dat_names, grid_names
 
 
 def main() -> None:
@@ -209,6 +308,13 @@ def main() -> None:
     plt.rcParams["axes.unicode_minus"] = True
     plt.rcParams.update({"font.size": 22})
 
+    # dI/dV channel selection: asked once per run, in the first folder that
+    # holds spectra (.dat), linecuts or maps (.3ds), and then reused for every
+    # later folder and file of this run.
+    didv_channels = None
+    didv_reference_names = None
+    didv_grid_reference_names = None
+
     # ---------- Main process ----------
     for _, Folderpath in enumerate(DataFolderpath):
         logger.info(f"Processing {Folderpath}")
@@ -220,11 +326,31 @@ def main() -> None:
 
         # File classification and sorting
         all_files = read_all_files(Folderpath)
-        DatFiles, SxmFiles, LinecutFiles, MapFiles = sort_files(all_files)
+        DatFiles, SxmFiles, LinecutFiles, MapFiles = sort_files(all_files, Storagepath)
         DatFiles = sort_files_by_creation_time(DatFiles)
         SxmFiles = sort_files_by_creation_time(SxmFiles)
         LinecutFiles = sort_files_by_creation_time(LinecutFiles)
         MapFiles = sort_files_by_creation_time(MapFiles)
+
+        # Ask for the dI/dV channels before any figure that depends on the
+        # selection is rendered. A folder holding only .sxm files never asks.
+        if didv_channels is None and (DatFiles or LinecutFiles or MapFiles):
+            dat_reference = (
+                (DatFiles[0], list(nap.read.Spec(str(DatFiles[0])).signals))
+                if DatFiles
+                else None
+            )
+            grid_reference = None
+            for candidate in sort_files_by_creation_time(LinecutFiles + MapFiles):
+                raw_reference = read_grid(candidate)
+                if raw_reference is not None:
+                    grid_reference = (candidate, list(raw_reference.signals))
+                    break
+            (
+                didv_channels,
+                didv_reference_names,
+                didv_grid_reference_names,
+            ) = ask_didv_channels(dat_reference, grid_reference)
 
         # Clean up invalid SXM files
         valid_sxm = []
@@ -335,12 +461,27 @@ def main() -> None:
         if DatFiles:
             for i, sts_path in enumerate(DatFiles):
                 if i == 0:  # Warm-up
-                    plot_sts(sts_path, None, Storagepath, smooth_switch)
+                    plot_sts(
+                        sts_path,
+                        None,
+                        Storagepath,
+                        smooth_switch,
+                        didv_channels,
+                        didv_reference_names,
+                    )
                 topopath = find_nearest_file(sts_path, SxmFiles)
                 topo_for_sts = topopath if topopath != "Topography Not Found" else None
                 sts_img, topo_marked_img = plot_sts(
-                    sts_path, topo_for_sts, Storagepath, smooth_switch
+                    sts_path,
+                    topo_for_sts,
+                    Storagepath,
+                    smooth_switch,
+                    didv_channels,
+                    didv_reference_names,
                 )
+                if sts_img is None:
+                    # This file does not hold the selected channels.
+                    continue
 
                 if i % 5 == 0:
                     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -372,14 +513,30 @@ def main() -> None:
         if LinecutFiles:
             for i, lc_path in enumerate(LinecutFiles):
                 if i == 0:  # Warm-up
-                    plot_linecut(lc_path, None, Storagepath, smooth_switch)
+                    plot_linecut(
+                        lc_path,
+                        None,
+                        Storagepath,
+                        smooth_switch,
+                        didv_channels,
+                        didv_grid_reference_names,
+                    )
                 topopath = find_nearest_file(lc_path, SxmFiles)
                 topo_for_lc = topopath if topopath != "Topography Not Found" else None
                 lc_img, ol_img, topo_marked_img = plot_linecut(
-                    lc_path, topo_for_lc, Storagepath, smooth_switch
+                    lc_path,
+                    topo_for_lc,
+                    Storagepath,
+                    smooth_switch,
+                    didv_channels,
+                    didv_grid_reference_names,
                 )
+                if lc_img is None:
+                    continue
 
-                raw_lc = nap.read.Grid(str(lc_path))
+                raw_lc = read_grid(lc_path)
+                if raw_lc is None:
+                    continue
                 try:
                     current_A = raw_lc.signals["Current [AVG] (A)"][0][0][0]
                 except Exception:
@@ -414,7 +571,14 @@ def main() -> None:
         # ----  Map data processing (including QPI / current maps) ----
         if MapFiles:
             for _, mappath in enumerate(MapFiles):
-                raw_map = nap.read.Grid(str(mappath))
+                raw_map = read_grid(mappath)
+                if raw_map is None:
+                    continue
+                if didv_channels is not None and file_lacks_channels(
+                    raw_map.signals, didv_channels, mappath
+                ):
+                    # This map file does not hold the selected channels.
+                    continue
                 topopath = find_nearest_file(mappath, SxmFiles)
                 if topopath != "Topography Not Found":
                     raw_topo = nap.read.Scan(str(topopath))
@@ -467,7 +631,13 @@ def main() -> None:
                 map_dir = Storagepath / "folder_map"
                 map_dir.mkdir(parents=True, exist_ok=True)
                 for n in range(n_bias):
-                    plot_map_bias(mappath, n, map_dir)
+                    plot_map_bias(
+                        mappath,
+                        n,
+                        map_dir,
+                        didv_channels,
+                        didv_grid_reference_names,
+                    )
 
                 # Animated map
                 fig, ax = plt.subplots(figsize=(2, 2))
@@ -544,7 +714,13 @@ def main() -> None:
                     qpi_dir = Storagepath / "folder_QPI"
                     qpi_dir.mkdir(parents=True, exist_ok=True)
                     for n in range(n_bias):
-                        plot_qpi_bias(mappath, n, qpi_dir)
+                        plot_qpi_bias(
+                            mappath,
+                            n,
+                            qpi_dir,
+                            didv_channels,
+                            didv_grid_reference_names,
+                        )
 
                     fig, ax = plt.subplots(figsize=(2, 2))
                     ax.axis("off")

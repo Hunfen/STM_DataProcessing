@@ -1,4 +1,8 @@
+import atexit
+import hashlib
 import logging
+import shutil
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -164,6 +168,230 @@ def build_bias_labels(raw_data, divider=1):
     return bias
 
 
+# ---------- Grid (3ds) reading with multi-line header tolerance ----------
+
+_GRID_HEADER_END_TAG = ":HEADER_END:"
+
+# Repaired copies already written in this process, keyed by source file path.
+_REPAIRED_GRID_CACHE = {}
+
+# Process-level scratch directory holding the header-repaired copies. It is
+# created lazily on the first repair (inside TMPDIR when the environment sets
+# it) and removed as a whole when the process exits, so nothing the reader
+# writes can ever survive in a caller-supplied storage directory.
+_REPAIRED_GRID_DIR = None
+
+
+def _cleanup_repaired_grid_dir():
+    """Remove the process-level repair directory (atexit hook)."""
+    if _REPAIRED_GRID_DIR is not None:
+        shutil.rmtree(_REPAIRED_GRID_DIR, ignore_errors=True)
+
+
+def _repaired_grid_dir() -> Path:
+    """Return the process-level repair directory, creating it on first use.
+
+    tempfile.mkdtemp() honours TMPDIR (and the platform temporary-directory
+    fallbacks); the atexit hook registered here deletes the whole directory
+    when the process terminates. Any failure (e.g. no creatable temporary
+    directory) propagates to read_grid, which warns about the specific file
+    and returns None instead of raising.
+    """
+    global _REPAIRED_GRID_DIR
+    if _REPAIRED_GRID_DIR is None:
+        _REPAIRED_GRID_DIR = Path(tempfile.mkdtemp(prefix="nanonis_grid_repair_"))
+        atexit.register(_cleanup_repaired_grid_dir)
+    return _REPAIRED_GRID_DIR
+
+
+def repaired_grid_path(gridpath: Path, repair_dir: Path) -> Path:
+    """Return the path of the header-repaired copy of gridpath in repair_dir."""
+    digest = hashlib.sha1(str(Path(gridpath).resolve()).encode("utf-8")).hexdigest()[:8]
+    return Path(repair_dir) / f"{Path(gridpath).stem}__repaired_{digest}.3ds"
+
+
+def _split_grid_header(content: bytes):
+    """Split raw 3ds bytes into (header_text, data_bytes).
+
+    The header is everything up to and including the newline that terminates
+    the ':HEADER_END:' line, which is exactly where nanonispy starts the data.
+    """
+    end = content.find(_GRID_HEADER_END_TAG.encode("ascii"))
+    if end < 0:
+        raise ValueError(f"{_GRID_HEADER_END_TAG} not found")
+    line_end = content.find(b"\n", end)
+    if line_end < 0:
+        raise ValueError(f"{_GRID_HEADER_END_TAG} line is not terminated")
+    return (
+        content[: line_end + 1].decode("utf-8", errors="replace"),
+        content[line_end + 1 :],
+    )
+
+
+def _write_repaired_grid(gridpath: Path, repair_dir: Path):
+    """Write a header-repaired copy of gridpath and return its path.
+
+    Nanonis allows a string header value to continue on the following lines:
+    the opening quote sits on the line carrying the '=', while the closing
+    quote sits alone on a later line that has no '=' at all. nanonispy splits
+    the raw header on '\r\n' and unpacks every entry at '=', so such a line
+    makes the whole file unreadable. The copy joins every header line without
+    '=' onto the previous line and keeps the data section (everything after
+    the ':HEADER_END:' line) byte for byte. Returns None when the header has
+    no such line, i.e. when a repair cannot address the failure.
+    """
+    gridpath = Path(gridpath)
+    content = gridpath.read_bytes()
+    header, data = _split_grid_header(content)
+    tag_at = header.rfind(_GRID_HEADER_END_TAG)
+    body, tail = header[:tag_at], header[tag_at:]
+    lines = body.split("\r\n")
+    trailing = ""
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+        trailing = "\r\n"
+    merged = []
+    for line in lines:
+        if merged and "=" not in line:
+            merged[-1] += line
+        else:
+            merged.append(line)
+    if merged == lines:
+        return None
+    out_path = repaired_grid_path(gridpath, repair_dir)
+    Path(repair_dir).mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(("\r\n".join(merged) + trailing + tail).encode("utf-8") + data)
+    _REPAIRED_GRID_CACHE[str(gridpath.resolve())] = out_path
+    return out_path
+
+
+def read_grid(gridpath: Path):
+    """Read a Nanonis grid (.3ds) file and return the parsed Grid object.
+
+    The file is parsed as it is first. If that fails and the header carries a
+    multi-line value, a repaired copy is written into the process-level
+    temporary directory (created lazily on first use, inside TMPDIR when the
+    environment sets it, and removed when the process exits) and parsed
+    instead; the source file itself is never modified and no artefact is left
+    in the caller's storage directory. When the file stays unreadable, a
+    warning naming the file is logged and None is returned so that the caller
+    can skip that file and keep processing the rest of the folder.
+    """
+    gridpath = Path(gridpath)
+    try:
+        return nap.read.Grid(str(gridpath))
+    except Exception as exc:
+        first_error = f"{type(exc).__name__}: {exc}"
+
+    key = str(gridpath.resolve())
+    repaired_path = _REPAIRED_GRID_CACHE.get(key)
+    freshly_repaired = False
+    if repaired_path is None or not Path(repaired_path).exists():
+        try:
+            repaired_path = _write_repaired_grid(gridpath, _repaired_grid_dir())
+            freshly_repaired = repaired_path is not None
+        except Exception as exc:
+            logger.warning(
+                "Grid file %s could not be read as is (%s) and no repaired copy "
+                "could be built (%s: %s); skipping it.",
+                gridpath,
+                first_error,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+    if repaired_path is None:
+        logger.warning(
+            "Grid file %s could not be read as is (%s) and its header has no "
+            "multi-line value to repair; skipping it.",
+            gridpath,
+            first_error,
+        )
+        return None
+    if freshly_repaired:
+        logger.warning(
+            "Grid file %s could not be read as is (%s); it is read from the "
+            "repaired header copy %s instead.",
+            gridpath,
+            first_error,
+            repaired_path,
+        )
+
+    try:
+        return nap.read.Grid(str(repaired_path))
+    except Exception as exc:
+        logger.warning(
+            "Grid file %s is still unreadable after repairing its header (%s: %s); "
+            "skipping it.",
+            gridpath,
+            type(exc).__name__,
+            exc,
+        )
+        return None
+
+
+# ---------- dI/dV channel selection ----------
+
+
+def resolve_channel_arrays(signals, channel_indices, reference_names=None, source=None):
+    """Return the arrays stored at the given 0-based signal positions.
+
+    The indices are positions in this file's own ``signals`` mapping, in
+    insertion order, so the same index set can be applied to .dat spectra and
+    to .3ds map/QPI/linecut files (each file resolves the index against its own
+    table). Returns None after warning when this file has fewer signals than
+    the selection needs, so the caller can skip the file and carry on.
+    ``reference_names`` is the name list of the reference file the user was
+    shown; every index that resolves to a different name here is reported once
+    with the file name, the index, the reference name and the actual name.
+    """
+    names = list(signals)
+    if file_lacks_channels(signals, channel_indices, source):
+        return None
+    if reference_names is not None:
+        for index in channel_indices:
+            if index < len(reference_names) and reference_names[index] != names[index]:
+                logger.warning(
+                    "dI/dV channel index %d in %s is named %r, but the reference "
+                    "table for this selection says %r; using the channel actually "
+                    "stored at this index.",
+                    index,
+                    source,
+                    names[index],
+                    reference_names[index],
+                )
+    return [np.asarray(signals[names[index]], dtype=float) for index in channel_indices]
+
+
+def file_lacks_channels(signals, channel_indices, source=None) -> bool:
+    """Warn and return True when this file lacks one of the selected channels.
+
+    Callers that must decide up front whether to skip a whole file use this;
+    the plotting functions reach the same warning through
+    resolve_channel_arrays, so the message is defined in exactly one place.
+    """
+    n_signals = len(signals)
+    missing = [i for i in channel_indices if i < 0 or i >= n_signals]
+    if not missing:
+        return False
+    logger.warning(
+        "dI/dV selection skipped for %s: channel index %s is not available "
+        "(this file has %d signal(s), valid 0-based indices [0, %d]); skipping "
+        "this file and continuing.",
+        source,
+        ", ".join(str(i) for i in missing),
+        n_signals,
+        n_signals - 1,
+    )
+    return True
+
+
+def average_channels(arrays):
+    """Return the element-wise arithmetic mean of the selected channel arrays."""
+    stacked = np.stack([np.asarray(array, dtype=float) for array in arrays], axis=0)
+    return stacked.mean(axis=0)
+
+
 # ---------- Single image plotting functions ----------
 
 
@@ -203,21 +431,40 @@ def plot_sxm_topo(topopath: Path, output_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_map_bias(mappath: Path, n: int, output_dir: Path) -> Path:
+def plot_map_bias(
+    mappath: Path,
+    n: int,
+    output_dir: Path,
+    didv_channels=None,
+    didv_reference_names=None,
+) -> Path:
     """
     Plot a map image for the specified bias index n,
     save to output_dir/f"temp_map_{n}.tif".
     Returns the saved path.
+    didv_channels selects the dI/dV channels by 0-based position in this file's
+    signals mapping (several channels are averaged into one image); None keeps
+    the original name-based rule.
     """
     divider = get_divider(mappath)
-    raw_data = nap.read.Grid(str(mappath))
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        return None
     # Extract bias list
     bias = build_bias_labels(raw_data, divider)
 
-    try:
-        data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
-    except Exception:
-        data = raw_data.signals["LI Demod 1 Y [AVG] (A)"][:, :, n]
+    if didv_channels is None:
+        try:
+            data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
+        except Exception:
+            data = raw_data.signals["LI Demod 1 Y [AVG] (A)"][:, :, n]
+    else:
+        arrays = resolve_channel_arrays(
+            raw_data.signals, didv_channels, didv_reference_names, mappath
+        )
+        if arrays is None:
+            return None
+        data = average_channels([array[:, :, n] for array in arrays])
 
     scan_range = raw_data.header["size_xy"]
 
@@ -246,19 +493,38 @@ def plot_map_bias(mappath: Path, n: int, output_dir: Path) -> Path:
     return out_path
 
 
-def plot_qpi_bias(mappath: Path, n: int, output_dir: Path) -> Path:
+def plot_qpi_bias(
+    mappath: Path,
+    n: int,
+    output_dir: Path,
+    didv_channels=None,
+    didv_reference_names=None,
+) -> Path:
     """
     Plot a QPI image, save to output_dir/f"temp_QPI_{n}.tif".
+    didv_channels selects the dI/dV channels by 0-based position in this file's
+    signals mapping (several channels are averaged before the FFT); None keeps
+    the original name-based rule.
     """
     divider = get_divider(mappath)
-    raw_data = nap.read.Grid(str(mappath))
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        return None
 
     bias = build_bias_labels(raw_data, divider)
 
-    try:
-        data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
-    except Exception:
-        data = raw_data.signals["LI Demod 1 Y [AVG] (A)"][:, :, n]
+    if didv_channels is None:
+        try:
+            data = raw_data.signals["LI Demod 1 Y (A)"][:, :, n]
+        except Exception:
+            data = raw_data.signals["LI Demod 1 Y [AVG] (A)"][:, :, n]
+    else:
+        arrays = resolve_channel_arrays(
+            raw_data.signals, didv_channels, didv_reference_names, mappath
+        )
+        if arrays is None:
+            return None
+        data = average_channels([array[:, :, n] for array in arrays])
 
     scan_range = raw_data.header["size_xy"]
 
@@ -311,7 +577,9 @@ def plot_map_current_bias(
     If smooth=True, apply Gaussian filter (sigma=1) to the image.
     """
     divider = get_divider(mappath)
-    raw_data = nap.read.Grid(str(mappath))
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        return None
 
     bias = build_bias_labels(raw_data, divider)
 
@@ -345,19 +613,52 @@ def plot_map_current_bias(
     return out_path
 
 
-def plot_sts(stspath: Path, topopath: Path, output_dir: Path, smooth: bool = False):
+def plot_sts(
+    stspath: Path,
+    topopath: Path,
+    output_dir: Path,
+    smooth: bool = False,
+    didv_channels=None,
+    didv_reference_names=None,
+):
     """
     Plot a single spectrum and the corresponding topography with marker.
     topopath can be None. If smooth=True, apply Gaussian filter (sigma=1).
     Returns (sts_path, topo_marked_path); the second is None if topopath is None.
+    didv_channels selects the dI/dV channels by 0-based position in this file's
+    signals mapping (several channels are averaged into one curve); None keeps
+    the original name-based rule. Both paths are None when this file lacks one
+    of the selected channels, so the caller can skip the file.
     """
     divider = get_divider(stspath)
     raw_sts = nap.read.Spec(str(stspath))
     bias = raw_sts.signals["Bias calc (V)"] * 1000 / divider
-    try:
-        didv = raw_sts.signals["LI Demod 1 Y [AVG] (A)"]
-    except Exception:
-        didv = raw_sts.signals["LI Demod 1 Y (A)"]
+    if didv_channels is None:
+        # Take the lock-in Y channel. It is stored in A for most files, but
+        # Nanonis writes it in V when the channel is recorded in volts, so both
+        # units are accepted here.
+        didv = None
+        for signal_name in (
+            "LI Demod 1 Y [AVG] (A)",
+            "LI Demod 1 Y (A)",
+            "LI Demod 1 Y [AVG] (V)",
+            "LI Demod 1 Y (V)",
+        ):
+            if signal_name in raw_sts.signals:
+                didv = raw_sts.signals[signal_name]
+                break
+        if didv is None:
+            raise KeyError(
+                f"no lock-in Y channel in {stspath}; "
+                f"available signals: {sorted(raw_sts.signals)}"
+            )
+    else:
+        arrays = resolve_channel_arrays(
+            raw_sts.signals, didv_channels, didv_reference_names, stspath
+        )
+        if arrays is None:
+            return None, None
+        didv = average_channels(arrays)
     if smooth:
         didv = gaussian_filter1d(didv, sigma=1)
 
@@ -427,22 +728,43 @@ def plot_sts(stspath: Path, topopath: Path, output_dir: Path, smooth: bool = Fal
     return sts_path, topo_marked_path
 
 
-def plot_linecut(lcpath: Path, topopath: Path, output_dir: Path, smooth: bool = False):
+def plot_linecut(
+    lcpath: Path,
+    topopath: Path,
+    output_dir: Path,
+    smooth: bool = False,
+    didv_channels=None,
+    didv_reference_names=None,
+):
     """
     Plot three figures for a linecut: waterfall plot, overlap plot,
     and topography with marker.
     topopath can be None. If smooth=True, apply Gaussian filter (sigma=1)
     to each spectrum along the bias axis.
     Returns (lc_path, ol_path, topo_marked_path); third is None if topopath is None.
+    All three are None if the grid file cannot be read or lacks one of the
+    selected dI/dV channels. didv_channels selects the dI/dV channels by
+    0-based position in this file's signals mapping (several channels are
+    averaged into one linecut); None keeps the original name-based rule.
     """
     divider = get_divider(lcpath)
-    raw_lc = nap.read.Grid(str(lcpath))
+    raw_lc = read_grid(lcpath)
+    if raw_lc is None:
+        return None, None, None
     L = raw_lc.header["size_xy"][0] * 1e9
     bias = raw_lc.signals["sweep_signal"][:] * 1000 / divider
-    try:
-        lcdata = raw_lc.signals["LI Demod 1 Y [AVG] (A)"][0, :, :]
-    except Exception:
-        lcdata = raw_lc.signals["LI Demod 1 Y (A)"][0, :, :]
+    if didv_channels is None:
+        try:
+            lcdata = raw_lc.signals["LI Demod 1 Y [AVG] (A)"][0, :, :]
+        except Exception:
+            lcdata = raw_lc.signals["LI Demod 1 Y (A)"][0, :, :]
+    else:
+        arrays = resolve_channel_arrays(
+            raw_lc.signals, didv_channels, didv_reference_names, lcpath
+        )
+        if arrays is None:
+            return None, None, None
+        lcdata = average_channels([array[0, :, :] for array in arrays])
 
     if smooth:
         lcdata = gaussian_filter1d(lcdata, sigma=1, axis=1)

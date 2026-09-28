@@ -25,6 +25,7 @@ try:
     from .plot_funcs import (
         build_bias_labels,
         finite_range,
+        read_grid,
         subtractMeanPlane,
         topo_colormap,
     )
@@ -32,6 +33,7 @@ except ImportError:  # allow running as a standalone script
     from plot_funcs import (
         build_bias_labels,
         finite_range,
+        read_grid,
         subtractMeanPlane,
         topo_colormap,
     )
@@ -118,7 +120,9 @@ def SortFiles(files):
         if each.suffix == ".sxm":
             SxmFiles.append(each)
         if each.suffix == ".3ds":
-            raw_data_1 = nap.read.Grid(each)
+            raw_data_1 = read_grid(each)
+            if raw_data_1 is None:
+                continue
             try:
                 data_1 = raw_data_1.signals["LI Demod 1 X (A)"]
             except Exception:
@@ -198,7 +202,10 @@ def ShowMap(mappath, n):
         divider = 10
     if "d100" in str(mappath):
         divider = 100
-    raw_data = nap.read.Grid(mappath)
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        # Unreadable 3ds file: skip it, the rest of the folder still runs.
+        return
     bias = build_bias_labels(raw_data, divider)
     try:
         data = raw_data.signals["LI Demod 1 X (A)"][:, :, n]
@@ -247,7 +254,10 @@ def QPI(mappath, n):
         divider = 10
     if "d100" in str(mappath):
         divider = 100
-    raw_data = nap.read.Grid(mappath)
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        # Unreadable 3ds file: skip it, the rest of the folder still runs.
+        return
     bias = build_bias_labels(raw_data, divider)
     try:
         data = raw_data.signals["LI Demod 1 X (A)"][:, :, n]
@@ -307,7 +317,10 @@ def ShowMapI(mappath, n):
         divider = 10
     if "d100" in str(mappath):
         divider = 100
-    raw_data = nap.read.Grid(mappath)
+    raw_data = read_grid(mappath)
+    if raw_data is None:
+        # Unreadable 3ds file: skip it, the rest of the folder still runs.
+        return
     # 获取mapping对应的偏压列表
     bias = build_bias_labels(raw_data, divider)
     data = raw_data.signals["Current (A)"][:, :, n]
@@ -515,7 +528,10 @@ def STS(stspath):
 # 绘制linecut的函数,并且搜索到最近的形貌图在形貌图上标注位置,保存linecut图和对应的形貌图
 def Linecut(lcpath):
     topopath = find_nearest_file(lcpath, SxmFiles)
-    raw_data = nap.read.Grid(lcpath)
+    raw_data = read_grid(lcpath)
+    if raw_data is None:
+        # Unreadable 3ds file: skip it, the rest of the folder still runs.
+        return
     L = raw_data.header["size_xy"][0] * 1e9  # 获取linecut长度,单位为nm
     divider = 1
     if "d1" in str(lcpath):
@@ -620,7 +636,9 @@ def Linecut(lcpath):
         angle = float(raw_data.header["scan_angle"])
         direction = raw_data.header["scan_dir"]
 
-        linecut_raw_data = nap.read.Grid(lcpath)
+        linecut_raw_data = read_grid(lcpath)
+        if linecut_raw_data is None:
+            return
         linecut_size = linecut_raw_data.header["size_xy"][0]
         linecut_center = linecut_raw_data.header["pos_xy"]
         lcangle = linecut_raw_data.header["angle"] * np.pi / 180
@@ -689,7 +707,7 @@ def Linecut(lcpath):
 def update_map(n):
     ax.cla()  # 清除当前轴上的内容
     ax.set_axis_off()
-    img_path = str(Storagepath / "folder_map") / f"temp_map_{n}.tif"
+    img_path = str(Storagepath / "folder_map" / f"temp_map_{n}.tif")
     img = plt.imread(img_path)
     # 获取图像的实际范围
     range_x, range_y = img.shape[1], img.shape[0]
@@ -701,7 +719,7 @@ def update_map(n):
 def update_QPI(n):
     ax.cla()  # 清除当前轴上的内容
     ax.set_axis_off()
-    img_path = str(Storagepath / "folder_QPI") / f"temp_QPI_{n}.tif"
+    img_path = str(Storagepath / "folder_QPI" / f"temp_QPI_{n}.tif")
     img = plt.imread(img_path)
     # 获取图像的实际范围
     range_x, range_y = img.shape[1], img.shape[0]
@@ -713,7 +731,7 @@ def update_QPI(n):
 def update_mapI(n):
     ax.cla()  # 清除当前轴上的内容
     ax.set_axis_off()
-    img_path = str(Storagepath / "folder_mapI") / f"temp_mapI_{n}.tif"
+    img_path = str(Storagepath / "folder_mapI" / f"temp_mapI_{n}.tif")
     img = plt.imread(img_path)
     # 获取图像的实际范围
     range_x, range_y = img.shape[1], img.shape[0]
@@ -1154,7 +1172,9 @@ if __name__ == "__main__":
                 lcpath = LinecutFiles[i]
                 Linecut(lcpath)
                 # 获取linecut的文字信息
-                raw_data_lc = nap.read.Grid(lcpath)
+                raw_data_lc = read_grid(lcpath)
+                if raw_data_lc is None:
+                    continue
                 try:
                     setpointI_lc = (
                         raw_data_lc.signals["Current [AVG] (A)"][0][0][0] * 1e12
@@ -1317,7 +1337,9 @@ if __name__ == "__main__":
             for j in range(len(MapFiles)):
                 mappath = MapFiles[j]
                 topopath = find_nearest_file(mappath, SxmFiles)
-                raw_data = nap.read.Grid(mappath)
+                raw_data = read_grid(mappath)
+                if raw_data is None:
+                    continue
                 topo_inmap = raw_data.signals["topo"]
                 try:
                     setpoint = raw_data.signals["Current (A)"][0][0][0] * 1e12
