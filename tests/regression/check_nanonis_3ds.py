@@ -1,4 +1,4 @@
-"""Regression checks for the Nanonis 3DS / DAT loader fixes (M3, M16, M19).
+"""Regression checks for the Nanonis 3DS / DAT loader fixes (M3, M16, M19, t14).
 
 Verifies, against two real Nanonis files (read-only) plus synthetic edge
 cases, that:
@@ -14,6 +14,9 @@ cases, that:
 - M19: empty strings in "Fixed parameters" / "Experiment parameters" are
   filtered out, and a column-count mismatch with "# Parameters (4 byte)"
   raises instead of silently writing values into the wrong columns.
+- t14: a .3ds whose header is cut before the ':HEADER_END:' marker raises a
+  ValueError naming the missing marker (and the file), instead of parsing a
+  partial header and failing with a raw error further down.
 
 Run from the repository root:
 
@@ -232,6 +235,23 @@ def check_channels_order_independent() -> None:
     print(f"  channels order-independent and quote-free ({len(ch_first)} channels)")
 
 
+def check_header_without_end_marker(tmpdir: Path) -> None:
+    """t14: a header cut before ':HEADER_END:' must raise a named ValueError."""
+    path = tmpdir / "cut_header.3ds"
+    prefix = LINE_3DS.read_bytes()[:2000]
+    assert b":HEADER_END:" not in prefix, "the 2000-byte cut still contains the marker"
+    path.write_bytes(prefix)
+    try:
+        NanonisFileLoader(str(path))
+    except ValueError as exc:
+        msg = str(exc)
+        assert ":HEADER_END:" in msg, f"message does not name the marker: {msg}"
+        assert path.name in msg, f"message does not name the file: {msg}"
+        print("  ValueError raised as expected; message:", msg)
+    else:
+        raise AssertionError("expected ValueError for a header without ':HEADER_END:'")
+
+
 def check_missing_block_fields(tmpdir: Path) -> None:
     """M16: missing block header fields must raise a ValueError naming them."""
     path = tmpdir / "missing_fields.3ds"
@@ -379,6 +399,10 @@ def main() -> int:
         (
             "3ds channels order-independent (t22)",
             lambda _tmpdir: check_channels_order_independent(),
+        ),
+        (
+            "3ds header cut before ':HEADER_END:' (t14)",
+            check_header_without_end_marker,
         ),
         ("3ds missing block header fields (M16)", check_missing_block_fields),
         ("3ds trailing extra bytes (M16)", check_trailing_extra_bytes),

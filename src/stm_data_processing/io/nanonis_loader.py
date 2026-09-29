@@ -10,6 +10,55 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+#: Encodings tried, in order, for one Nanonis header line.
+_HEADER_LINE_ENCODINGS = ("utf-8", "cp1252")
+
+
+def _decode_header_line(raw_line: bytes) -> str:
+    """Decode one header line: UTF-8, else cp1252, else latin-1.
+
+    Nanonis writes header text in the operator's local codepage, so a single
+    non-UTF-8 byte (a real .3ds stores the sample name ``BLG/SiC - r3\\xd7r3``,
+    where 0xD7 is ``x``-squared in cp1252) must not poison the whole value.
+    ``errors="replace"`` would turn that byte into U+FFFD and lose the
+    information, so the two encodings that actually occur are tried and
+    latin-1 - which cannot fail - is the last resort.
+    """
+    for encoding in _HEADER_LINE_ENCODINGS:
+        try:
+            return raw_line.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw_line.decode("latin-1")
+
+
+def _strip_one_quote_pair(value: str) -> str:
+    """Remove exactly one pair of surrounding double quotes from ``value``.
+
+    Nanonis quotes every header value (``Grid dim="304 x 304"``); this is the
+    single documented rule applied to every .3ds value, whether it belongs to a
+    top-level key, a module leaf or a single-attribute module.  Further quotes
+    inside the value are left untouched, and a value that is not quoted (or is
+    just one quote character, the signature of a continuation line that was
+    never accumulated) is returned unchanged.
+    """
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    return value
+
+
+def _pending_value_is_open(pending_lines: list[str]) -> bool:
+    """True while the pending .3ds value has an unclosed leading quote.
+
+    Nanonis quotes multi-line values; while the opening quote has not been
+    closed, a line is a continuation even when it happens to contain ``=``.
+    An empty pending value or an unquoted value is never "open".
+    """
+    if not pending_lines:
+        return False
+    text = "\n".join(pending_lines)
+    return len(text) >= 2 and text.startswith('"') and not text.endswith('"')
+
 
 class NanonisFileLoader:
     """Loader for Nanonis spectroscopy and scanning probe microscopy files.
@@ -304,6 +353,13 @@ class NanonisFileLoader:
     def _reform_sxm_data(self) -> np.ndarray:
         """Reformats raw SXM data into structured array.
 
+        The payload is row-major ``x`` (fast axis) then ``y`` (slow axis) — the
+        first ``SCAN_PIXELS[0]`` floats form the first scan line (x = 0..nx-1),
+        the next ``nx`` the second line, etc.  SCAN_PIXELS is (pixels/line,
+        lines) = (nx, ny), so each channel is a ``(ny, nx)`` matrix with
+        ``nx`` samples per row (the fast / x axis) and ``ny`` rows (the slow /
+        y axis).
+
         The backward scan rows are flipped horizontally (and every row
         vertically for upward scans) on an explicit copy of the payload,
         so calling this method never mutates self._raw_data.
@@ -342,7 +398,15 @@ class NanonisFileLoader:
         # buffer. Work on an explicit copy so _raw_data always stays
         # pristine regardless of access order (the copy is one
         # payload-sized buffer, not a duplicate of the whole file).
-        data = raw_data[:total_pts].reshape((len(channels) * 2, *pixels)).copy()
+        # pixels = (nx, ny): a channel is reshaped as (ny, nx) so the fast / x
+        # axis has nx samples per row and the slow / y axis gives ny rows,
+        # matching nanonispy's 'forward' / 'backward' orientation on both
+        # square and rectangular scans.
+        data = (
+            raw_data[:total_pts]
+            .reshape((len(channels) * 2, pixels[1], pixels[0]))
+            .copy()
+        )
         for i in range(data.shape[0]):
             if i % 2 != 0:
                 data[i] = np.fliplr(data[i])
@@ -515,32 +579,59 @@ class NanonisFileLoader:
                 - data_1d (np.ndarray): 1D array of binary data
 
         Note:
-            - Uses UTF-8 decoding with error replacement
-            - Handles multi-line header values
+            - Each line is decoded as UTF-8 with a cp1252 / latin-1 fallback
+              (see :func:`_decode_header_line`), so a single non-UTF-8 byte
+              cannot turn the value into U+FFFD.
+            - A value may span lines: Nanonis closes a quoted multi-line value
+              with a continuation line (typically a lone ``"``).  Continuation
+              lines are accumulated into the pending value and the value is
+              committed only when the next key line starts, so the first line's
+              text is never replaced by the continuation.
+            - Physical lines of a multi-line value are joined with a single
+              ``"\\n"`` (the file's CRLF line endings are not part of the
+              value), which reproduces the original text apart from the line
+              ending.
             - Skips CRLF after header end marker
+            - A header that never reaches ':HEADER_END:' raises a ValueError
+              naming the marker (and the last line read) instead of quietly
+              parsing a partial header.
 
         """
-        raw_header = {}
-        key, value_buffer = "", ""
+        raw_header: dict[str, str] = {}
+        pending_key: str | None = None
+        pending_lines: list[str] = []
+        saw_header_end = False
+        last_line = ""
         with Path.open(f_path, "rb") as f:
-            for line in f:
-                decoded_line = line.decode(encoding="utf-8", errors="replace")
+            for raw_line in f:
+                decoded_line = _decode_header_line(raw_line)
                 if ":HEADER_END:" in decoded_line:
                     # b'\x0d\x0a' is following the ":HEADER_END:"
                     # f.readline() will automaticly skip them
+                    saw_header_end = True
                     break
-                if decoded_line.endswith("\r\n"):
-                    # Update key and value when encounter '\r\n'
-                    if "=" in decoded_line.strip("\r\n"):
-                        key, value_buffer = decoded_line.strip("\r\n").split("=", 1)
-                    else:
-                        value_buffer += decoded_line.rstrip("\t\r\n")
-                    raw_header.update({key: value_buffer})
-                    value_buffer = ""
-                elif "=" in decoded_line:
-                    key, value_buffer = decoded_line.split("=", 1)
-                else:
-                    value_buffer += decoded_line
+                line = decoded_line.rstrip("\r\n")
+                last_line = line
+                if "=" in line and not _pending_value_is_open(pending_lines):
+                    # A new key line: commit the value it terminates.
+                    if pending_key is not None:
+                        raw_header[pending_key] = "\n".join(pending_lines)
+                    pending_key, first_line = line.split("=", 1)
+                    pending_lines = [first_line]
+                elif pending_key is not None and line.strip():
+                    # Continuation of the pending value (also when the
+                    # continuation itself contains '=': an opened quote is
+                    # closed only by a line that has not been seen yet).
+                    pending_lines.append(line)
+            if not saw_header_end:
+                error_msg = (
+                    f"{Path(f_path).name}: the .3ds header has no "
+                    f"':HEADER_END:' marker, so it was cut off; the last line "
+                    f"read was {last_line!r}"
+                )
+                raise ValueError(error_msg)
+            if pending_key is not None:
+                raw_header[pending_key] = "\n".join(pending_lines)
             data_1d = np.fromfile(f, dtype=">f")
         return raw_header, data_1d
 
@@ -550,63 +641,46 @@ class NanonisFileLoader:
         Parses the raw header, organizes module-specific data, and converts
         specific fields (e.g., 'MultiLine Settings') into appropriate formats.
 
+        Every module becomes a dict of ``leaf -> value`` - including a module
+        with a single attribute, which used to collapse into a bare string and
+        lose the leaf key name.  Every value has exactly one pair of
+        surrounding double quotes removed (:func:`_strip_one_quote_pair`),
+        uniformly for top-level keys, module leaves and single-attribute
+
         Returns:
             dict: Structured header with module-specific data.
 
         """
-        header = {}
-        modules = []
-        for key, value in self._raw_header.items():
+        module_of: dict[str, str] = {}
+        for key in self._raw_header:
             if re.search(">", key):  # initial dicts for modules
                 if key.startswith("Ext. VI 1>"):
                     # deal with external VI attributes
                     # Use proper string slicing instead of strip
                     module_name = key[len("Ext. VI 1>") :]
                     if ">" in module_name:
-                        modules.append(module_name.split(">")[0])
+                        module_of[key] = module_name.split(">")[0]
                     else:
-                        modules.append(module_name)
+                        module_of[key] = module_name
                 else:  # deal with the internal modules
-                    modules.append(key.split(">")[0])
-            else:
-                header.update({key: value.strip("\r\n").strip('"')})
+                    module_of[key] = key.split(">")[0]
 
-        modules = Counter(modules)
+        header: dict = {}
+        for key, value in self._raw_header.items():
+            if key not in module_of:
+                header[key] = _strip_one_quote_pair(value.strip("\r\n"))
 
-        for module, count in modules.items():
-            if count == 1:
-                for key, value in self._raw_header.items():
-                    # Handle the strip issue properly
-                    # if key.startswith("Ext. VI 1>"):
-                    #     check_key = key[len("Ext. VI 1>") :]
-                    # else:
-                    #     check_key = key
-                    check_key = (
-                        key[len("Ext. VI 1>") :]
-                        if key.startswith("Ext. VI 1>")
-                        else key
-                    )
-
-                    if module == check_key.split(">")[0]:
-                        header.update({module: value.strip("\r\n")})
-            else:
-                header[module] = {}
-                for key, value in self._raw_header.items():
-                    # Handle the strip issue properly
-                    # if key.startswith("Ext. VI 1>"):
-                    #     check_key = key[len("Ext. VI 1>") :]
-                    # else:
-                    #     check_key = key
-                    check_key = (
-                        key[len("Ext. VI 1>") :]
-                        if key.startswith("Ext. VI 1>")
-                        else key
-                    )
-
-                    if module == check_key.split(">")[0]:
-                        header[module].update(
-                            {key.split(">")[-1]: value.strip("\r\n").strip('"')},
-                        )
+        modules = Counter(module_of.values())
+        for module in modules:
+            container: dict[str, str] = {}
+            for key, value in self._raw_header.items():
+                if module_of.get(key) != module:
+                    continue
+                container[key.split(">")[-1]] = _strip_one_quote_pair(
+                    value.strip("\r\n"),
+                )
+            if container:
+                header[module] = container
 
         if "Bias Spectroscopy" in header:
             for key, value in header["Bias Spectroscopy"].items():
@@ -820,6 +894,12 @@ class NanonisFileLoader:
     def data(self) -> np.ndarray | pd.DataFrame | None:
         """Get the processed data from the loaded file.
 
+        Axis order for .sxm: ``pixels = (nx, ny)`` where ``nx`` = SCAN_PIXELS[0]
+        samples per line (fast / x axis) and ``ny`` = SCAN_PIXELS[1] scan lines
+        (slow / y axis).  The returned array has shape ``(2 * n_channels,
+        ny, nx)``; channel ``i``'s forward scan is ``data[2 * i]`` (a ``(ny,
+        nx)`` matrix), its backward scan is ``data[2 * i + 1]``.
+
         Returns:
             np.ndarray | pd.DataFrame | None: The processed data depending on file type:
                 - For .sxm files: 2D numpy array of scan data
@@ -881,7 +961,12 @@ class NanonisFileLoader:
 
     @property
     def pixels(self) -> tuple:
-        """Get the pixel dimensions of the scan data."""
+        """Get the pixel dimensions of the scan data.
+
+        For .sxm the tuple is ``(nx, ny)`` = SCAN_PIXELS as written, i.e.
+        ``nx`` = samples per line (fast / x axis), ``ny`` = scan lines (slow /
+        y axis).  A single channel matrix is therefore shaped ``(ny, nx)``.
+        """
         if self._pixels is None:
             if self.file_type == "sxm":
                 if self._header is not None:

@@ -17,6 +17,11 @@ legacy offset (skip two lines, seek two bytes) is additionally exercised
 on marker-stripped copies written to var/: the copy must load the
 identical payload and emit the fallback warning.
 
+The default file list includes rectangular scans (SCAN_PIXELS 256x512 and
+208x512): on those, a channel whose row width is filled with the line count
+instead of pixels/line shows up both as a wrong shape against nanonispy and as
+a wrong rendered aspect ratio in the PNG self-check.
+
 Run from the repository root:
 
     .venv/bin/python tests/regression/check_nanonis_sxm.py
@@ -49,6 +54,11 @@ from stm_data_processing.io.nanonis_loader import NanonisFileLoader
 from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
 # Real Nanonis scan files (read-only). Optional CLI arguments may override.
+# The first six are square scans; the last two are rectangular (SCAN_PIXELS
+# 256x512 and 208x512) and are what makes the row/column layout and the PNG
+# self-check fail when a channel's row width is filled with the line count.
+# t006 scans downward and c6lic6 topo0002 upward, so both directions are
+# covered.
 SXM_FILES = [
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0002.sxm",
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0007.sxm",
@@ -56,6 +66,8 @@ SXM_FILES = [
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0013.sxm",
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0019.sxm",
     "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-07-09/topo0020.sxm",
+    "/Users/hunfen/Documents/论文/Si111_Pb_islands/raw_data/2025-06-25/t006.sxm",
+    "/Users/hunfen/Documents/论文/c6lic6/data/raw/2025-09-29/topo0002.sxm",
 ]
 
 PNG_DIR = Path(__file__).resolve().parents[2] / "var" / "m15_sxm"
@@ -78,13 +90,45 @@ def old_sxm_raw(f_path: str) -> np.ndarray:
         return np.fromfile(f, dtype=">f")
 
 
-def _check_png_content(png_path: Path, expected_finite: float) -> None:
+def _axes_pixel_box(
+    fig, ax, png_shape: tuple[int, int]
+) -> tuple[float, float, float, float]:
+    """Return the axes' rendered data frame in saved-image pixel coordinates.
+
+    The frame comes from ``Axes.get_position()`` after a draw: for ``imshow``
+    (``aspect="equal"``) matplotlib adjusts the axes box to the data aspect
+    ratio during the draw, so the position is the real rendered image frame -
+    not a fixed fraction of the canvas.  Positions are figure fractions, so
+    multiplying by the saved PNG's size is exact for any figure dpi; image
+    arrays are indexed from the top left while matplotlib display coordinates
+    start at the bottom left, hence the y flip.  The returned box is
+    (x0, y0, x1, y1) with y measured from the top.
+    """
+    fig.canvas.draw()
+    pos = ax.get_position()
+    h_px, w_px = png_shape
+    return (
+        pos.x0 * w_px,
+        (1.0 - pos.y1) * h_px,
+        pos.x1 * w_px,
+        (1.0 - pos.y0) * h_px,
+    )
+
+
+def _check_png_content(
+    png_path: Path,
+    expected_finite: float,
+    data_shape: tuple[int, int],
+    fig,
+    ax,
+) -> None:
     """Verify a rendered topography PNG is not blank and matches finite ratio.
 
-    Crops the axes interior (skipping the title band and the colour bar)
-    and checks colormap-independent statistics: the non-white fraction must
-    be non-zero, the pixel-value spread (std) must rule out a blank or flat
-    rendering, and the finite-pixel fraction must roughly match the finite
+    Crops the axes' real rendered data frame (see ``_axes_pixel_box``; a fixed
+    fraction of the canvas assumes a square canvas and mis-crops rectangular
+    scans) and checks colormap-independent statistics: the non-white fraction
+    must be non-zero, the pixel-value spread (std) must rule out a blank or
+    flat rendering, and the finite-pixel fraction must roughly match the finite
     ratio of the underlying data. The NaN pixels are rendered as the neutral
     gray #808080; they are classified only approximately, so the check does
     not depend on the colormap having no gray midtones.
@@ -93,7 +137,26 @@ def _check_png_content(png_path: Path, expected_finite: float) -> None:
 
     rgb = mpimg.imread(png_path)  # (H, W, 4), values in [0, 1]
     h, w = rgb.shape[:2]
-    crop = rgb[int(h * 0.15) : int(h * 0.92), int(w * 0.05) : int(w * 0.78), :3]
+
+    x0, y0, x1, y1 = _axes_pixel_box(fig, ax, (h, w))
+    left, right = max(0, int(np.floor(x0))), min(w, int(np.ceil(x1)))
+    top, bottom = max(0, int(np.floor(y0))), min(h, int(np.ceil(y1)))
+    assert right - left > 1 and bottom - top > 1, (
+        f"axes crop box is degenerate: {(left, top, right, bottom)} of {(w, h)}"
+    )
+    # imshow renders with aspect="equal", so the axes frame must carry the data
+    # aspect ratio: a data layout that swaps lines and pixels/line (the pre-fix
+    # reshape) changes the rendered frame and fails here instead of sizing a
+    # wrong crop.
+    ny, nx = data_shape
+    frame_aspect = (x1 - x0) / (y1 - y0)
+    data_aspect = nx / ny
+    assert abs(frame_aspect - data_aspect) <= 0.02 * data_aspect, (
+        f"axes frame aspect {frame_aspect:.4f} does not match data aspect "
+        f"{data_aspect:.4f} ({nx}x{ny})"
+    )
+
+    crop = rgb[top:bottom, left:right, :3]
     r, g, b = crop[..., 0], crop[..., 1], crop[..., 2]
     near_white = (r > 0.92) & (g > 0.92) & (b > 0.92)
     coloured = ~near_white
@@ -102,7 +165,7 @@ def _check_png_content(png_path: Path, expected_finite: float) -> None:
     # Colormap-independent non-blank checks: a blank image (all white) has a
     # tiny non-white fraction, and a flat image (single solid colour, e.g. an
     # all-NaN rendering) has a tiny pixel std. Measured on real files: std is
-    # 0.26-0.40 for any finite data and ~0.04 for an all-NaN flat rendering,
+    # 0.24-0.40 for any finite data and ~0.04 for an all-NaN flat rendering,
     # so 0.1 separates the two with a wide margin.
     data_std = float(np.std(crop[coloured])) if coloured.any() else 0.0
     assert coloured_frac > 0.05, (
@@ -121,8 +184,9 @@ def _check_png_content(png_path: Path, expected_finite: float) -> None:
         f"finite ratio {expected_finite:.3f}"
     )
     print(
-        f"  pixel self-check: finite pixels {finite_frac:.3f} vs "
-        f"finite {expected_finite:.3f} OK (std {data_std:.4f})"
+        f"  pixel self-check: crop {right - left}x{bottom - top} px, "
+        f"finite pixels {finite_frac:.3f} vs finite {expected_finite:.3f} OK "
+        f"(std {data_std:.4f})"
     )
 
 
@@ -250,18 +314,19 @@ def check_file(f_path: str) -> None:
     PNG_DIR.mkdir(parents=True, exist_ok=True)
     out_png = PNG_DIR / f"{name}.png"
     fig.savefig(out_png, dpi=150)
-    plt.close(fig)
     print(
         f"  PNG saved: {out_png} "
         f"(finite {finite_ratio * 100:.1f}%, std {finite_std:.3e})"
     )
 
-    # Pixel-stat self-check on the rendered image: crop the axes interior
-    # (skip the title band and the colour bar), classify pixels as
-    # data-coloured / NaN-gray / background-white and require the
-    # data-coloured fraction to roughly match the finite ratio and to be
-    # non-zero (no more all-blank images).
-    _check_png_content(out_png, finite_ratio)
+    # Pixel-stat self-check on the rendered image: crop the axes' real rendered
+    # data frame (not a fixed fraction of the canvas, which assumes a square
+    # canvas and mis-crops rectangular scans), classify pixels as
+    # data-coloured / NaN-gray / background-white and require the data-coloured
+    # fraction to roughly match the finite ratio and to be non-zero (no more
+    # all-blank images).
+    _check_png_content(out_png, finite_ratio, z_plane.shape, fig, ax)
+    plt.close(fig)
 
 
 class _RecordCapture(logging.Handler):
