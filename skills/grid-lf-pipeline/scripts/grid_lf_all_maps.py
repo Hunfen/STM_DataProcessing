@@ -21,6 +21,31 @@ square CSVs under ``<out>/current`` and ``<out>/didv``; nothing is resampled
 here -- ``apply_lf_transform.py`` does the ``flipud`` + ``warp_by_field``
 resampling itself and never touches the values.
 
+**Orientation (top-down convention).**  A ``.3ds`` records its pixels bottom-up
+and the loader's 3ds path flips nothing: it walks one flat pixel index and
+writes it into ``/params`` and into the grid channels alike, so ``/data`` and
+``/params`` are in one and the same frame.  The loader's sxm path
+(``_reform_sxm_data``) is the one that normalises an image -- ``fliplr`` on the
+backward-scan rows, ``flipud`` when ``SCAN_DIR`` is ``up`` -- i.e. sxm comes out
+top-down.  This skill adopts the sxm convention for every grid product, so the
+flip is made at the source (``grid_topo.load_z_map`` returns a top-down map, and
+the topography CSV is top-down) and the rest of the chain follows it:
+
+* the channel average of every bias frame is written with one ``np.flipud``, so
+  the raw maps are top-down, exactly like the topography CSV the displacement
+  field was fitted on -- ``apply_lf_transform.py`` requires its input in that
+  same frame;
+* the applier works in u's index frame (it flips its input on the way in) and
+  leaves its product there, so the product is flipped with ``np.flipud`` once
+  before it lands -- ``<out>/<kind>/<label>.csv`` and
+  ``<out>/<kind>_corrected/<label>_corrected.csv`` are then both top-down and
+  comparable point by point.
+
+Neither flip is a frame fix: ``/data`` and ``/params`` were never mirrored with
+respect to each other.  Both exist only so that the whole chain -- topography
+CSV, raw maps, corrected maps -- comes out in the same top-down convention as
+the sxm products.
+
 Channels are resolved **by name** out of ``/channels`` (no channel index is
 hard-coded anywhere; ``list.index(name)`` is used after the name is found), and
 a forward channel is always taken together with its mirrored sweep partner,
@@ -328,8 +353,15 @@ def main(argv=None):
     for index, volts in enumerate(bias):
         label = f"{index}_{volts * 1e3:g}meV"
         for kind, channels in (("current", current), ("didv", didv)):
+            # Top-down convention (see the module docstring): a grid's /data and
+            # /params share one frame -- the 3ds loader flips neither -- whereas
+            # the sxm loader normalises its images top-down.  Every grid product
+            # of this pipeline follows the sxm convention, and the topography
+            # CSV the applier was fitted on is top-down too, so the channel
+            # average gets one np.flipud here.
             raw_csv = out / kind / f"{label}.csv"
-            write_map(raw_csv, cube[:, :, channels, index].mean(axis=2))
+            write_map(raw_csv, np.flipud(cube[:, :, channels, index].mean(axis=2)))
+            corrected_dir = out / f"{kind}_corrected"
             run(
                 [
                     sys.executable,
@@ -340,9 +372,16 @@ def main(argv=None):
                     "-L",
                     f"{size_nm:g}",
                     "-o",
-                    str(out / f"{kind}_corrected"),
+                    str(corrected_dir),
                 ]
             )
+            # The applier works in u's index frame (it flipped its input on the
+            # way in) and leaves its product there, so flip it back with
+            # np.flipud before it lands: the corrected map is then top-down like
+            # raw_csv above and the two are comparable point by point.
+            corrected_csv = corrected_dir / f"{label}_corrected.csv"
+            corrected = np.loadtxt(corrected_csv, delimiter=",")
+            write_map(corrected_csv, np.flipud(corrected))
 
     print(f"# done: {out}")
     return 0

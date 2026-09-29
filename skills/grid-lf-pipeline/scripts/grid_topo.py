@@ -17,11 +17,25 @@ Step 2 calls the repository helper
 transposed matrix: transposing does not change the plane that gets fitted (the
 basis ``{1, i, j}`` spans the same surface either way), it only changes the
 last-digit rounding of the plane evaluation, and the transposed call is what
-reproduces the approved reference topography byte for byte.
+reproduces the approved reference topography byte for byte once the convention
+flip below is undone.
 
-The z map is ``/params['Z (m)']`` reshaped to ``(ny, nx)``, exactly as stored:
-it is *not* flipped.  The LF scripts take the topography in scan order and do
-their own ``flipud`` internally.
+**Orientation (top-down convention).**  A ``.3ds`` records its pixels
+bottom-up: in :mod:`stm_data_processing.io.nanonis_loader` the 3ds path walks a
+single flat pixel index and writes block ``n`` into ``/params`` *and* into the
+grid channels alike, flipping neither, so ``/data`` and ``/params`` are in one
+and the same frame.  The loader's sxm path (``_reform_sxm_data``) is the one
+that normalises an image: it mirrors the backward-scan rows with ``fliplr``, and
+flips the row order with ``flipud`` when ``SCAN_DIR`` is ``up`` -- i.e. an sxm
+comes back top-down.  This skill adopts that same top-down convention for grid
+products, so the extracted z map is flipped once, right here at the source::
+
+    z = np.flipud(z)
+
+``/data`` and ``/params`` remain in one frame with each other (both flipped),
+which is what the rest of the chain relies on: the displacement field is fitted
+on this top-down CSV and every map that is later fed to the applier is flipped
+into the same top-down frame.
 
 The input is an ``.h5`` produced by ``python -m stm_data_processing.io.grid2h5``
 (see ``src/stm_data_processing/io/grid2h5.py``); a ``.3ds`` source is converted
@@ -119,7 +133,15 @@ def scan_size_nm(h5_path: Path) -> float:
 
 
 def load_z_map(h5_path: Path) -> np.ndarray:
-    """``(ny, nx)`` tip-height map from the ``/params`` ``Z (m)`` column, unflipped."""
+    """``(ny, nx)`` tip-height map from ``/params``'s ``Z (m)`` column, top-down.
+
+    The only flip of the whole chain (see the module docstring): a ``.3ds``
+    records bottom-up -- the loader's 3ds path writes one flat pixel index into
+    ``/params`` and the grid channels alike, flipping neither, so ``/data`` and
+    ``/params`` share one frame -- while an sxm is normalised to top-down by
+    ``_reform_sxm_data``.  Grid products adopt the sxm convention, so the map is
+    flipped once here, at the source, and stays top-down from here on.
+    """
     with h5py.File(h5_path, "r") as handle:
         columns = [
             name.decode() if isinstance(name, bytes) else str(name)
@@ -134,7 +156,7 @@ def load_z_map(h5_path: Path) -> np.ndarray:
         ny, nx = handle["data"].shape[:2]
     if z.size != ny * nx:
         raise SystemExit(f"ERROR: {h5_path}: {z.size} Z values for a {ny} x {nx} grid")
-    return z.reshape(ny, nx)
+    return np.flipud(z.reshape(ny, nx))
 
 
 def preprocess(z: np.ndarray) -> np.ndarray:
