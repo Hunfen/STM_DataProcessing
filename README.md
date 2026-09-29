@@ -299,14 +299,38 @@ PPT 自动报告与绘图助手（`utils/plot_funcs.py`、`utils/AutoPPt_winnew_
 
 ### 本地数据与 CI 的分工
 
-9 个回归脚本里有 5 个（`check_3ds_real_data.py`、`check_bragg_peak_detection.py`、`check_lindhard_re_chi.py`、`check_nanonis_3ds.py`、`check_nanonis_sxm.py`）要读本机 `/Users/hunfen/Documents/...` 下的真实测量数据（论文 Nanonis 文件、Wannier 模型）；这些数据**永不入库**（见 `.gitignore` 的测量数据段与 CI 守卫）。它们带 `localdata` 标记：
+14 个回归脚本里有 5 个（`check_3ds_real_data.py`、`check_bragg_peak_detection.py`、`check_lindhard_re_chi.py`、`check_nanonis_3ds.py`、`check_nanonis_sxm.py`）要读本机 `/Users/hunfen/Documents/...` 下的真实测量数据（论文 Nanonis 文件、Wannier 模型）；这些数据**永不入库**（见 `.gitignore` 的测量数据段与 CI 守卫）。它们带 `localdata` 标记：
 
 ```bash
-.venv/bin/python -m pytest -q                     # 本机一把梭：全部 9 个脚本（唯一的完整门）
-.venv/bin/python -m pytest -q -m "not localdata"  # CI 口径：只跑与本地数据无关的 4 个，摘要打印 deselect 数量
+.venv/bin/python -m pytest -q                     # 本机一把梭：全部 14 个脚本（唯一的完整门）
+.venv/bin/python -m pytest -q -m "not localdata"  # CI 口径：只跑与本地数据无关的 9 个，摘要打印 deselect 数量
 ```
 
 CI（`.github/workflows/ci.yml`）的 `full-test` 作业跑的就是 `pytest -q -m "not localdata"`；另两个作业是 `lint`（ruff，含"禁止提交测量数据"的守卫）与 `core-import`（不带 extras 装包并导入核心子模块）。标记规则是机械的：脚本里出现 `/Users/` 绝对路径即判为 `localdata`，因此新加的数据相关脚本会自动被 CI 排除，而不是让 CI 变红，也不会靠"内部 SKIP 侥幸变绿"。
+
+## sxm→csv 批量转换
+
+把一批 Nanonis 形貌图 `.sxm` 批量转成 CSV（`scripts/sxm_to_csv.py`）：读 Z(m) 通道的 forward 扫描（复用 `NanonisFileLoader`），做 NaN-safe 平面拟合矫正（复用 `subtractMeanPlane`，只对有限像素拟合）并把有限最小值平移到 0，然后按 tab 分隔、无表头、单位米、`%g` 数值写出（与既有产物 `20251117_topo4_30nm.csv` 同口径，即 `np.savetxt(path, arr, delimiter="\t", fmt="%g")`）。NaN 像素全程保持 NaN。
+
+```bash
+.venv/bin/python scripts/sxm_to_csv.py topo0001.sxm topo0007.sxm -o data/csv
+.venv/bin/python scripts/sxm_to_csv.py --list files.txt -o data/csv   # 每行一个路径，# 与空行忽略
+```
+
+输出按 `{yyyymmdd}_{sxm名}_{bias}mV{setpoint}pA_{frame}nm.csv` 命名（`{sxm名}` 是去掉扩展名的 `.sxm` 文件名），四个数值都是 `%g`（6 位有效数字、去尾零）且与单位字母之间无空格：
+
+- `yyyymmdd`：`REC_DATE` 的 `dd.mm.yyyy` 转成 `yyyymmdd`；
+- `{bias}mV`：`BIAS` 从 V 转 mV（保留负号）；
+- `{setpoint}pA`：Z-CONTROLLER 的 Setpoint 值从 A 转 pA；
+- `{frame}nm`：`max(SCAN_RANGE)` 从 m 转 nm（矩形扫描取最长边）。
+
+例如 `20250709_topo0002_50mV100pA_30nm.csv`、`20250625_t006_1500mV20pA_500nm.csv`（t006 的 `Z-CONTROLLER` Setpoint 是 `2.000E-11 A`，即 20 pA）。通道选择优先在 `Scan>channels`（形如 `Current (A);Bias (V);Z (m);...`）中匹配 `Z (m)`，缺失时回退到 `DATA_INFO` 中 `Name=="Z" && Unit=="m"` 的通道；两者都找不到则记录失败并跳过该文件，不中止整批。全部失败时退出码非 0。
+
+三点说明：
+
+- 输出 CSV 的形状是 `(lines, pixels/line)`（`SCAN_PIXELS` 写的是 `pixels/line lines`），每行 `pixels/line` 个数就是 x（快轴）方向的采样数，扫描方向已在加载时归一化（`SCAN_DIR=up` 的图会被上下翻转）；方形扫描就是 `(N, N)`，矩形扫描例如 208x512 的文件输出 `(512, 208)`。
+- 脚本在模块级 `import plot_funcs`，而 `plot_funcs` 牵入 `cv2`，所以运行该脚本需要 `ppt` extra（`pip install -e ".[ppt]"`），只有核心计算路径不需要它。
+- **同名会覆盖（已知限制）**：输出名只由 header 字段决定。若同一批里两个不同的 `.sxm` 算出同一个名字（例如 `2025-07-07/topo0006.sxm` 与 `2025-07-08/topo0006.sxm` 的 `REC_DATE` 都是 `08.07.2025`，都映射到 `20250708_topo0006_50mV100pA_30nm.csv`），后一个会**静默覆盖**前一个，两条都打印 `OK` 且退出码为 0（本机语料 1072 个 `.sxm` 中有 1 例）。批量转换前请确认目标目录内不会出现同名；需要两份可先转换到不同目录，或把其中一个 `.sxm` 复制改名后再转。
 
 ## 许可证
 
