@@ -40,7 +40,8 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
   TARGET.csv --transform OUT/transform.json -L 50 -o OUT_TARGET
 ```
 
-流程：读入 → `flipud(subtractMeanPlane(...))` → 包内数据锚定峰检测（`bragg_peak.detect_bragg_peaks`）
+流程：读入 → `flipud(subtract_mean_plane(...))`（本 skill 内联的 NaN 安全平面拟合，纯 numpy，
+与仓库 `utils.plot_funcs.subtractMeanPlane` 逐位等价）→ 包内数据锚定峰检测（`bragg_peak.detect_bragg_peaks`）
 → 取数据自身 (1,0) 方向构造显式 `LatticeSpec` → `correct_bragg_peaks` 对称正定拉伸
 （纯拉伸、零旋转，加权最小二乘，失败时闭式回退并记 `meta`）→ `scipy.ndimage.affine_transform`
 重采样（`order=3`，`cval=NaN`），画布 `n_out`、**矫正后视场 = `L · n_out / n`**。
@@ -129,7 +130,7 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 ```
 
 apply 段只做**重采样**：与拟合段同样的读入/分隔符自动识别与预处理
-（`flipud(subtractMeanPlane(...))`）→ 用**目标图自己的像素数 n** 重算数组矩阵
+（`flipud(subtract_mean_plane(...))`，同一内联平面拟合）→ 用**目标图自己的像素数 n** 重算数组矩阵
 `A = P·M⁻¹·P`、画布 `n_out = 2·(⌈max|A⁻¹·角点|⌉ + pad) + 1` 与 offset（`order` / `pad` 取自 JSON）
 → `scipy.ndimage.affine_transform`（`cval=NaN`）→ 输出与拟合段同名的产物
 （`<stem>_corrected.csv`、`_corrected_fft2.npy`、`_corrected.png`、`_corrected_fft.png`）、

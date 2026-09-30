@@ -19,7 +19,10 @@
 ## 依赖
 
 - 仓库 `STM_DataProcessing` 源码（`src/`）：`utils.bragg_peak`（峰检测/亚像素定位/对称正定拉伸/重采样/FFT2）、
-  `stm.preview_plot.gwyddion`（色标，缺省 builtin 锚点回退）、`utils.plot_funcs.subtractMeanPlane`
+  `stm.preview_plot.gwyddion`（色标，缺省 builtin 锚点回退）
+- NaN 安全平面拟合 `subtract_mean_plane` 是**本 skill 内联**的（纯 numpy，与仓库
+  `utils.plot_funcs.subtractMeanPlane` 逐位等价）；本 skill **不 import** `utils.plot_funcs`
+  （它会在模块级 import `nanonispy`）
 - `h5py`（HDF5 产物；仓库 `pyproject.toml` 已含）
 - 执行环境（系统 Python 无 numpy；不要用 `uv run`——它会写仓库 `.venv`）：
 

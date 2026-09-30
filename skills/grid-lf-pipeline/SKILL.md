@@ -19,7 +19,7 @@ description: 把 Nanonis grid spectroscopy（`.3ds`，或经 `stm_data_processin
 | h5 结构 | `/data (ny, nx, nch, npts)`、`/channels`、`/channel_units`、`/bias`（V）、`/params` + `/param_columns`、`/header` |
 | 视场 L (nm) | 从 h5 header 的 `Scan>Scanfield` 解析（`x0;y0;width;height;angle`，`;` 分隔、单位 m，取第 3 段宽 ×1e9=nm）；没有则退回 header 的 `Grid settings`（同一条记录）；`-L` 可显式覆盖 |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`）。**`PYTHONDONTWRITEBYTECODE=1` 是必需的**：步 ③ 嵌套调用的 `stm_lf_correct.py` 会在启动时 import 同目录的 `lf_lib.py` / `h5io.py`，不设它就会在 `skills/lawler-fujita-correction/scripts/` 下留下 `__pycache__/`（仓库不该有这些字节码缓存；`.gitignore` 忽略它们，但目录会堆在 checkout 里、也会被误当成产物） |
-| 依赖 | `h5py`、`numpy`；嵌套调用的 LF skill 自身的依赖（`scipy`、`matplotlib`——`grid_lf_fit.py` 只转交，不 import 它们）；本仓库源码包 `stm_data_processing`（脚本只 `import stm_data_processing` 定位 checkout 根，见 `scripts/grid_lf_fit.py:62-65`；平面拟合已内联进本 skill，**不再**经 `stm_data_processing.utils.plot_funcs`）；以及本仓库 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`（**相对路径嵌套调用，不修改它**）。**依赖 `stm_data_processing` 是设计意图**，见 `lawler-fujita-correction/README.md` §依赖 |
+| 依赖 | `h5py`、`numpy`；嵌套调用的 LF skill 自身的依赖（`scipy`、`matplotlib`——`grid_lf_fit.py` 只转交，不 import 它们）；本仓库源码包 `stm_data_processing`（脚本只 `import stm_data_processing` 定位 checkout 根，见 `scripts/grid_lf_fit.py:68-71`；平面拟合已内联进本 skill，**不再**经 `stm_data_processing.utils.plot_funcs`）；以及本仓库 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`（**相对路径嵌套调用，不修改它**）。**依赖 `stm_data_processing` 是设计意图**，见 `lawler-fujita-correction/README.md` §依赖 |
 
 ## 2 三步流程（确切命令）
 
@@ -62,10 +62,12 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 .venv/bin/python skills/grid-lf-pipeline/scripts/grid_lf_fit.py <out>/<stem>_topo.csv -L 30 -o <out>/lf
 ```
 
-内部按相对路径调用 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`，只传 `-L`、`-o`、`--lambda-nm`
-（默认 3）与 `--save-transform`：**`grid_lf_fit.py` 自己没有 `--stm-lib` 选项、也不向被调用脚本传它**——
-`stm_lf_correct.py` 走它自己的 `--stm-lib` 默认值（仓库 `src/`，见 `stm_lf_correct.py:200-203`）。
-传给它的 `--save-transform` 是**绝对路径**（`grid_lf_fit.py:134-138` 对默认名和显式值都做 `.resolve()`），
+内部按相对路径调用 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`，固定传 `-L`、`-o`、`--lambda-nm`
+（默认 3）与 `--save-transform`；另有两个可选转发项 `--ring-tol` / `--ring-cluster-tol`，**只在调用方显式给出时**
+才转发（不给就由被调用脚本自己的默认值决定，保证这两个容差在 CLI 与库之间只有一个来源）：
+**`grid_lf_fit.py` 自己没有 `--stm-lib` 选项、也不向被调用脚本传它**——
+`stm_lf_correct.py` 走它自己的 `--stm-lib` 默认值（仓库 `src/`，见 `stm_lf_correct.py:213-216`）。
+传给它的 `--save-transform` 是**绝对路径**（`grid_lf_fit.py:156-160` 对默认名和显式值都做 `.resolve()`），
 所以 bundle JSON 里的 `u_field_file` 是绝对路径、Skill B 不需要相对解析；Skill B 仍保留「相对则按 bundle
 所在目录解析」的回退（`skills/grid-sym-fft/scripts/grid_sym.py:193-195`）。可迁移位移场包
 `<stem>_topo_transform.json` + `<stem>_topo_transform.h5` 落进 `-o` 指定的目录（即流水线布局里的 `<out>/lf/`）。
@@ -77,10 +79,11 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 - `-o` 的值就是 `<out>/lf/`：该目录下直接是 LF 拟合的全部产物（见 §3），并含 `--save-transform` 带来的位移场包。
 - 此步 fail-closed：缺 topo CSV、LF 脚本不存在、**LF 拟合失败**（`stm_lf_correct.py` 非零退出、或它的
   `correction_report.json` 记录 `fallback: true` 即没有可用的位移场）→ 脚本**只删除本次运行新增的产物**、打印
-  原因、非零退出；`-o` 目录里原有的文件一律保留（脚本进入时先记下目录内容，见 `scripts/grid_lf_fit.py:115` 的
+  原因、非零退出；`-o` 目录里原有的文件一律保留（脚本进入时先记下目录内容，见 `scripts/grid_lf_fit.py:137` 的
   `pre_existing`），退出信息形如 `fail-closed: fit failed, removed N file(s) written by this run from <dir>
-  (files that were already there are kept)`（`scripts/grid_lf_fit.py:180-181`）。所以重跑前把已有产物留在 `-o`
-  里是安全的：这次失败不会清空它们，非空目录也不阻碍重跑。
+  (files that were already there are kept)`（删除循环见 `scripts/grid_lf_fit.py:210-211`，退出信息见
+  `scripts/grid_lf_fit.py:217-221`）。
+  所以重跑前把已有产物留在 `-o` 里是安全的：这次失败不会清空它们，非空目录也不阻碍重跑。
 
 ## 3 产物布局
 

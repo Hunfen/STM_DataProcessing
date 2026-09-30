@@ -17,10 +17,10 @@ description: Lawler–Fujita 晶格相位矫正（Fujita et al., PNAS 2014, SI �
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtract_mean_plane(...))` 转到数组坐标，与 affine skill 一致；`subtract_mean_plane` 是本 skill 内联的 NaN 安全平面拟合，见 `scripts/stm_lf_correct.py:73`） |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtract_mean_plane(...))` 转到数组坐标，与 affine skill 一致；`subtract_mean_plane` 是本 skill 内联的 NaN 安全平面拟合，见 `scripts/stm_lf_correct.py:82`） |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方 1x1 环，晶格常数 `a`（默认 0.246 nm）；**半径取理想值 `2L/(√3a)` px，取向取数据自身**（见 §2.3） |
-| 锚定环 | 数据锚定峰检测（`bragg_peak.detect_bragg_peaks`，与 affine skill 同一入口）找到的、半径与理想 1x1 环相符（`--ring-tol`，默认 10%）且 ≥6 成员的环 |
+| 锚定环 | **理想半径锚定**：`lf_lib.hexagon_ring_near_radius()` 在由 `a`（0.246 nm）与视场 `L` 定出的理想 1x1 半径 `2L/(√3a)` 的 ±`--ring-tol`（默认 10 %）窗内取最强反射为参考方向，要求其 ±120° 伙伴（三条独立基矢、彼此 60°）并返回三者及其 Friedel 镜像；`stm_lf_correct.py` 按三级来源依次尝试（① legacy 半径聚类 ② 理想半径窗内的检出峰 ③ \|FFT\| 环带），每级都须能给出三条 lock-in 方向才被采纳，全部失败时打印峰表（\|q\|/角度/snr）与逐源拒绝原因，再走 identity 回退（不静默） |
 | λ（lock-in 尺度） | `--lambda-nm`，默认 30.0 nm：q 空间高斯低通 `exp(-λ²k²/2)` 保留的畸变尺度 |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`。**不要用 `uv run`** |
 | 绘图 | `text.usetex=False`（mpl 3.10 + TeX Live 2026 有编码 bug），mathtext cm + Palatino |
@@ -79,7 +79,9 @@ lock-in 只能保留满足 `|∇θ| = |K||∇u| < 2π/λ` 的畸变结构，即
 
 ### 2.3 参考六方（Q_a、Q_b、Q_c 的来源）
 
-- 数据锚定检测给出 1x1 环的 6 个成员（测得峰位，被平均畸变整体平移过）；
+- **环成员来自理想半径锚定**（§1 表「锚定环」、`lf_lib.hexagon_ring_near_radius()`）：三条独立
+  基矢（参考方向及其 ±120° 伙伴，彼此 60°）加上各自的 Friedel 镜像共 6 条测得峰位，被平均畸变
+  整体平移过；
 - **半径取理想值**（由 `--a` 决定），**取向取数据**：把三个成员相对「恰好 120° 间隔」的平均偏差
   加到最强成员的方位角上，得到参考六方的取向；
 - 三个方向按 `--pair-angle`（默认 120°）**严格等间隔**放置，于是 `Q_a + Q_b + Q_c = 0`
@@ -166,7 +168,7 @@ lock-in 方向、间距 60°、不存在第三方向。核心产物 `_corrected.
 | --- | --- |
 | `skill` / `skill_version` / `input` / `canvas_px` / `field_of_view_nm` / `nm_per_px` | 溯源 |
 | `a_nm` / `ideal_radius_px` / `ideal_radius_nm_inv` | 参考环 |
-| `ring_cluster_tol` / `ring_tol` | 环聚类与锚定匹配容差（CLI 传入值，默认 0.02 / 0.10） |
+| `ring_cluster_tol` / `ring_tol` | 锚定用 `ring_tol`（**理想半径窗**，默认 0.10）；`ring_cluster_tol`（默认 0.02）只用于第①级 legacy 半径聚类、且仅为报告与自检列环表 |
 | `rings_before` / `anchor_ring` | 检测到的环表与锚定环 |
 | `q_a_px` / `q_b_px` / `q_c_px` / `q_*_nm_inv` / `q_matrix_px` / `q_measured_px` | 参考波矢（px 与 rad/nm）与测得峰位 |
 | `hexagon_orientation_deg` / `hexagon_member_deviation_deg` | 参考取向与成员偏离 120° 的量 |
@@ -179,6 +181,14 @@ lock-in 方向、间距 60°、不存在第三方向。核心产物 `_corrected.
 | `method` / `fallback` / `fallback_reason` | `lawler_fujita`，或 `identity_fallback` + 原因 |
 | `lf_artifacts` | 每张 LF 图的登记项：`h5`（`<stem>_lf.h5` 路径）+ `dataset`（数据集名）+ `png`（预览路径） |
 | `written` / `transfer_constraints` | 核心产物路径（含 `corrected_h5`）与迁移约束说明 |
+
+**两个"环容差"不是同一个量，不要"顺手统一"**：`--ring-cluster-tol`（默认 **0.02**，源码里
+`lf_lib.DEFAULT_RING_CLUSTER_TOL`）只喂第①级 legacy 半径聚类与报告/自检的环表；而
+`bragg_peak/rings.py` 的 `_RING_RADIUS_TOL = 0.03` 是 **bragg_peak 包自己的环推断常量**，本流程
+**从不调用它**（锚定走 `lf_lib.hexagon_ring_near_radius()` 的理想半径窗，不依赖任何成员间半径
+容差）。两者**无语义耦合**：把 0.02 改成 0.03 不会改变任何一级锚定结果，只会让已落盘
+`correction_report.json` 的 `ring_cluster_tol` 字段发生变化（模板扫描 2025-11-10 的产物因此不再
+逐字节可复现）——**没有语义收益，只有回归风险**。
 
 **回退语义**：找不到可用 1x1 环、或有效掩码占比低于 `--min-coverage`（默认 0.50）时，
 `method = "identity_fallback"`、`fallback = true`：**不做任何矫正**，把输入原样（在其自身画布与
@@ -233,8 +243,10 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 
 合成真值：a = 0.246 nm、L = 50 nm 的六方点阵（1x1 三成员 + r3 三成员），注入**已知**光滑位移场
 （1.0 nm 高斯包 + 0.4 nm 线性漂移，零均值）。注入幅度受**可见性条件**约束：数据锚定检测要求
-Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差是半径的 2–3 %，因此 `|∇u|` 必须 ≲ 2 %；
-在 50 nm 视场内 1.0 nm 变化已经接近该上限（实测 `|∇u|` 到 0.025 仍可检出、0.03 起环碎裂）。
+Bragg 峰不被畸变抹开（峰宽 ≈ `|∇u| × 半径`），应变大到峰被抹平时六重环就凑不出来——实测
+`|∇u|` 到 0.025 仍可检出、0.03 起环碎裂（这两个数字测自成员间半径聚类为 2–3 % 的年代；改成理想
+半径锚定后上限未重新测定，此处按保守值取用），因此 `|∇u|` 必须 ≲ 2 %；
+在 50 nm 视场内 1.0 nm 变化已经接近该上限。
 
 覆盖与验收阈值（实测 **23/23** 通过）。下表 # 列为分组内序号（既有约定）；运行时按全局计数，
 #17/#18/#19 对应运行时的第 21/22/23 条。
@@ -273,7 +285,9 @@ Bragg 峰不被畸变抹开，峰宽 ≈ `|∇u| × 半径`，而环聚类容差
 1. **相位结点**：`|psi|` 很小的像素相位不可靠（掩码剔除 + 解缠填充），掩码覆盖率会随 λ 与噪声下降。
 2. **边界**：解调相位在边界 0.65λ 带内被周期化 FFT 污染；λ 越接近视场，可信区域越小。
 3. **参考规范**：位移场含一个「刚性平移 + 均匀应变」自由度（§2.4），绝对应变需外部参考。
-4. **可见性**：应变 ≳ 2–3 % 时数据锚定检测找不到成形的环 → 回退（`identity_fallback`）；
+4. **可见性**：应变大到把 Bragg 峰抹开、六重环凑不出来时，检测走 identity 回退
+   （`identity_fallback`，并在 log 给出峰表与逐源拒绝原因）。量级参考：既有实测在 |∇u| ≳ 2–3 %
+   起环开始碎裂（该数字测自成员间半径聚类时代，理想半径锚定后未重新测定）；
    本 skill 不是为大应变/大转角场景设计的。
 5. **不重新检测**：`stm_lf_apply.py` 只做重采样，不重跑检测与自检，包的可信度等于来源图。
 

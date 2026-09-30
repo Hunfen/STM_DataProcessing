@@ -75,7 +75,8 @@
   报告与 log 字段未增删改。
 - 新脚本 `scripts/stm_apply_transform.py`（CLI：`INPUT.csv --transform TRANSFORM.json -L SIZE_NM
   [-o OUTDIR] [--delimiter X] [--stm-lib DIR]`）：与拟合段相同的读入/分隔符自动识别与预处理
-  （`flipud(subtractMeanPlane(...))`）；先校验变换 JSON（schema 字符串、`schema_version`、
+  （`flipud(subtract_mean_plane(...))`，skill 内联的平面拟合，见 `SKILL.md` §2）；先校验变换 JSON
+  （schema 字符串、`schema_version`、
   `affine_q` 有限 2×2 且 `det > 0`，不满足则打印明确原因并以非零码退出）；再用**目标图自己的像素数
   n** 重算数组矩阵 `A = P·M⁻¹·P`、画布 `n_out = 2·(⌈max|A⁻¹·角点|⌉ + pad) + 1` 与 offset
   （本地镜像 `bragg_peak.correct._image_transform`，`pad`/`order` 取自 JSON），

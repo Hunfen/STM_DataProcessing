@@ -11,9 +11,9 @@
 
 | 路径 | 作用 |
 | --- | --- |
-| `scripts/stm_lf_correct.py` | 拟合段 CLI：检测 1x1 环 → 三个等间隔参考波矢（理想半径 + 数据取向）→ q 空间高斯 lock-in → 最小二乘相位解缠 → `u = Q⁻¹(θ̄ − θ)` → 按 u 重采样；输出矫正产物（CSV + h5）+ 相位/幅度/位移/掩码单一 `<stem>_lf.h5` + 报告；`--save-transform` 导出可迁移包（JSON + u 场 h5） |
+| `scripts/stm_lf_correct.py` | 拟合段 CLI：**理想半径锚定**检测 1x1 环（三级来源依次尝试，见 `SKILL.md` §1「锚定环」）→ 三个等间隔参考波矢（理想半径 + 数据取向）→ q 空间高斯 lock-in → 最小二乘相位解缠 → `u = Q⁻¹(θ̄ − θ)` → 按 u 重采样；输出矫正产物（CSV + h5）+ 相位/幅度/位移/掩码单一 `<stem>_lf.h5` + 报告；`--save-transform` 导出可迁移包（JSON + u 场 h5） |
 | `scripts/stm_lf_apply.py` | **第二段**：把包里的稠密位移场（从 bundle 的 `.h5` 读）套用到同一扫描的另一张图（同网格逐位复现；不同像素数按物理位移重采样；目标图无需有晶格；`identity_fallback` 包原样复制 + WARNING），并写出与拟合段同名的 `<stem>_corrected.h5` |
-| `scripts/lf_lib.py` | 自包含辅助模块：lock-in（q 空间高斯掩码）、最小二乘（Poisson/DCT）相位解缠、位移场求解、按场重采样、场的网格重采样、绘图样式与 gwyddion 色图、环聚类 |
+| `scripts/lf_lib.py` | 自包含辅助模块：lock-in（q 空间高斯掩码）、最小二乘（Poisson/DCT）相位解缠、位移场求解、按场重采样、场的网格重采样、绘图样式与 gwyddion 色图、环聚类 `group_rings` 与理想半径锚定环搜索 `hexagon_ring_near_radius` |
 | `scripts/h5io.py` | 自包含 HDF5 writer：仓库统一 h5 约定（`SCHEMA_VERSION = 1`、`gzip`/4、显式 chunk ≤ 1 MiB、root `schema_version`/`generator`/`creation_date`、`units` 属性），**不 import `stm_data_processing`** |
 | `scripts/selftest.py` | **一键自我验证**（**23 项**：拟合产物与契约行、h5 约定与数组逐位一致、已知位移场恢复（原始与去仿射规范）、环质量、第三方向一致性、包迁移（同网格/不同网格）、无晶格回退、written 登记 corrected_h5、n_px 根属性、环检测容差记录） |
 | `SKILL.md` | 完整方法学：模型与符号约定、lock-in 与可解性条件 `\|∇u\| < 2π/(\|K\|λ)`、参考六方、规范自由度、有效掩码与边界、输出契约、h5 数据集与 `units`、迁移约束、自检与限制 |
@@ -25,8 +25,8 @@
 - `scipy`（`fft.dctn/idctn`、`ndimage.map_coordinates/distance_transform_edt`）、`numpy`、`matplotlib`
 - `h5py`（HDF5 产物；仓库 `pyproject.toml` 已含）
 - **依赖 `stm_data_processing` 是设计意图，不是缺陷**：本 skill 有意住在仓库里、有意用这个包——
-  `stm_lf_correct.py` 用 `--stm-lib`（默认 = 仓库 `src/`，见 `scripts/stm_lf_correct.py:200-203`）
-  把 `stm_data_processing.utils.bragg_peak` 接进 `sys.path`（`stm_lf_correct.py:489`），`lf_lib.load_colormap`
+  `stm_lf_correct.py` 用 `--stm-lib`（默认 = 仓库 `src/`，见 `scripts/stm_lf_correct.py:213-216`）
+  把 `stm_data_processing.utils.bragg_peak` 接进 `sys.path`（`stm_lf_correct.py:612`），`lf_lib.load_colormap`
   同理取 `stm.preview_plot.gwyddion`（取不到才回落到 builtin 锚点）。**平面拟合已内联**：
   `scripts/{stm_lf_correct,stm_lf_apply,selftest}.py` 各自有一个逐位等价的 NaN 安全 `subtract_mean_plane`，
   所以 `utils.plot_funcs` **不再是依赖**（它会在模块级 import `nanonispy`）。

@@ -248,7 +248,7 @@ def transform_payload(
         "anchor_verdict": anchor_verdict,
         "usage": (
             "apply with: .venv/bin/python "
-            "skills/topo-correction/scripts/stm_apply_transform.py INPUT.csv "
+            "skills/affine-correction/scripts/stm_apply_transform.py INPUT.csv "
             "--transform <this file> -L SIZE_NM -o OUT"
         ),
     }
