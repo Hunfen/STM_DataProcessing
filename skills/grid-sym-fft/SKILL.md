@@ -70,9 +70,23 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 **e. 绕 DC 的 C3**：先取幅度 `A = |F|`，再同样绕 DC 像素转 120/240 并平均 `C3dc = (A + R120 A + R240 A)/3`（与 Z3 **唯一区别就是先取模**）。存 npy + `log|C3dc|` 图。三次插值振铃会给出少量负值，故 log 用 `log|C3dc|`，并把负值个数与相对幅度记进 log。
 
-**f. 色标（按角色，永不跨角色池化）**：第一组（b 阶段）FFT 图之后，**对每个角色各**生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 该角色自己的一张 contact sheet，落在 `<OUT>/window_candidates/<role>/`。每个角色的候选窗口取自**该角色自己**的 log|F| 分布（该角色全部 bias 平面的并集），因此 current 一套（~−24…−15）、didv 一套（~+2.5…+10.5）互不影响。候选必须同画布尺寸（PIL 断言全部一致）、每张标注角色/vmin/vmax 与两端压死百分比，并打印按角色分组的候选表（编号/vmin/vmax/两端裁剪比例）。
+**f. 色标（按角色，永不跨角色池化）**：第一组（b 阶段）FFT 图之后，**对每个角色各**生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 该角色自己的一张 contact sheet，落在 `<OUT>/window_candidates/<role>/`。每个角色的候选窗口取自**该角色自己**的 log|F| 分布（该角色全部 bias 平面的并集），因此 current 一套（~−24…−15）、didv 一套（~+2.5…+10.5）互不影响。候选必须同画布尺寸（PIL 断言全部一致）。
 
-候选图必须画**与窗口同源的那张 plane**：具体取该角色中分位数向量（p0.5/p50/p99.5）最接近其并集分布的那张偏压平面（表里记 `representative_bias_index`）；不允许出现「图来自某个角色的 plane、窗口来自池化分布」这种错配。
+**窗口与图是两个口径，表里必须分开印（2026-10 修）**：窗口的 vmin/vmax 是该角色**并集分布**的分位数（选窗要用它，因为窗口要套到该角色所有 bias 平面），而候选**图**只能画其中一张 plane——为此取该角色中分位数向量（p0.5/p50/p99.5）最接近其并集分布的那张偏压平面（表里记 `representative_bias_index` / `representative_bias_meV`）。两者会有小幅漂移，所以候选表对每档同时给两套数字，**字段名带口径后缀，禁止同名不同义**：
+
+| 字段（`fft_window_candidates.json` → `roles.<role>.candidates[i]`） | 含义 |
+| --- | --- |
+| `vmin`, `vmax` | 窗口本身，**并集分位数**（用户选的就是这一对） |
+| `clip_below_pct_pooled`, `clip_above_pct_pooled` | 该角色**并集分布**中落在窗口外的像素占比（按构造等于设计档位的百分数） |
+| `clip_total_pct_pooled` | 上面两者之和 |
+| `clip_below_pct_plane`, `clip_above_pct_plane` | **画布上那张 plane**（代表平面）实测落在窗口外的像素占比——这才是与图对应的数（数据侧，不含坐标区/文字/色条） |
+| `clip_total_pct_plane` | 上面两者之和 |
+| `clip_budget_pct` | 该档的设计预算（= 选档时用的两个百分数之和，如 index 8 = 2.20 + 2.30 = 4.50 %） |
+| `plane_over_budget_pct` | `clip_total_pct_plane − clip_budget_pct`，带符号；超出容差时表格里打 `!` |
+
+候选图的标题同样两行印出 `clip pooled a/b %  plane c/d %`（`scripts/grid_sym.py` 的 `render_candidates()`），避免"标题上的数"与"画布上的图"对不上。
+
+**warning 语义**：代表平面的端点占比本就允许比并集口径略高（并集比任何单张平面宽），容差写在脚本常量 `PLANE_CLIP_TOL_PCT = 0.5`（百分点）。若某档 `plane_over_budget_pct > PLANE_CLIP_TOL_PCT`，脚本在 stdout 与 `pipeline.log` 各打一行 `WARNING candidates <role> window KK: ...`，点名档位、实测端点占比、超预算量、并集口径数值与**未改动**的 vmin/vmax——不静默、也不因此改窗口（窗口仍是并集分位数）。实测：11-08 的 didv 第 5–8 档触发（超 +0.503/+0.561/+0.557/+0.529 pp），11-15 两角色 18 档全部不触发。
 
 候选窗口按 `vmin% + (100 − vmax)% < 5 %` 选（index 0 最宽、index 8 对比最强），即任何一档的端点压死像素都 < 5 %——整幅一个颜色的候选图没有信息，用户看不了。**注意**：这条约束不允许 "vmin = p50" 那类深背景风格（会有 50 % 像素压在底端），要那种观感请用 `--fft-window-role` 显式给窗口。
 
@@ -155,28 +169,43 @@ cd /path/to/STM_DataProcessing && ! grep -rEn '\[\s*:\s*,\s*:\s*,\s*[0-9]+\s*,\s
 MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python skills/grid-sym-fft/scripts/grid_channels.py \
     GRID.h5 --map current="Current (A)" --map didv="DSP 7280 Y (%)"
 
-# 3) 先出候选（a+b + 候选 + contact sheet），exit 0
+# 3) 先出候选（a+b + 每角色候选 + contact sheet），exit 0；stdout 存下来供第 3b 步查 warning
+mkdir -p /tmp/out          # the redirect target must exist before the shell opens it
 MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py \
     GRID.h5 --map current="Current (A)" --map didv="DSP 7280 Y (%)" \
-    --transform OUT/SkillA/lf -o /tmp/out --window-candidates 9
+    --transform OUT/SkillA/lf -o /tmp/out --window-candidates 9 \
+    > /tmp/out/candidates_stdout.log 2>&1
+echo "candidates exit=$?"     # must be 0
 
-# 3b) 候选按角色分开落地，且窗口取自各自角色的单位（窗口值本身是 log|F|，不是百分数）
+# 3b) 候选按角色分开落地；表里两套口径（pooled / plane）齐全；超容差的档必须
+#     同时有表格里的 ! 与一行 WARNING（不静默），未超容差的档不得有 WARNING
 (cd /tmp/out \
     && test "$(ls window_candidates/current/window_*.png | wc -l)" -eq 9 \
     && test "$(ls window_candidates/didv/window_*.png | wc -l)" -eq 9 \
     && test -f window_candidates/current/contact_sheet.png \
     && test -f window_candidates/didv/contact_sheet.png \
     && echo "9+9 figures + 2 sheets ok")
-.venv/bin/python - /tmp/out/fft_window_candidates.json <<'EOF'
+.venv/bin/python - /tmp/out/fft_window_candidates.json /tmp/out/candidates_stdout.log <<'EOF'
 import json, sys
 t = json.load(open(sys.argv[1]))
+log = open(sys.argv[2]).read()
 assert set(t["roles"]) == {"current", "didv"}, list(t["roles"])
 c = [x["vmin"] for x in t["roles"]["current"]["candidates"]]
 d = [x["vmin"] for x in t["roles"]["didv"]["candidates"]]
 assert max(c) < min(d), (c, d)          # the two roles must not share a value range
-assert all(x["clip_below_pct"] + x["clip_above_pct"] < 5.0
-           for r in t["roles"].values() for x in r["candidates"])
-print("per-role candidate tables ok")
+warned = 0
+for role, r in t["roles"].items():
+    tol = r["plane_clip_tolerance_pct"]
+    for x in r["candidates"]:
+        pooled = x["clip_below_pct_pooled"] + x["clip_above_pct_pooled"]
+        plane = x["clip_below_pct_plane"] + x["clip_above_pct_plane"]
+        assert abs(x["clip_total_pct_plane"] - plane) < 1e-9, x
+        assert pooled < 5.0, x          # the design budget keeps every candidate viewable
+        over = x["plane_over_budget_pct"] > tol
+        line = f"WARNING candidates {role} window {x['index']:02d}:"
+        assert over == (line in log), (role, x["index"], over)   # never silent, never spurious
+        warned += over
+print(f"per-role candidate tables ok (both calibers; {warned} over-tolerance warning(s))")
 EOF
 
 # 4) 挑候选 K 出全套（每个角色各取自己的第 K 档）

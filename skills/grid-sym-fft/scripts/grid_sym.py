@@ -126,6 +126,13 @@ _WINDOW_CANDIDATE_FRACS = [
 #: ``representative_bias_index``).
 _REPRESENTATIVE_QUANTILES = (0.5, 50.0, 99.5)
 
+#: Slack (percentage points) allowed between a candidate's design budget and the
+#: endpoint fraction measured on the plane that is actually drawn.  The two are
+#: not the same number (the budget comes from the role's pooled log|F|, the plane
+#: is one member of that pool), so a small excess is expected; a larger one is
+#: reported as a warning instead of being hidden.
+PLANE_CLIP_TOL_PCT = 0.5
+
 
 def _decode(values):
     return [v.decode() if isinstance(v, bytes) else str(v) for v in values]
@@ -448,8 +455,14 @@ def candidate_window_list(logvals, n):
 
     ``logvals`` must hold a single role's values: the two roles are different
     units and must never be pooled (that bug is what made every candidate a flat
-    colour).  The reported clip percentages are exact by construction, since the
-    endpoints are percentiles of the same array.
+    colour).
+
+    The windows -- and the ``*_pooled`` clip percentages reported with them --
+    come from that role's *pooled* log|F| (every bias plane of the role), because
+    that is the distribution the window is applied to.  The candidate *figure*,
+    however, can only show one plane, so its own numbers are reported separately
+    by ``plane_clip_pct`` (``*_plane``); the two differ slightly and must never
+    share one field name.
     """
     nlist = []
     for i in range(n):
@@ -466,11 +479,26 @@ def candidate_window_list(logvals, n):
                 "index": i,
                 "vmin": vmin,
                 "vmax": vmax,
-                "clip_below_pct": clip_below,
-                "clip_above_pct": clip_above,
+                "clip_below_pct_pooled": clip_below,
+                "clip_above_pct_pooled": clip_above,
+                "clip_total_pct_pooled": clip_below + clip_above,
+                # the endpoint budget this candidate was designed for (= the two
+                # percentile fractions it was built from)
+                "clip_budget_pct": fmin + (100.0 - fmax),
             }
         )
     return nlist
+
+
+def plane_clip_pct(plane_vals, vmin, vmax):
+    """``(below %, above %)`` of the plane that is actually drawn for a candidate.
+
+    Data side only: it counts values of the representative plane, not rendered
+    pixels (the figure's axes, text and colour bar are not part of it).
+    """
+    below = 100.0 * float(np.mean(plane_vals < vmin))
+    above = 100.0 * float(np.mean(plane_vals > vmax))
+    return below, above
 
 
 def representative_bias_index(planes, pooled):
@@ -531,8 +559,11 @@ def render_candidates(candidates, outdir: Path, role: str):
         fig, ax = plt.subplots(figsize=(6, 6))
         ax.set_title(
             f"{role} window {cand['index']}: vmin={cand['vmin']:.3g} "
-            f"vmax={cand['vmax']:.3g}  clip {cand['clip_below_pct']:.1f}/"
-            f"{cand['clip_above_pct']:.1f} %",
+            f"vmax={cand['vmax']:.3g}\n"
+            f"clip pooled {cand['clip_below_pct_pooled']:.1f}/"
+            f"{cand['clip_above_pct_pooled']:.1f} %  "
+            f"plane {cand['clip_below_pct_plane']:.2f}/"
+            f"{cand['clip_above_pct_plane']:.2f} %",
             fontsize=8,
         )
         im = ax.imshow(plane, cmap="viridis", vmin=cand["vmin"], vmax=cand["vmax"])
@@ -1058,20 +1089,44 @@ def main(argv=None):
             planes, pooled = role_fft_log_data(outdir, role)
             cands = candidate_window_list(pooled, n)
             rep = representative_bias_index(planes, pooled)
+            plane_vals = planes[rep][np.isfinite(planes[rep])]
             for c in cands:
                 c["_plane"] = planes[rep]
+                # the numbers that belong to the canvas: measured on the very
+                # plane this candidate draws, not on the pooled distribution the
+                # window percentiles come from
+                below, above = plane_clip_pct(plane_vals, c["vmin"], c["vmax"])
+                c["clip_below_pct_plane"] = below
+                c["clip_above_pct_plane"] = above
+                c["clip_total_pct_plane"] = below + above
+                c["plane_over_budget_pct"] = (
+                    c["clip_total_pct_plane"] - c["clip_budget_pct"]
+                )
             paths, sheet = render_candidates(cands, cand_dir / role, role)
             saved_roles[role] = {
                 "unit": role_desc["unit"],
                 "pooled_log_p50": float(np.percentile(pooled, 50)),
                 "representative_bias_index": rep,
                 "representative_bias_meV": float(bias_meV[rep]),
+                "plane_clip_tolerance_pct": PLANE_CLIP_TOL_PCT,
                 "contact_sheet": str(sheet),
                 "figures": [str(p) for p in paths],
                 "candidates": [
                     {k: v for k, v in c.items() if k != "_plane"} for c in cands
                 ],
             }
+            for c in cands:
+                if c["plane_over_budget_pct"] > PLANE_CLIP_TOL_PCT:
+                    pipe.log(
+                        f"WARNING candidates {role} window {c['index']:02d}: the drawn "
+                        f"plane pins {c['clip_total_pct_plane']:.3f} % of its pixels at a "
+                        f"window endpoint, {c['plane_over_budget_pct']:.3f} pp above its "
+                        f"{c['clip_budget_pct']:.2f} % design budget (tolerance "
+                        f"{PLANE_CLIP_TOL_PCT:.2f} pp); pooled-side numbers are "
+                        f"{c['clip_below_pct_pooled']:.2f}/{c['clip_above_pct_pooled']:.2f} %. "
+                        f"Window values are NOT changed (vmin={c['vmin']:.6g} "
+                        f"vmax={c['vmax']:.6g}, still the pooled percentiles)"
+                    )
             pipe.log(
                 f"candidates {role} ({role_desc['unit']}): log|F| over "
                 f"{len(planes)} planes, p50 {np.percentile(pooled, 50):.3f}, "
@@ -1082,6 +1137,17 @@ def main(argv=None):
         (outdir / CANDIDATES_FILE).write_text(json.dumps(saved, indent=2) + "\n")
 
         print("\nCandidate FFT color windows, per role (choose with --pick-window K):")
+        print(
+            "column meanings: vmin/vmax = the window (percentiles of the role's "
+            "pooled log|F|);\n"
+            "  pooled<,> = pixels outside the window in that pooled distribution "
+            "(what the window is designed for);\n"
+            "  plane<,> = pixels outside the window on the plane the candidate "
+            "figure actually draws (the number that belongs to the canvas);\n"
+            "  budget = the design budget of that candidate; over = plane total - "
+            "budget (marked ! and warned about when it exceeds "
+            f"{PLANE_CLIP_TOL_PCT:.2f} pp)."
+        )
         for role in role_names:
             info = saved_roles[role]
             print(
@@ -1090,11 +1156,18 @@ def main(argv=None):
                 f"{info['representative_bias_index']} = "
                 f"{info['representative_bias_meV']:g} meV)"
             )
-            print(f"{'#':>3} {'vmin':>12} {'vmax':>12} {'clip< %':>8} {'clip> %':>8}")
+            print(
+                f"{'#':>3} {'vmin':>11} {'vmax':>11} "
+                f"{'pooled< %':>9} {'pooled> %':>9} "
+                f"{'plane< %':>9} {'plane> %':>9} {'budget %':>9} {'over pp':>8}"
+            )
             for c in info["candidates"]:
+                flag = " !" if c["plane_over_budget_pct"] > PLANE_CLIP_TOL_PCT else ""
                 print(
-                    f"{c['index']:>3} {c['vmin']:>12.4g} {c['vmax']:>12.4g} "
-                    f"{c['clip_below_pct']:>8.2f} {c['clip_above_pct']:>8.2f}"
+                    f"{c['index']:>3} {c['vmin']:>11.4g} {c['vmax']:>11.4g} "
+                    f"{c['clip_below_pct_pooled']:>9.2f} {c['clip_above_pct_pooled']:>9.2f} "
+                    f"{c['clip_below_pct_plane']:>9.3f} {c['clip_above_pct_plane']:>9.3f} "
+                    f"{c['clip_budget_pct']:>9.2f} {c['plane_over_budget_pct']:>+8.3f}{flag}"
                 )
         print(
             "\nRerun with --pick-window K (candidate K of every role) or "
