@@ -15,9 +15,9 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | --- | --- |
 | 输入 | `<grid>.h5`（`python -m stm_data_processing.io.grid2h5 <grid>.3ds -o <grid>.h5` 得到）；角色映射（`--map ROLE="CHANNEL NAME"`）；Skill A 的位移场包 |
 | h5 结构 | `/data (ny, nx, nch, npts)`、`/channels`、`/channel_units`、`/bias`（V，偏压标签只能从这里读）、`/params` + `/param_columns`、`/header` |
-| 位移场包 | Skill A 产出的 `<stem>_transform.json`（含 `u_field_file`、`n_px_reference`、`field_of_view_nm_reference`、`pad`、`order`）+ `<stem>_transform.h5`（`u_x` / `u_y` / `valid`，nm / 参考网格） |
+| 位移场包 | Skill A 产出的 `<stem>_transform.json`（含 `u_field_file`、`n_px_reference`、`field_of_view_nm_reference`、`pad`、`order`）+ `<stem>_transform.h5`（`u_x` / `u_y` / `valid`，nm / 参考网格）。Skill A 写出的 `u_field_file` 是**绝对路径**（`grid_lf_fit.py` 对 `--save-transform` 做 `.resolve()`）；若遇到相对路径，按 bundle 所在目录解析（`scripts/grid_sym.py:193-195`） |
 | 视场 L (nm) | 从 h5 header 解析 `Scan>Scanfield`（`;` 分隔，第 3 段宽 ×1e9=nm），否则退回 `Grid settings`；与 Skill A 的 `grid_topo.py` 同源 |
-| 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`；`PYTHONDONTWRITEBYTECODE=1` 与 Skill A 一致，避免在 `skills/grid-sym-fft/scripts/` 里留下 `__pycache__/`） |
+| 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`）。**`PYTHONDONTWRITEBYTECODE=1` 是必需的**：本 skill 与 Skill A 都会 import `skills/lawler-fujita-correction/scripts/lf_lib.py`（`grid_sym.py` 把它接进 `sys.path`），不设它就会在 `skills/lawler-fujita-correction/scripts/` 下留下 `__pycache__/`（仓库不该有这些字节码缓存；`.gitignore` 忽略它们，但目录会堆在 checkout 里） |
 | 依赖 | `numpy`、`h5py`、`scipy.ndimage`、matplotlib、Pillow（contact sheet），以及本仓库 `skills/lawler-fujita-correction/scripts/lf_lib.py`（**相对路径嵌套调用，不修改它**） |
 
 **按名字解析，禁止任何通道索引字面量**。通道索引一律由 `list.index(name)` 在运行时求出；代码里不出现 `data[:, :, N, :]` 这类数字索引字面量（有 grep 门）。
@@ -67,7 +67,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 **e. 绕 DC 的 C3**：先取幅度 `A = |F|`，再同样绕 DC 像素转 120/240 并平均 `C3dc = (A + R120 A + R240 A)/3`（与 Z3 **唯一区别就是先取模**）。存 npy + `log|C3dc|` 图。三次插值振铃会给出少量负值，故 log 用 `log|C3dc|`，并把负值个数与相对幅度记进 log。
 
-**f. 色标**：第一组（b 阶段）FFT 图之后生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 一张 contact sheet。候选必须同画布尺寸（PIL 断言全部一致）、每张标注 vmin/vmax 与两端压死百分比，并打印候选表（编号/vmin/vmax/两端裁剪比例）。用户选定后用 `--pick-window K`（读上一轮的候选表）或 `--fft-window VMIN VMAX` 重跑，写入 `<OUTDIR>/fft_window.json`；此后**所有** FFT 图（fft_raw / fft_corrected / z3 / c3dc）共用该窗口。已存在 `fft_window.json` 时直接读取复用（幂等）。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
+**f. 色标**：第一组（b 阶段）FFT 图之后生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 一张 contact sheet。候选必须同画布尺寸（PIL 断言全部一致）、每张标注 vmin/vmax 与两端压死百分比，并打印候选表（编号/vmin/vmax/两端裁剪比例）。用户选定后用 `--pick-window K`（读上一轮的候选表；**`K` 是候选表的 `index`，0-based，即 `window_{K:02d}.png` 的编号**，合法范围 `0 <= K < N`）或 `--fft-window VMIN VMAX` 重跑，写入 `<OUTDIR>/fft_window.json`；此后**所有** FFT 图（fft_raw / fft_corrected / z3 / c3dc）共用该窗口。已存在 `fft_window.json` 时直接读取复用（幂等）。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
 
 ## 3 产物布局
 

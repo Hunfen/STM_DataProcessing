@@ -21,9 +21,20 @@
 ## 依赖
 
 - 仓库 `STM_DataProcessing` 源码（`src/`）：`utils.bragg_peak`（数据锚定峰检测/环聚类）、
-  `utils.plot_funcs.subtractMeanPlane`、`stm.preview_plot.gwyddion`（色标，缺省 builtin 锚点回退）
+  `stm.preview_plot.gwyddion`（色标，缺省 builtin 锚点回退）
 - `scipy`（`fft.dctn/idctn`、`ndimage.map_coordinates/distance_transform_edt`）、`numpy`、`matplotlib`
 - `h5py`（HDF5 产物；仓库 `pyproject.toml` 已含）
+- **依赖 `stm_data_processing` 是设计意图，不是缺陷**：本 skill 有意住在仓库里、有意用这个包——
+  `stm_lf_correct.py` 用 `--stm-lib`（默认 = 仓库 `src/`，见 `scripts/stm_lf_correct.py:200-203`）
+  把 `stm_data_processing.utils.bragg_peak` 接进 `sys.path`（`stm_lf_correct.py:489`），`lf_lib.load_colormap`
+  同理取 `stm.preview_plot.gwyddion`（取不到才回落到 builtin 锚点）。**平面拟合已内联**：
+  `scripts/{stm_lf_correct,stm_lf_apply,selftest}.py` 各自有一个逐位等价的 NaN 安全 `subtract_mean_plane`，
+  所以 `utils.plot_funcs` **不再是依赖**（它会在模块级 import `nanonispy`）。
+- **嵌套代码来自仓库 checkout**：调用方（`grid-lf-pipeline` 的 `grid_lf_fit.py`、`grid-sym-fft` 的
+  `grid_sym.py`）用 `stm_data_processing.__file__` 定位仓库根，再取
+  `<repo>/skills/lawler-fujita-correction/scripts/` 下的 `stm_lf_correct.py` / `lf_lib.py`。
+  因此 `~/.agents/skills/lawler-fujita-correction/` 只是**安装副本**，不参与嵌套调用；改了仓库里的脚本
+  立刻对嵌套调用方生效，改安装副本则不影响任何运行。
 - 执行环境（系统 Python 无 numpy；不要用 `uv run`——它会写仓库 `.venv`）：
 
 ```bash

@@ -17,7 +17,7 @@ description: Lawler–Fujita 晶格相位矫正（Fujita et al., PNAS 2014, SI �
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtractMeanPlane(...))` 转到数组坐标，与 affine skill 一致） |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtract_mean_plane(...))` 转到数组坐标，与 affine skill 一致；`subtract_mean_plane` 是本 skill 内联的 NaN 安全平面拟合，见 `scripts/stm_lf_correct.py:73`） |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方 1x1 环，晶格常数 `a`（默认 0.246 nm）；**半径取理想值 `2L/(√3a)` px，取向取数据自身**（见 §2.3） |
 | 锚定环 | 数据锚定峰检测（`bragg_peak.detect_bragg_peaks`，与 affine skill 同一入口）找到的、半径与理想 1x1 环相符（`--ring-tol`，默认 10%）且 ≥6 成员的环 |

@@ -10,8 +10,11 @@ exports the transferable displacement-field bundle (``<stem>_transform.json``
 
 Nested dependency only: this script never re-implements the fit or any
 resampling.  It locates ``skills/lawler-fujita-correction/scripts/stm_lf_correct.py``
-by a **relative path from the STM_DataProcessing checkout root** and calls it
-with the repository ``--stm-lib`` default; it neither reads from nor writes to
+by a **relative path from the STM_DataProcessing checkout root** and calls it with
+``-L`` / ``-o`` / ``--lambda-nm`` / ``--save-transform`` only.  It has no
+``--stm-lib`` option and passes none: the nested script falls back to its own
+``--stm-lib`` default (the repository ``src`` directory).  This script neither
+reads from nor writes to
 anything under ``skills/lawler-fujita-correction`` besides running that one
 script (nothing there is modified).
 

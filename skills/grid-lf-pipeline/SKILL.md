@@ -18,8 +18,8 @@ description: 把 Nanonis grid spectroscopy（`.3ds`，或经 `stm_data_processin
 | 输入 | `<grid>.h5`，由 `python -m stm_data_processing.io.grid2h5 <grid>.3ds -o <grid>.h5` 得到（步骤 ①）；也可以直接把 `.3ds` 交给 `grid_topo.py`，脚本先做这次转换并**打印该转换命令** |
 | h5 结构 | `/data (ny, nx, nch, npts)`、`/channels`、`/channel_units`、`/bias`（V）、`/params` + `/param_columns`、`/header` |
 | 视场 L (nm) | 从 h5 header 的 `Scan>Scanfield` 解析（`x0;y0;width;height;angle`，`;` 分隔、单位 m，取第 3 段宽 ×1e9=nm）；没有则退回 header 的 `Grid settings`（同一条记录）；`-L` 可显式覆盖 |
-| 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`） |
-| 依赖 | `h5py`、`numpy`、matplotlib（经 `stm_data_processing.utils.plot_funcs`），以及本仓库 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`（**相对路径嵌套调用，不修改它**） |
+| 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`）。**`PYTHONDONTWRITEBYTECODE=1` 是必需的**：步 ③ 嵌套调用的 `stm_lf_correct.py` 会在启动时 import 同目录的 `lf_lib.py` / `h5io.py`，不设它就会在 `skills/lawler-fujita-correction/scripts/` 下留下 `__pycache__/`（仓库不该有这些字节码缓存；`.gitignore` 忽略它们，但目录会堆在 checkout 里、也会被误当成产物） |
+| 依赖 | `h5py`、`numpy`；嵌套调用的 LF skill 自身的依赖（`scipy`、`matplotlib`——`grid_lf_fit.py` 只转交，不 import 它们）；本仓库源码包 `stm_data_processing`（脚本只 `import stm_data_processing` 定位 checkout 根，见 `scripts/grid_lf_fit.py:62-65`；平面拟合已内联进本 skill，**不再**经 `stm_data_processing.utils.plot_funcs`）；以及本仓库 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`（**相对路径嵌套调用，不修改它**）。**依赖 `stm_data_processing` 是设计意图**，见 `lawler-fujita-correction/README.md` §依赖 |
 
 ## 2 三步流程（确切命令）
 
@@ -43,12 +43,15 @@ cd /path/to/STM_DataProcessing
 ```
 z = np.flipud(params['Z (m)'].reshape(ny, nx))   # ⓪ 转到 top-down（见 §5 第 1 条）
 z -= np.median(z, axis=1, keepdims=True)     # ① 逐行去背景（axis=1 = 快轴，逐慢扫行）
-z  = subtractMeanPlane(z.T).T                # ② 减二维最小二乘平面（仓库 helper，NaN 安全）
+z  = subtract_mean_plane(z.T).T              # ② 减二维最小二乘平面（本 skill 内联实现，NaN 安全）
 z -= z.min()                                 # ③ 平移最小值到 0
 np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 ```
 
-② 用仓库的 `stm_data_processing.utils.plot_funcs.subtractMeanPlane`；`.T` 不改变拟合出的平面，只改变平面求值的
+② 用本 skill 内联的 `subtract_mean_plane`（`scripts/grid_topo.py:79`；与仓库
+`stm_data_processing.utils.plot_funcs.subtractMeanPlane` 逐位等价——同 `meshgrid` 轴序、同
+`np.linalg.lstsq(..., rcond=None)`、同求值顺序；内联的理由是 `plot_funcs` 在模块级 import `nanonispy`，
+而本 skill 只读 `.h5`，不需要那个依赖）。`.T` 不改变拟合出的平面，只改变平面求值的
 末位舍入——转置调用是与已确认的参考 topo CSV 在撤销 ⓪ 的约定翻转之后逐字节一致的那一种（§6）。
 `<stem>` 是 h5 的文件名词干。此步 fail-closed：输入 `.h5` 不存在、或 `/param_columns` 缺 `Z (m)` 列时，脚本
 `SystemExit`（非零退出）。
@@ -59,9 +62,13 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 .venv/bin/python skills/grid-lf-pipeline/scripts/grid_lf_fit.py <out>/<stem>_topo.csv -L 30 -o <out>/lf
 ```
 
-内部按相对路径调用 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`（默认 `--lambda-nm 3`，`--stm-lib`
-用仓库默认），并带 `--save-transform`，把可迁移位移场包 `<stem>_topo_transform.json` + `<stem>_topo_transform.h5`
-落进 `-o` 指定的目录（即流水线布局里的 `<out>/lf/`）。
+内部按相对路径调用 `skills/lawler-fujita-correction/scripts/stm_lf_correct.py`，只传 `-L`、`-o`、`--lambda-nm`
+（默认 3）与 `--save-transform`：**`grid_lf_fit.py` 自己没有 `--stm-lib` 选项、也不向被调用脚本传它**——
+`stm_lf_correct.py` 走它自己的 `--stm-lib` 默认值（仓库 `src/`，见 `stm_lf_correct.py:200-203`）。
+传给它的 `--save-transform` 是**绝对路径**（`grid_lf_fit.py:134-138` 对默认名和显式值都做 `.resolve()`），
+所以 bundle JSON 里的 `u_field_file` 是绝对路径、Skill B 不需要相对解析；Skill B 仍保留「相对则按 bundle
+所在目录解析」的回退（`skills/grid-sym-fft/scripts/grid_sym.py:193-195`）。可迁移位移场包
+`<stem>_topo_transform.json` + `<stem>_topo_transform.h5` 落进 `-o` 指定的目录（即流水线布局里的 `<out>/lf/`）。
 
 - 本流程固定用 `--lambda-nm 3`：LF 自己的默认 30 nm 对 30 nm 视场太宽，`correction.log` 会报
   `band margin ... OUTSIDE the low-pass radius` 的 WARNING；用 3 nm 时同一行报 `band margin lambda x offset =
@@ -127,4 +134,5 @@ shasum -a 256 /tmp/gridskill-a/topo.csv \
 .venv/bin/python skills/grid-lf-pipeline/scripts/grid_lf_fit.py /tmp/gridskill-a/topo.csv -L 30 -o /tmp/gridskill-a/lf
 ```
 
-**本 task 未修改 `skills/lawler-fujita-correction` 下任何文件。**
+**本 skill 不修改 `skills/lawler-fujita-correction` 下任何文件**——只按相对路径运行它的 `stm_lf_correct.py`，
+不读写该 skill 的其它内容。
