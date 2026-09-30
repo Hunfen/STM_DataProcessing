@@ -68,6 +68,15 @@ DEFAULT_MIN_COVERAGE = 0.50
 # image border (the FFT treats the image as periodic, so the phase there averages
 # data from the opposite edge): used for the border-excluded diagnostics.
 LAMBDA_BORDER_MARGIN = 0.65
+# Detector settings of the |FFT| annulus search below.  They are the pipeline
+# defaults of ``stm_data_processing.utils.bragg_peak`` (``detect_bragg_peaks``
+# / ``_run_pipeline``); only the searched |q| range is different there.
+DETECT_MIN_SNR = 4.0
+DETECT_DC_MASK_FRACTION = 0.03
+DETECT_MAX_CANDIDATES = 2048
+DETECT_SIGMA_MODEL_FLOOR_PX = 0.006
+#: Peak-table rows printed when no ring is found (fail-closed diagnostics).
+MAX_DIAGNOSTIC_PEAKS = 64
 
 
 def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
@@ -154,9 +163,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--ring-tol",
         type=float,
-        default=0.10,
-        help="relative radius tolerance when matching a detected ring "
-        "to the ideal 1x1 ring radius (default 0.10)",
+        default=lf.DEFAULT_RING_TOL,
+        help="relative radius tolerance of the 1x1-ring search: the ring is "
+        f"anchored on the ideal radius 2 L / (sqrt(3) a) (default "
+        f"{lf.DEFAULT_RING_TOL:g})",
     )
     parser.add_argument(
         "--pair-angle",
@@ -187,8 +197,11 @@ def parse_args(argv=None):
     parser.add_argument(
         "--ring-cluster-tol",
         type=float,
-        default=0.02,
-        help="relative radius tolerance of the ring clustering (default 0.02)",
+        default=lf.DEFAULT_RING_CLUSTER_TOL,
+        help="relative radius tolerance of the radius clustering that tabulates "
+        "the detected rings for the report and the self-check; the ring search "
+        f"itself is anchored on the ideal radius (default "
+        f"{lf.DEFAULT_RING_CLUSTER_TOL:g})",
     )
     parser.add_argument(
         "--delimiter",
@@ -233,9 +246,9 @@ def load_matrix(path, delimiter, loader):
     return data
 
 
-def ring_table(peaks, cluster_tol):
-    """Radius clustering of the detected peaks (geometry only, no labels)."""
-    records = [
+def peak_records(peaks):
+    """Reflection records ``(qx, qy, amplitude, snr, |q|)`` of detected peaks."""
+    return [
         (
             float(peak.q_px[0]),
             float(peak.q_px[1]),
@@ -245,7 +258,109 @@ def ring_table(peaks, cluster_tol):
         )
         for peak in peaks
     ]
-    return lf.group_rings(records, tol_frac=cluster_tol, min_members=6)
+
+
+def ring_table(peaks, cluster_tol):
+    """Radius clustering of the detected peaks (geometry only, no labels)."""
+    return lf.group_rings(peak_records(peaks), tol_frac=cluster_tol, min_members=6)
+
+
+def fft_annulus_ring(topo, size_nm, radius_ideal, tol_frac, patch_half):
+    """Hexagonal ring read off the |FFT| around the ideal 1x1 radius, or None.
+
+    ``detect_bragg_peaks`` reports the reflections of the ring *its* reference
+    inference selected; when that inference anchors on another rung of the radial
+    ladder (a weaker (2,2) ring, say), the 1x1 reflections never reach the peak
+    list and no selection downstream of it can recover them.  This helper
+    therefore runs the package's own candidate/localization primitives -- never a
+    re-implementation -- restricted to the annulus around the ideal radius
+    ``2 L / (sqrt(3) a)``.  That radius comes from the lattice constant and the
+    field of view, so the search cannot drift onto a low-order ring either.
+    """
+    from stm_data_processing.utils.bragg_peak import (
+        compute_fft2,
+        detect_candidates,
+        localize_peak,
+        radial_background,
+    )
+    from stm_data_processing.utils.bragg_peak.fft import radius_map
+    from stm_data_processing.utils.bragg_peak.localize import merge_duplicates
+
+    n = int(topo.shape[0])
+    magnitude = np.abs(
+        compute_fft2(
+            topo, size_nm, window="hann", subtract_plane=False, nan_policy="plane"
+        )
+    )
+    radius = radius_map(n)
+    dc_radius_px = DETECT_DC_MASK_FRACTION * n
+    q_max_px = float(radius_ideal) * (1.0 + float(tol_frac))
+    level, sigma = radial_background(magnitude, radius)
+    snr_map = (magnitude - level) / np.maximum(sigma, np.finfo(float).tiny)
+    candidates, _footprint, _n_total = detect_candidates(
+        magnitude,
+        snr_map,
+        radius,
+        min_snr=DETECT_MIN_SNR,
+        dc_radius_px=dc_radius_px,
+        q_max_px=q_max_px,
+        max_candidates=DETECT_MAX_CANDIDATES,
+        footprint=None,
+    )
+    records = []
+    for record in merge_duplicates(
+        [
+            localize_peak(
+                magnitude,
+                candidate.row,
+                candidate.col,
+                snr=candidate.snr,
+                noise_sigma=float(sigma[candidate.row, candidate.col]),
+                patch_half=int(patch_half),
+                sigma_model_floor_px=DETECT_SIGMA_MODEL_FLOOR_PX,
+            )
+            for candidate in candidates
+        ]
+    ):
+        qx, qy = float(record["qx_px"]), float(record["qy_px"])
+        amplitude, snr = float(record["amplitude"]), float(record["snr"])
+        # detect_candidates keeps one half-plane only; a real |FFT| has the
+        # Friedel partner at -q with the same modulus, so it is added back before
+        # the ring search.
+        records.append((qx, qy, amplitude, snr, float(np.hypot(qx, qy))))
+        records.append((-qx, -qy, amplitude, snr, float(np.hypot(qx, qy))))
+    return lf.hexagon_ring_near_radius(records, radius_ideal, tol_frac)
+
+
+def anchor_ring_candidates(rings, peaks, topo, args, radius_ideal):
+    """Yield ``(source, ring)`` of the 1x1-ring search, best-founded first.
+
+    Three sources, all of them anchored on the *known* ideal radius
+    ``2 L / (sqrt(3) a)`` rather than on a measured radius:
+
+    1. ``radius_clustering`` -- the radius clustering of the detected peaks (the
+       historical table), kept first so that the published products of the
+       template scan stay bit for bit reproducible;
+    2. ``ideal_radius_window`` -- the detected peaks inside the ideal-radius
+       window, with no reflection-to-reflection clustering at all;
+    3. ``fft_annulus`` -- the |FFT| annulus itself, for the case where the
+       package detector reported another rung of the radial ladder and the 1x1
+       reflections are missing from ``peaks``.
+
+    The generator is lazy on purpose: source 3 (the only expensive one) is not
+    computed when an earlier source already yields a ring.
+    """
+    yield "radius_clustering", match_ring(rings, radius_ideal, args.ring_tol)
+    yield (
+        "ideal_radius_window",
+        lf.hexagon_ring_near_radius(peak_records(peaks), radius_ideal, args.ring_tol),
+    )
+    yield (
+        "fft_annulus",
+        fft_annulus_ring(
+            topo, args.size_nm, radius_ideal, args.ring_tol, args.patch_half
+        ),
+    )
 
 
 def match_ring(rings, radius_ideal, tol):
@@ -330,9 +445,16 @@ def reference_vectors(orientation_deg, slots, size_nm, a_nm):
     )
 
 
-def ring_quality(peaks, size_nm, a_nm, cluster_tol, ring_tol):
-    """Residual self-check of a re-detected image: 1x1 ring spread and pair ratio."""
+def ring_quality(peaks, size_nm, a_nm, cluster_tol, ring_tol, extra_ring=None):
+    """Residual self-check of a re-detected image: 1x1 ring spread and pair ratio.
+
+    ``extra_ring`` is the anchored 1x1 ring of the input image when it did not
+    come out of the radius clustering; it is added to the table so that the ring
+    spread and the 1 : sqrt(3) pair ratio are reported for it too.
+    """
     rings = ring_table(peaks, cluster_tol)
+    if extra_ring is not None:
+        rings = [*rings, extra_ring]
     radius_ideal = lf.ideal_radius_px(size_nm, a_nm)
     matched = match_ring(rings, radius_ideal, ring_tol)
     quality = {
@@ -566,22 +688,62 @@ def main(argv=None):
                 f"snr={peak.snr:6.2f} {peak.quality}"
             )
 
-    matched = match_ring(rings, radius_ideal, args.ring_tol)
+    matched, anchor_source, rejected = None, None, []
+    for source, ring in anchor_ring_candidates(
+        rings, detection.peaks, topo, args, radius_ideal
+    ):
+        if ring is None:
+            rejected.append(f"{source}: no hexagonal ring in this source")
+            continue
+        # A 1x1 ring is only usable when it carries the three lock-in directions
+        # (see pick_directions); a radius cluster that cannot is not that ring, so
+        # the search moves on to the next source instead of falling back blindly.
+        try:
+            pick_directions(ring, args.pair_angle)
+        except ValueError as exc:
+            rejected.append(f"{source}: {exc}")
+            continue
+        matched, anchor_source = ring, source
+        break
+
     fallback_reason = None
     if matched is None:
         fallback_reason = (
-            f"no detected ring with at least six members matches the "
-            f"ideal 1x1 radius {radius_ideal:.4f} px within "
-            f"{100 * args.ring_tol:.1f} %"
+            f"no hexagonal 1x1 ring within {100 * args.ring_tol:.1f} % of the "
+            f"ideal radius {radius_ideal:.4f} px (a = {args.a:g} nm, "
+            f"L = {args.size_nm:g} nm)"
         )
         emit("")
         emit(f"# WARNING: {fallback_reason}")
+        table = sorted(peak_records(detection.peaks), key=lambda row: -row[4])
+        emit(
+            f"# peak table of the {len(table)} detected peak(s) (|q| px, deviation "
+            "from the ideal radius, angle deg, snr):"
+        )
+        for index, record in enumerate(table[:MAX_DIAGNOSTIC_PEAKS], 1):
+            emit(
+                f"#   {index:2d}: |q| {record[4]:9.3f} "
+                f"({100 * (record[4] / radius_ideal - 1):+8.3f} %) "
+                f"angle {np.degrees(np.arctan2(record[1], record[0])) % 360:8.3f} "
+                f"snr {record[3]:8.2f}"
+            )
+        if len(table) > MAX_DIAGNOSTIC_PEAKS:
+            emit(f"#   ... {len(table) - MAX_DIAGNOSTIC_PEAKS} further peak(s)")
+        emit(
+            f"# why no ring: a ring needs three detected reflections 60 deg apart "
+            f"(+/-{lf.DEFAULT_HEXAGON_ANGLE_TOL_DEG:g} deg) inside the "
+            f"{100 * args.ring_tol:.1f} % radius window, plus their Friedel partners"
+        )
+        for note in rejected:
+            emit(f"#   rejected {note}")
     else:
         emit("")
         emit(
-            f"# anchor ring: the detected 1x1 ring (radius {float(matched['radius']):.4f} "
-            f"px, {100 * (float(matched['radius']) / radius_ideal - 1):+.3f} % from the "
-            f"ideal, {len(matched['members'])} members)"
+            f"# anchor ring: {float(matched['radius']):.4f} px, "
+            f"{100 * (float(matched['radius']) / radius_ideal - 1):+.3f} % from the "
+            f"ideal, {len(matched['members'])} members "
+            f"(source: {anchor_source}, window {100 * args.ring_tol:.1f} % of the "
+            f"ideal radius)"
         )
 
     q_pair, theta_maps, amplitude_maps, threshold = None, None, None, None
@@ -777,7 +939,12 @@ def main(argv=None):
         return_fft2=False,
     )
     before_quality = ring_quality(
-        detection.peaks, args.size_nm, args.a, args.ring_cluster_tol, args.ring_tol
+        detection.peaks,
+        args.size_nm,
+        args.a,
+        args.ring_cluster_tol,
+        args.ring_tol,
+        extra_ring=None if anchor_source == "radius_clustering" else matched,
     )
     after_quality = ring_quality(
         after.peaks, size_out, args.a, args.ring_cluster_tol, args.ring_tol

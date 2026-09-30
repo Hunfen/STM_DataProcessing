@@ -90,9 +90,35 @@ def load_colormap(stm_lib=None):
 
 
 # --------------------------------------------------------------------------- #
-# radius clustering of the detected reflections
+# radius clustering / ideal-radius anchoring of the detected reflections
 # --------------------------------------------------------------------------- #
-def group_rings(reflections, tol_frac=0.02, min_members=6):
+#: Relative radius tolerance of the *anchored* ring search, the tolerance that
+#: the ring detection actually uses: the 1x1 radius is known from the lattice
+#: constant and the field of view (:func:`ideal_radius_px`), so the ring is
+#: gathered in a window around that radius.  The members of the shipped 30 nm
+#: grids spread over 3-6 % in radius (the ring is an ellipse), which no
+#: reflection-to-reflection tolerance can capture without a magic number.
+DEFAULT_RING_TOL = 0.10
+#: Relative radius tolerance of the radius *clustering* of the detected
+#: reflections.  It only tabulates the detected rings for the report and the
+#: self-check; the search for the 1x1 ring itself is anchored on the ideal radius
+#: (``DEFAULT_RING_TOL``) and does not read it.  This constant is the single
+#: source of the number for both this module and the CLI default; the package
+#: constant ``bragg_peak.rings._RING_RADIUS_TOL`` (0.03) belongs to the package's
+#: own ring inference and is never used here.  The value stays the historical
+#: 0.02 because every product published so far records that number in its
+#: correction report.
+DEFAULT_RING_CLUSTER_TOL = 0.02
+#: Angle tolerance (degrees) of the hexagonal triple.  A ring is three
+#: independent reflections 60 degrees apart, so the two partners of the
+#: strongest member sit +/-120 degrees away (and the Friedel partners mirror
+#: them); a distorted lattice ring misses 60 degrees by up to a few degrees.
+DEFAULT_HEXAGON_ANGLE_TOL_DEG = 25.0
+#: Where the two partners of the strongest ring member sit, in degrees.
+HEXAGON_PARTNER_ANGLES_DEG = (120.0, -120.0)
+
+
+def group_rings(reflections, tol_frac=DEFAULT_RING_CLUSTER_TOL, min_members=6):
     """Cluster reflections by radius (greedy, strongest first).
 
     ``reflections`` are tuples whose entries 2, 3 and 4 are amplitude, snr and
@@ -122,6 +148,85 @@ def group_rings(reflections, tol_frac=0.02, min_members=6):
     keep = [ring for ring in rings if len(ring["members"]) >= min_members]
     keep.sort(key=lambda ring: -ring["total_amplitude"])
     return keep
+
+
+def ring_angle_deg(reflection):
+    """Direction of a reflection record, in degrees."""
+    return float(np.degrees(np.arctan2(float(reflection[1]), float(reflection[0]))))
+
+
+def _signed_angle_difference(first_deg, second_deg):
+    """``first - second`` folded into (-180, 180] degrees."""
+    return (float(first_deg) - float(second_deg) + 180.0) % 360.0 - 180.0
+
+
+def hexagon_ring_near_radius(
+    reflections,
+    radius_ideal_px,
+    tol_frac=DEFAULT_RING_TOL,
+    *,
+    angle_tol_deg=DEFAULT_HEXAGON_ANGLE_TOL_DEG,
+):
+    """Hexagonal ring anchored on a *known* ideal radius, or None.
+
+    ``reflections`` are the tuples of :func:`group_rings` (entries 2, 3 and 4 are
+    amplitude, snr and radius).  Only reflections whose radius sits within
+    ``tol_frac`` of ``radius_ideal_px`` are considered: the ideal 1x1 radius
+    follows from the lattice constant and the field of view, so the search does
+    not have to guess which rung of the radial ladder the data shows, and it
+    cannot drift onto a weaker low-order ring.
+
+    The ring is then *defined* by six-fold symmetry: the strongest reflection of
+    the window fixes the reference direction and the ring requires its two
+    partners ``+/-120`` degrees away, i.e. three independent members 60 degrees
+    apart.  A partner is the *strongest* reflection inside the angle tolerance:
+    the angle window only selects the direction, and inside an annulus that wide
+    a weak local blob of the |FFT| background can easily sit closer to the exact
+    angle than the ring member itself.  The returned ring carries those three
+    measured reflections plus their mirrored partners (Friedel pairs of a real
+    |FFT|), so every consumer sees the six members of a hexagonal ring.  Returns
+    None when the window holds fewer than three reflections or when the
+    hexagonal triple is not there.
+    """
+    window = [
+        reflection
+        for reflection in reflections
+        if abs(float(reflection[4]) / float(radius_ideal_px) - 1.0) <= tol_frac
+    ]
+    if len(window) < 3:
+        return None
+    ordered = sorted(window, key=lambda reflection: -float(reflection[2]))
+    reference_angle = ring_angle_deg(ordered[0])
+
+    def partner(target_deg):
+        best, best_key = None, None
+        for reflection in ordered[1:]:
+            distance = abs(
+                _signed_angle_difference(ring_angle_deg(reflection), reference_angle)
+                - target_deg
+            )
+            if distance > angle_tol_deg:
+                continue
+            key = (-float(reflection[2]), distance)
+            if best_key is None or key < best_key:
+                best, best_key = reflection, key
+        return best
+
+    partners = [partner(target) for target in HEXAGON_PARTNER_ANGLES_DEG]
+    if any(entry is None for entry in partners) or partners[0] is partners[1]:
+        return None
+    triple = [ordered[0], *partners]
+    members = triple + [
+        (-float(m[0]), -float(m[1]), float(m[2]), float(m[3]), float(m[4]))
+        for m in triple
+    ]
+    return {
+        "radius": float(
+            np.average([m[4] for m in members], weights=[m[2] for m in members])
+        ),
+        "members": members,
+        "total_amplitude": float(sum(m[2] for m in members)),
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -11,7 +11,10 @@ exports the transferable displacement-field bundle (``<stem>_transform.json``
 Nested dependency only: this script never re-implements the fit or any
 resampling.  It locates ``skills/lawler-fujita-correction/scripts/stm_lf_correct.py``
 by a **relative path from the STM_DataProcessing checkout root** and calls it with
-``-L`` / ``-o`` / ``--lambda-nm`` / ``--save-transform`` only.  It has no
+``-L`` / ``-o`` / ``--lambda-nm`` / ``--save-transform`` plus the optional ring
+parameters ``--ring-tol`` / ``--ring-cluster-tol`` (each forwarded only when the
+caller passes it, so the nested skill's default stays the single source of that
+number).  It has no
 ``--stm-lib`` option and passes none: the nested script falls back to its own
 ``--stm-lib`` default (the repository ``src`` directory).  This script neither
 reads from nor writes to
@@ -96,6 +99,22 @@ def parse_args(argv=None):
         "wide for a 30 nm field and it warns about that)",
     )
     parser.add_argument(
+        "--ring-tol",
+        type=float,
+        default=None,
+        help="relative radius tolerance of the 1x1-ring search, forwarded to "
+        "stm_lf_correct.py --ring-tol; omit it and the nested skill's own "
+        "default applies (that default is the single source of the number)",
+    )
+    parser.add_argument(
+        "--ring-cluster-tol",
+        type=float,
+        default=None,
+        help="relative radius tolerance of the detected-ring clustering, "
+        "forwarded to stm_lf_correct.py --ring-cluster-tol; omit it and the "
+        "nested skill's own default applies",
+    )
+    parser.add_argument(
         "--save-transform",
         default=None,
         metavar="FILE",
@@ -152,6 +171,14 @@ def main(argv=None):
         "--save-transform",
         str(bundle_json),
     ]
+    # Forwarded only when the caller set them: the nested skill then keeps its own
+    # default, which stays the single source of the two tolerances.
+    for option, value in (
+        ("--ring-tol", args.ring_tol),
+        ("--ring-cluster-tol", args.ring_cluster_tol),
+    ):
+        if value is not None:
+            cmd += [option, f"{value:g}"]
     print("$ " + " ".join(shlex.quote(part) for part in cmd), flush=True)
 
     failed_reason = None
