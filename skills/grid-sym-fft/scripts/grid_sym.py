@@ -26,21 +26,29 @@ the repo root for the convention).  It never touches the target values -- no
 before committing to a FFT colormap (they dislike formula-derived windows):
 
 1. Run ``--window-candidates N`` (N is required with this flag): stages a+b
-   run and N candidate FFT images + a contact sheet are written into
-   ``window_candidates/``, the candidate table
-   is printed and saved to ``<OUTDIR>/fft_window_candidates.json``, then the
-   script exits 0 (no window chosen yet).
-2. Run ``--pick-window K`` (or ``--fft-window VMIN VMAX``): the full chain
-   a+b+c+d+e runs, ``<OUTDIR>/fft_window.json`` is written, and **all** FFT
-   plots (fft_raw / fft_corrected / z3 / c3dc) share that one window.
+   run and, **per role**, N candidate FFT images + that role's own contact
+   sheet are written into ``window_candidates/<role>/``; the per-role candidate
+   table is printed and saved to ``<OUTDIR>/fft_window_candidates.json``, then
+   the script exits 0 (no window chosen yet).
+2. Run ``--pick-window K`` (candidate K of *every* role), or
+   ``--fft-window-role ROLE VMIN VMAX`` (one role at a time; repeatable), or
+   ``--fft-window VMIN VMAX`` (the same numbers for every role): the full chain
+   a+b+c+d+e runs, ``<OUTDIR>/fft_window.json`` is written, and every FFT plot
+   (fft_raw / fft_corrected / z3 / c3dc) of a role uses **that role's** window.
+
+Windows are never shared across roles: ``current`` and ``didv`` carry different
+units, and their log|F| medians are ~26 apart, so one window pins one role at
+the top of the colormap and the other at the bottom.  Within a role the window
+is shared by all its bias points and by all four FFT plot families.
 
 If ``fft_window.json`` already exists it is reused (idempotent).  Running the
 full chain with no window selected yet is fail-closed.
 
 **Fail-closed.**  A missing/ambiguous channel name, a ``--transform`` that is
 missing or not unique inside its directory, a grid h5 without ``/params``'s
-``Z (m)`` column, or requesting the full chain before a window is chosen all
-exit non-zero without writing a half-finished pipeline.
+``Z (m)`` column, a saved candidate table from the pooled-window version, or
+requesting the full chain before a window is chosen all exit non-zero without
+writing a half-finished pipeline.
 
 Usage::
 
@@ -48,7 +56,8 @@ Usage::
         --map current="Current (A)" --map didv="DSP 7280 Y (%)" \\
         --transform <dir|bundle.json> -o OUT [--window-candidates 9]
     (then)  ... -o OUT --pick-window 3
-    (or)    ... -o OUT --fft-window 0 6.5
+    (or)    ... -o OUT --fft-window-role current -22 -16 \\
+                          --fft-window-role didv 4 10
 """
 
 from __future__ import annotations
@@ -91,11 +100,31 @@ Z_COLUMN = "Z (m)"
 FFT_WINDOW_FILE = "fft_window.json"
 CANDIDATES_FILE = "fft_window_candidates.json"
 
-# Color-scale candidate generation (see contain below): percentile fractions of
-# the pooled log|F| data, vmin ascending, vmax ascending.  Index 0 is the
-# tightest/darkest window, the last is the brightest.
-_VMIN_FRAC = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
-_VMAX_FRAC = [0.90, 0.95, 0.98, 0.99, 0.995, 0.997, 0.999, 0.9995, 0.9999]
+# Color-scale candidate generation: (vmin percentile, vmax percentile) of **one
+# role's own** log|F| distribution.  Windows are never pooled across roles --
+# ``current`` and ``didv`` sit on different units and their log|F| medians differ
+# by ~26 (e.g. -19.95 vs +6.27 on 2025-11-15), so a pooled window pins one role
+# at the top of the colormap and the other at the bottom.
+#
+# The pair is chosen so that the fraction of pixels pinned at a window endpoint,
+# ``vmin% + (100 - vmax)%``, stays below 5 %: a candidate whose picture is one
+# flat colour cannot be judged.  Index 0 is the widest window (least clipping),
+# the last is the contrastiest one that still stays inside that budget.
+_WINDOW_CANDIDATE_FRACS = [
+    (0.05, 99.95),
+    (0.10, 99.80),
+    (0.20, 99.50),
+    (0.40, 99.20),
+    (0.70, 98.90),
+    (1.00, 98.60),
+    (1.40, 98.30),
+    (1.80, 98.00),
+    (2.20, 97.70),
+]
+
+#: Percentiles used to pick the plane that represents a role (see
+#: ``representative_bias_index``).
+_REPRESENTATIVE_QUANTILES = (0.5, 50.0, 99.5)
 
 
 def _decode(values):
@@ -414,20 +443,24 @@ def save_fft_image(out_png: Path, F, window, title, dpi=120, log_fn=_logmag):
     plt.close(fig)
 
 
-def candidate_window_list(logvals_flat, n):
-    """Build ``n`` (vmin, vmax) candidate windows from pooled log|F| values."""
-    fracs_min = _VMIN_FRAC
-    fracs_max = _VMAX_FRAC
+def candidate_window_list(logvals, n):
+    """Build ``n`` (vmin, vmax) candidate windows from **one role's** log|F| values.
+
+    ``logvals`` must hold a single role's values: the two roles are different
+    units and must never be pooled (that bug is what made every candidate a flat
+    colour).  The reported clip percentages are exact by construction, since the
+    endpoints are percentiles of the same array.
+    """
     nlist = []
     for i in range(n):
-        fmin = fracs_min[min(i, len(fracs_min) - 1)] * 100.0
-        fmax = fracs_max[min(i, len(fracs_max) - 1)] * 100.0
-        if fmax <= fmin:
-            fmax = fmin + 1.0
-        vmin = float(np.percentile(logvals_flat, fmin))
-        vmax = float(np.percentile(logvals_flat, fmax))
-        clip_below = 100.0 * float(np.mean(logvals_flat < vmin))
-        clip_above = 100.0 * float(np.mean(logvals_flat > vmax))
+        fmin, fmax = _WINDOW_CANDIDATE_FRACS[min(i, len(_WINDOW_CANDIDATE_FRACS) - 1)]
+        vmin = float(np.percentile(logvals, fmin))
+        vmax = float(np.percentile(logvals, fmax))
+        if vmax <= vmin:
+            vmax = float(np.max(logvals))
+            vmin = float(np.min(logvals))
+        clip_below = 100.0 * float(np.mean(logvals < vmin))
+        clip_above = 100.0 * float(np.mean(logvals > vmax))
         nlist.append(
             {
                 "index": i,
@@ -440,19 +473,56 @@ def candidate_window_list(logvals_flat, n):
     return nlist
 
 
-def render_candidates(candidates, outdir: Path):
+def representative_bias_index(planes, pooled):
+    """Index of the plane whose log|F| distribution is closest to the role's pooled one.
+
+    The windows come from the pooled distribution (they are applied to every
+    plane of the role), but the candidate *picture* has to be an actual plane, so
+    it must be the one that represents that distribution -- otherwise the figure
+    would be drawn from a different distribution than the window, which is the
+    defect this function exists to prevent.
+    """
+    target = np.array([np.percentile(pooled, q) for q in _REPRESENTATIVE_QUANTILES])
+    best, best_score = 0, None
+    for i, plane in enumerate(planes):
+        finite = plane[np.isfinite(plane)]
+        got = np.array([np.percentile(finite, q) for q in _REPRESENTATIVE_QUANTILES])
+        score = float(np.abs(got - target).sum())
+        if best_score is None or score < best_score:
+            best, best_score = i, score
+    return best
+
+
+def role_fft_log_data(outdir: Path, role: str):
+    """One role's log|F| planes from ``fft_raw/<role>`` -> (planes, pooled values)."""
+    d = outdir / "fft_raw" / role
+    planes = []
+    for path in sorted(d.glob("*_fft2.npy")):
+        F = np.load(path)
+        planes.append(np.log(np.abs(F)))
+    if not planes:
+        raise SystemExit(
+            f"ERROR: no *_fft2.npy under {d}; run --window-candidates after the "
+            f"raw FFT stage has produced them"
+        )
+    pooled = np.concatenate([p[np.isfinite(p)] for p in planes])
+    return planes, pooled
+
+
+def render_candidates(candidates, outdir: Path, role: str):
     """Render N candidate FFT images + tiled contact sheet, all same canvas.
 
-    The candidate figures all show the same pooled log|F| plane under a
-    different (vmin, vmax); with a fixed figure size and no ``bbox_inches``
-    crop every PNG shares one canvas, so they are pixel-for-pixel comparable
-    (asserted below with PIL before the contact sheet is assembled).
+    The candidates all show the *same role's* log|F| plane under a different
+    (vmin, vmax); with a fixed figure size and no ``bbox_inches`` crop every PNG
+    shares one canvas, so they are pixel-for-pixel comparable (asserted below
+    with PIL before the contact sheet is assembled).
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    outdir.mkdir(parents=True, exist_ok=True)
     sizes = []
     paths = []
     for cand in candidates:
@@ -460,7 +530,7 @@ def render_candidates(candidates, outdir: Path):
         plane = np.asarray(cand["_plane"])
         fig, ax = plt.subplots(figsize=(6, 6))
         ax.set_title(
-            f"window {cand['index']}: vmin={cand['vmin']:.3g} "
+            f"{role} window {cand['index']}: vmin={cand['vmin']:.3g} "
             f"vmax={cand['vmax']:.3g}  clip {cand['clip_below_pct']:.1f}/"
             f"{cand['clip_above_pct']:.1f} %",
             fontsize=8,
@@ -491,20 +561,27 @@ def render_candidates(candidates, outdir: Path):
 
 
 def default_fft_window(roles, h5_path, bias_meV):
-    """Pooled p50..p99.9 window used only as a provisional render fallback."""
+    """Per-role p50..p99.9 window used only as a provisional render fallback.
+
+    Returns ``{role: {"vmin", "vmax"}}``; the roles are never pooled (see
+    ``_WINDOW_CANDIDATE_FRACS``).
+    """
     with h5py.File(h5_path, "r") as handle:
         data = handle["data"][:]
-    pooled = []
+    windows = {}
     for role_desc in roles:
+        role = role_desc["role"]
+        chunks = []
         for i in range(len(bias_meV)):
             m = extract_role_map(data, role_desc, i)
             F = compute_fft(m)
-            pooled.append(np.log(np.abs(F))[np.isfinite(F)])
-    pooled = np.concatenate(pooled) if pooled else np.zeros(1)
-    return {
-        "vmin": float(np.percentile(pooled, 50)),
-        "vmax": float(np.percentile(pooled, 99.9)),
-    }
+            chunks.append(np.log(np.abs(F))[np.isfinite(F)])
+        pooled = np.concatenate(chunks) if chunks else np.zeros(1)
+        windows[role] = {
+            "vmin": float(np.percentile(pooled, 50)),
+            "vmax": float(np.percentile(pooled, 99.9)),
+        }
+    return windows
 
 
 # --------------------------------------------------------------------------
@@ -513,7 +590,7 @@ def default_fft_window(roles, h5_path, bias_meV):
 
 
 class Pipeline:
-    def __init__(self, h5_path, roles, outdir, size_nm, payload, u_nm, valid, window):
+    def __init__(self, h5_path, roles, outdir, size_nm, payload, u_nm, valid, windows):
         self.h5_path = h5_path
         self.roles = roles
         self.outdir = outdir
@@ -521,7 +598,9 @@ class Pipeline:
         self.payload = payload
         self.u_nm = u_nm
         self.valid = valid
-        self.window = window
+        # {role: {"vmin", "vmax"}} -- one colour window per role, never shared:
+        # the roles carry different units (see _WINDOW_CANDIDATE_FRACS).
+        self.windows = windows
         self.log_lines = []
         self.log(
             f"pairing rule: forward name + {BWD_MARKER!r} suffix, resolved by "
@@ -534,6 +613,18 @@ class Pipeline:
                 f"{r['fwd_idx']}) + bwd {r['back']!r} (index {r['back_idx']}) "
                 f"-> nanmean; unit {r['unit']!r}"
             )
+        for role, win in self.windows.items():
+            if win["vmin"] is not None:
+                self.log(
+                    f"fft color window {role}: [{win['vmin']:.6g}, {win['vmax']:.6g}] "
+                    f"(per role, never pooled across roles)"
+                )
+
+    def window_for(self, role):
+        win = self.windows.get(role)
+        if win is None or win.get("vmin") is None:
+            raise SystemExit(f"ERROR: no FFT colour window selected for role {role!r}")
+        return win
 
     def log(self, msg):
         self.log_lines.append(msg)
@@ -586,12 +677,13 @@ class Pipeline:
                 save_fft_image(
                     d / f"{label}_fft.png",
                     F,
-                    self.window,
+                    self.window_for(role),
                     f"{role} {i} bias {round(b)} meV  |FFT| (raw)",
                 )
                 self.log(
                     f"fft_raw {role} {i} meV {round(b)}: "
-                    f"F[{self.window['vmin']:.3g},{self.window['vmax']:.3g}]"
+                    f"F[{self.window_for(role)['vmin']:.3g},"
+                    f"{self.window_for(role)['vmax']:.3g}]"
                 )
 
     def run_correct(self, raw_maps, bias_meV):
@@ -629,7 +721,7 @@ class Pipeline:
                 save_fft_image(
                     fdir / f"{label}_fft.png",
                     FC,
-                    self.window,
+                    self.window_for(role),
                     f"{role} {i} bias {round(b)} meV  |FFT| (LF corrected)",
                 )
                 corrected[(role, i)] = (FC, corr)
@@ -638,8 +730,8 @@ class Pipeline:
                     f"max|u| {mag:.3g} px"
                 )
                 self.log(
-                    f"fft_corrected {role} {i}: F[{self.window['vmin']:.3g},"
-                    f"{self.window['vmax']:.3g}]"
+                    f"fft_corrected {role} {i}: F[{self.window_for(role)['vmin']:.3g},"
+                    f"{self.window_for(role)['vmax']:.3g}]"
                 )
         return corrected
 
@@ -657,7 +749,7 @@ class Pipeline:
                 save_fft_image(
                     d / f"{label}_fft.png",
                     Z,
-                    self.window,
+                    self.window_for(role),
                     f"{role} {i} bias {round(b)} meV  log|Z| (C3, complex)",
                 )
                 dc_out = _dc_preservation(Z, F)
@@ -699,7 +791,7 @@ class Pipeline:
                 save_fft_image(
                     d / f"{label}_fft.png",
                     C,
-                    self.window,
+                    self.window_for(role),
                     f"{role} {i} bias {round(b)} meV  log|C3dc| "
                     f"(neg {neg} px, mag {rel_neg:.2e})",
                     log_fn=lambda x: np.log(np.abs(x)),
@@ -726,7 +818,7 @@ class Pipeline:
             fh.write("\n".join(self.log_lines) + ("\n" if self.log_lines else ""))
         if include_window:
             with (self.outdir / FFT_WINDOW_FILE).open("w") as fh:
-                json.dump(self.window, fh, indent=2)
+                json.dump({"window_version": 2, "roles": self.windows}, fh, indent=2)
                 fh.write("\n")
 
 
@@ -770,7 +862,19 @@ def parse_args(argv=None):
         type=float,
         default=None,
         metavar=("VMIN", "VMAX"),
-        help="explicit FFT color window; write fft_window.json and run the full chain",
+        help="explicit FFT color window applied to EVERY role; write "
+        "fft_window.json and run the full chain.  The roles carry different "
+        "units, so this only does what you want when they happen to match -- use "
+        "--fft-window-role for a per-role window",
+    )
+    parser.add_argument(
+        "--fft-window-role",
+        action="append",
+        nargs=3,
+        default=[],
+        metavar=("ROLE", "VMIN", "VMAX"),
+        help="explicit FFT color window for one role (repeatable; overrides "
+        "--fft-window for that role)",
     )
     return parser.parse_args(argv)
 
@@ -813,9 +917,30 @@ def main(argv=None):
     size_nm = _scan_size_nm(src)
 
     # ---- decide the window and mode ------------------------------------
+    # A window is always a {role: (vmin, vmax)} table: the roles carry different
+    # units, so one shared window is meaningless (see _WINDOW_CANDIDATE_FRACS).
+    role_names = [r["role"] for r in roles]
     window_file = outdir / FFT_WINDOW_FILE
     if window_file.is_file():
-        window = json.loads(window_file.read_text())
+        saved = json.loads(window_file.read_text())
+        if "roles" in saved:
+            windows = {r: dict(w) for r, w in saved["roles"].items()}
+        else:
+            # legacy flat file (pre per-role windows): apply to every role
+            windows = {
+                r: {"vmin": saved["vmin"], "vmax": saved["vmax"]} for r in role_names
+            }
+            print(
+                f"# WARNING: {window_file} uses the legacy single-window format; "
+                f"applying it to every role.  Rerun --window-candidates N to get "
+                f"per-role windows."
+            )
+        missing = [r for r in role_names if r not in windows]
+        if missing:
+            raise SystemExit(
+                f"ERROR: {window_file} has no window for role(s) {missing}; it "
+                f"holds {sorted(windows)}"
+            )
         mode = "full"
     elif args.pick_window is not None:
         cand_file = outdir / CANDIDATES_FILE
@@ -826,33 +951,69 @@ def main(argv=None):
                 f"run first"
             )
         cands = json.loads(cand_file.read_text())
-        entries = cands["candidates"]
-        if not (0 <= args.pick_window < len(entries)):
+        if "roles" not in cands:
             raise SystemExit(
-                f"ERROR: --pick-window {args.pick_window} out of range "
-                f"[0, {len(entries) - 1}] from {cand_file}"
+                f"ERROR: {cand_file} holds a pooled (pre per-role) candidate "
+                f"table, whose windows are wrong for every role; rerun "
+                f"--window-candidates N to regenerate it per role"
             )
-        window = {
-            "vmin": entries[args.pick_window]["vmin"],
-            "vmax": entries[args.pick_window]["vmax"],
-        }
+        windows = {}
+        for role in role_names:
+            entries = cands["roles"].get(role, {}).get("candidates")
+            if not entries:
+                raise SystemExit(
+                    f"ERROR: {cand_file} has no candidate table for role {role!r} "
+                    f"(it holds {sorted(cands['roles'])})"
+                )
+            if not (0 <= args.pick_window < len(entries)):
+                raise SystemExit(
+                    f"ERROR: --pick-window {args.pick_window} out of range "
+                    f"[0, {len(entries) - 1}] for role {role!r} in {cand_file}"
+                )
+            windows[role] = {
+                "vmin": entries[args.pick_window]["vmin"],
+                "vmax": entries[args.pick_window]["vmax"],
+            }
         mode = "full"
-    elif args.fft_window is not None:
-        vmin, vmax = args.fft_window
-        if not (vmin < vmax):
+    elif args.fft_window is not None or args.fft_window_role:
+        if args.fft_window is not None:
+            vmin, vmax = args.fft_window
+            if not (vmin < vmax):
+                raise SystemExit(
+                    f"ERROR: --fft-window requires VMIN < VMAX, got {vmin},{vmax}"
+                )
+            windows = {r: {"vmin": vmin, "vmax": vmax} for r in role_names}
+        else:
+            windows = {}
+        for spec in args.fft_window_role:
+            role, vmin, vmax = spec[0], float(spec[1]), float(spec[2])
+            if role not in role_names:
+                raise SystemExit(
+                    f"ERROR: --fft-window-role names unknown role {role!r}; this "
+                    f"run has {role_names}"
+                )
+            if not (vmin < vmax):
+                raise SystemExit(
+                    f"ERROR: --fft-window-role {role} requires VMIN < VMAX, got "
+                    f"{vmin},{vmax}"
+                )
+            windows[role] = {"vmin": vmin, "vmax": vmax}
+        missing = [r for r in role_names if r not in windows]
+        if missing:
             raise SystemExit(
-                f"ERROR: --fft-window requires VMIN < VMAX, got {vmin},{vmax}"
+                f"ERROR: no window given for role(s) {missing}; pass --fft-window "
+                f"VMIN VMAX (all roles) or --fft-window-role ROLE VMIN VMAX"
             )
-        window = {"vmin": vmin, "vmax": vmax}
         mode = "full"
     elif args.window_candidates is not None:
         mode = "candidates"
-        window = {"vmin": None, "vmax": None}  # filled after candidate generation
+        windows = {r: {"vmin": None, "vmax": None} for r in role_names}
     else:
         raise SystemExit(
             "ERROR: no FFT color window selected and none on disk. Run "
             "--window-candidates N first (choose from the printed table), then "
-            "--pick-window K (or --fft-window VMIN VMAX), or place "
+            "--pick-window K (or --fft-window VMIN VMAX, or one "
+            "--fft-window-role ROLE VMIN VMAX per role), or place "
             f"{FFT_WINDOW_FILE} in the output directory."
         )
 
@@ -860,63 +1021,84 @@ def main(argv=None):
     print(f"# transform: {bundle_json} -> {u_path}")
     print(f"# field of view: {size_nm} nm")
 
-    pipe = Pipeline(src, roles, outdir, size_nm, payload, u_nm, valid, window)
+    pipe = Pipeline(src, roles, outdir, size_nm, payload, u_nm, valid, windows)
 
     # stages a + b always run first (extraction + raw FFT)
     raw_maps, bias_meV = pipe.run_extract()
     if mode == "candidates":
-        # No window chosen yet: render the b-stage fft_raw plots with a
-        # provisional pooled window so they are viewable; the candidate figures
+        # No window chosen yet: render the b-stage fft_raw plots with the
+        # provisional per-role window so they are viewable; the candidate figures
         # give the user the final choices and the full rerun redraws every FFT
         # plot with the picked window.
-        pipe.window = default_fft_window(roles, src, bias_meV)
+        pipe.windows = default_fft_window(roles, src, bias_meV)
+        for role, win in pipe.windows.items():
+            pipe.log(
+                f"provisional fft color window {role}: "
+                f"[{win['vmin']:.6g}, {win['vmax']:.6g}] (this role's p50..p99.9; "
+                f"the picked window replaces it)"
+            )
     pipe.run_raw_fft(raw_maps, bias_meV)
 
     if mode == "candidates":
-        # ---- candidate color-scale generation --------------------------
+        # ---- candidate color-scale generation, ONE SET PER ROLE ----------
         n = args.window_candidates
-        # pool log|F| from all raw FFT maps to pick meaningful range
-        pooled = []
-        for role_desc in roles:
-            d = outdir / "fft_raw" / role_desc["role"]
-            for i in range(len(bias_meV)):
-                path = d / f"{i}_{round(bias_meV[i])}meV_fft2.npy"
-                F = np.load(path)
-                pooled.append(np.log(np.abs(F))[np.isfinite(F)])
-        pooled = np.concatenate(pooled)
-        cands = candidate_window_list(pooled, n)
-        # attach the first raw FFT plane for comparable candidate rendering
-        first = None
-        for role_desc in roles:
-            d = outdir / "fft_raw" / role_desc["role"]
-            p0 = d / f"0_{round(bias_meV[0])}meV_fft2.npy"
-            if p0.is_file():
-                first = np.log(np.abs(np.load(p0)))
-                break
-        for c in cands:
-            c["_plane"] = first
         cand_dir = outdir / "window_candidates"
         cand_dir.mkdir(parents=True, exist_ok=True)
-        render_candidates(cands, cand_dir)
-        # persist candidate table (mini-json without the plane)
-        saved = {
-            "source": str(src),
-            "candidates": [
-                {k: v for k, v in c.items() if k != "_plane"} for c in cands
-            ],
-        }
+        # the flat window_NN.png / contact_sheet.png files this script wrote
+        # before windows became per-role would otherwise be mistaken for the new
+        # candidates; remove exactly those legacy names.
+        for stale in sorted(cand_dir.glob("window_[0-9][0-9].png")) + sorted(
+            cand_dir.glob("contact_sheet.png")
+        ):
+            stale.unlink()
+            pipe.log(f"removed legacy pooled candidate figure {stale}")
+        saved_roles = {}
+        for role_desc in roles:
+            role = role_desc["role"]
+            planes, pooled = role_fft_log_data(outdir, role)
+            cands = candidate_window_list(pooled, n)
+            rep = representative_bias_index(planes, pooled)
+            for c in cands:
+                c["_plane"] = planes[rep]
+            paths, sheet = render_candidates(cands, cand_dir / role, role)
+            saved_roles[role] = {
+                "unit": role_desc["unit"],
+                "pooled_log_p50": float(np.percentile(pooled, 50)),
+                "representative_bias_index": rep,
+                "representative_bias_meV": float(bias_meV[rep]),
+                "contact_sheet": str(sheet),
+                "figures": [str(p) for p in paths],
+                "candidates": [
+                    {k: v for k, v in c.items() if k != "_plane"} for c in cands
+                ],
+            }
+            pipe.log(
+                f"candidates {role} ({role_desc['unit']}): log|F| over "
+                f"{len(planes)} planes, p50 {np.percentile(pooled, 50):.3f}, "
+                f"preview plane {rep} ({round(bias_meV[rep])} meV), "
+                f"{len(cands)} windows -> {sheet}"
+            )
+        saved = {"source": str(src), "roles": saved_roles}
         (outdir / CANDIDATES_FILE).write_text(json.dumps(saved, indent=2) + "\n")
 
-        print("\nCandidate FFT color windows (choose with --pick-window K):")
-        print(f"{'#':>3} {'vmin':>12} {'vmax':>12} {'clip< %':>8} {'clip> %':>8}")
-        for c in cands:
+        print("\nCandidate FFT color windows, per role (choose with --pick-window K):")
+        for role in role_names:
+            info = saved_roles[role]
             print(
-                f"{c['index']:>3} {c['vmin']:>12.4g} {c['vmax']:>12.4g} "
-                f"{c['clip_below_pct']:>8.2f} {c['clip_above_pct']:>8.2f}"
+                f"\n-- {role} (unit {info['unit']!r}; pooled log|F| p50 "
+                f"{info['pooled_log_p50']:.3f}; preview plane bias "
+                f"{info['representative_bias_index']} = "
+                f"{info['representative_bias_meV']:g} meV)"
             )
+            print(f"{'#':>3} {'vmin':>12} {'vmax':>12} {'clip< %':>8} {'clip> %':>8}")
+            for c in info["candidates"]:
+                print(
+                    f"{c['index']:>3} {c['vmin']:>12.4g} {c['vmax']:>12.4g} "
+                    f"{c['clip_below_pct']:>8.2f} {c['clip_above_pct']:>8.2f}"
+                )
         print(
-            "\nRerun with --pick-window K (or --fft-window VMIN VMAX) to "
-            "run the full chain with that window."
+            "\nRerun with --pick-window K (candidate K of every role) or "
+            "--fft-window-role ROLE VMIN VMAX (per role) to run the full chain."
         )
         pipe.finish_log(include_window=False)
         return 0
@@ -927,8 +1109,11 @@ def main(argv=None):
     pipe.run_c3dc(corrected, bias_meV)
     pipe.finish_log(include_window=True)
     print(
-        f"# full chain done; products in {outdir}; window: "
-        f"[{window['vmin']:.3g}, {window['vmax']:.3g}]"
+        f"# full chain done; products in {outdir}; per-role windows: "
+        + ", ".join(
+            f"{role} [{windows[role]['vmin']:.3g}, {windows[role]['vmax']:.3g}]"
+            for role in role_names
+        )
     )
     return 0
 
