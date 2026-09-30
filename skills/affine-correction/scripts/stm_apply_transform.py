@@ -12,7 +12,7 @@ Preprocessing and geometry:
 
 * the target matrix is loaded exactly like the fit stage (same delimiter
   auto-detection) and preprocessed the same way --
-  ``flipud(subtractMeanPlane(...))``, first row = top scan line;
+  ``flipud(subtract_mean_plane(...))``, first row = top scan line;
 * the array-space map is the same ``A = P M^-1 P`` (``P`` the axis swap), but the
   canvas side ``n_out`` and the offset are recomputed for the **target's** pixel
   count ``n`` (see :func:`_image_transform`, a local mirror of
@@ -66,6 +66,43 @@ import h5io  # noqa: E402
 AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
 TRANSFORM_SCHEMA = "topo-correction-transform"
 TRANSFORM_SCHEMA_VERSION = 1
+
+
+def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
+    """Subtract the best-fit plane from ``matrix`` (NaN safe).
+
+    The same computation as the repository helper
+    ``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` -- same
+    ``meshgrid`` axes, same ``np.linalg.lstsq(..., rcond=None)`` call on the
+    finite pixels, same ``data - plane`` evaluation order -- inlined so that no
+    run of the apply stage imports ``plot_funcs``, which imports ``nanonispy``
+    at module level (this skill reads its matrices through ``numpy`` and has no
+    use for that dependency).
+
+    Only finite pixels take part in the fit; the fitted plane is evaluated over
+    the whole image, so NaN pixels stay NaN and the finite region gets the usual
+    plane-subtracted result.  Fewer than three finite points cannot define a
+    plane: the input is returned unchanged (the repository helper reports that
+    through its logger, this one through stderr).
+    """
+    xdim, ydim = matrix.shape
+    y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        print(
+            f"WARNING: subtract_mean_plane: only {n_finite} finite point(s); "
+            f"cannot fit a plane, returning the input unchanged.",
+            file=sys.stderr,
+        )
+        return matrix.copy()
+    basis = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
+    coeffs, _, _, _ = np.linalg.lstsq(
+        basis[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
+    plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
+    return data - plane
 
 
 def parse_args(argv=None):
@@ -212,7 +249,6 @@ def main(argv=None):
     args = parse_args(argv)
     sys.path.insert(0, args.stm_lib)
     from stm_data_processing.utils.bragg_peak import compute_fft2, load_image
-    from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
     csv_path = Path(args.input)
     transform_path = Path(args.transform)
@@ -232,7 +268,7 @@ def main(argv=None):
         return 2
 
     topo = load_matrix(csv_path, resolve_delimiter(args.delimiter), load_image)
-    topo = np.flipud(subtractMeanPlane(topo))  # first row = top scan line
+    topo = np.flipud(subtract_mean_plane(topo))  # first row = top scan line
     n = int(topo.shape[0])
     affine_q = transform["affine_q"]
     pad = transform["pad"]

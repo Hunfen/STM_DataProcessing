@@ -23,9 +23,11 @@ arrays (see ``stm_lf_correct.py``'s transform bundle) instead of 0-d datasets.
 This module is deliberately dependency-free: it imports only the standard
 library, ``numpy`` and ``h5py``, so the h5 products of the skill do not depend on
 the package's h5 module.  The skill's own, documented package dependency (the
-``bragg_peak`` / ``plot_funcs`` imports behind the ``--stm-lib`` path, and the
-guarded lazy ``preview_plot.gwyddion`` colour map in ``correction_lib.py`` /
-``lf_lib.py``) is untouched by this module.
+``bragg_peak`` import behind the ``--stm-lib`` path, and the guarded lazy
+``preview_plot.gwyddion`` colour map in ``correction_lib.py``) is untouched by
+this module.  The package's plotting-helper module is *not* part of that
+dependency: it imports ``nanonispy`` at module level, so the scripts that need
+its plane fit inline the same computation instead of importing it.
 """
 
 from __future__ import annotations

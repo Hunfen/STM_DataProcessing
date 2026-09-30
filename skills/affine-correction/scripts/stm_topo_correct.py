@@ -3,7 +3,7 @@
 Peak detection, sub-pixel localization and the symmetric positive-definite
 stretch ``M`` (pure stretch, no rotation) all come from
 ``stm_data_processing.utils.bragg_peak``; this script loads the matrix, applies
-the skill's preprocessing (``flipud(subtractMeanPlane(...))``, first row = top
+the skill's preprocessing (``flipud(subtract_mean_plane(...))``, first row = top
 scan line), states the reference lattice explicitly and writes the plots and the
 report.
 
@@ -85,6 +85,43 @@ PATCH_HALF = 8  # sub-pixel Gaussian patch half width: 8 -> 17x17 pixels
 # examples miss it by 42 % / 73 %, while the measured deviation of a correct fit is
 # at most a few percent.
 STRETCH_SCALE_TOL = 0.05
+
+
+def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
+    """Subtract the best-fit plane from ``matrix`` (NaN safe).
+
+    The same computation as the repository helper
+    ``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` -- same
+    ``meshgrid`` axes, same ``np.linalg.lstsq(..., rcond=None)`` call on the
+    finite pixels, same ``data - plane`` evaluation order -- inlined so that no
+    run of this skill imports ``plot_funcs``, which imports ``nanonispy`` at
+    module level (this skill reads its matrices through ``numpy`` and has no use
+    for that dependency).
+
+    Only finite pixels take part in the fit; the fitted plane is evaluated over
+    the whole image, so NaN pixels stay NaN and the finite region gets the usual
+    plane-subtracted result.  Fewer than three finite points cannot define a
+    plane: the input is returned unchanged (the repository helper reports that
+    through its logger, this one through stderr).
+    """
+    xdim, ydim = matrix.shape
+    y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        print(
+            f"WARNING: subtract_mean_plane: only {n_finite} finite point(s); "
+            f"cannot fit a plane, returning the input unchanged.",
+            file=sys.stderr,
+        )
+        return matrix.copy()
+    basis = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
+    coeffs, _, _, _ = np.linalg.lstsq(
+        basis[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
+    plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
+    return data - plane
 
 
 def parse_args(argv=None):
@@ -317,7 +354,6 @@ def main(argv=None):
         detect_bragg_peaks,
         load_image,
     )
-    from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
     csv_path = Path(args.input)
     outdir = Path(args.outdir) if args.outdir else csv_path.parent
@@ -330,7 +366,7 @@ def main(argv=None):
         log_lines.append(text)
 
     topo = load_matrix(csv_path, resolve_delimiter(args.delimiter), load_image)
-    topo = np.flipud(subtractMeanPlane(topo))  # first row = top scan line
+    topo = np.flipud(subtract_mean_plane(topo))  # first row = top scan line
 
     detection = detect_bragg_peaks(
         topo,
