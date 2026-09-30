@@ -77,6 +77,43 @@ THIRD_DIRECTION_INTERIOR_TOL_DEG = 2.0
 RESULTS: list[tuple[str, bool, str]] = []
 
 
+def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
+    """Subtract the best-fit plane from ``matrix`` (NaN safe).
+
+    The same computation as the repository helper
+    ``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` -- same
+    ``meshgrid`` axes, same ``np.linalg.lstsq(..., rcond=None)`` call on the
+    finite pixels, same ``data - plane`` evaluation order -- inlined so that no
+    run of this skill imports ``plot_funcs``, which imports ``nanonispy`` at
+    module level (the self-test compares the scripts' own frame, and it must be
+    able to run without that dependency).
+
+    Only finite pixels take part in the fit; the fitted plane is evaluated over
+    the whole image, so NaN pixels stay NaN and the finite region gets the usual
+    plane-subtracted result.  Fewer than three finite points cannot define a
+    plane: the input is returned unchanged (the repository helper reports that
+    through its logger, this one through stderr).
+    """
+    xdim, ydim = matrix.shape
+    y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        print(
+            f"WARNING: subtract_mean_plane: only {n_finite} finite point(s); "
+            f"cannot fit a plane, returning the input unchanged.",
+            file=sys.stderr,
+        )
+        return matrix.copy()
+    basis = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
+    coeffs, _, _, _ = np.linalg.lstsq(
+        basis[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
+    plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
+    return data - plane
+
+
 def check(name, ok, detail, threshold=""):
     RESULTS.append((name, bool(ok), detail))
     flag = "PASS" if ok else "FAIL"
@@ -351,11 +388,10 @@ def load_matrix(path):
 
 
 def preprocessed(path, stm_lib):
-    """The frame the scripts work in: flipud(subtractMeanPlane(loaded matrix))."""
+    """The frame the scripts work in: flipud(subtract_mean_plane(loaded matrix))."""
     sys.path.insert(0, str(stm_lib))
-    from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
-    return np.flipud(subtractMeanPlane(load_matrix(path)))
+    return np.flipud(subtract_mean_plane(load_matrix(path)))
 
 
 def main(argv=None):

@@ -123,11 +123,19 @@ def main(argv=None):
             f"checkout at {root}: {lf_script}"
         )
 
+    # The bundle path is resolved to an absolute path before it is handed to
+    # stm_lf_correct.py: that script records the ``.h5`` u-field next to the
+    # bundle and stores the path it was given verbatim in the bundle's
+    # ``u_field_file``, which Skill B reads relative to the bundle's directory.
+    # A relative ``--save-transform`` (or a relative ``-o`` with the default
+    # bundle name) would therefore be mis-resolved as
+    # ``<bundle-dir>/<that relative path>`` and step ⑤ would die with
+    # FileNotFoundError.
     bundle_json = (
         Path(args.save_transform)
         if args.save_transform
         else lf_dir / f"{topo_csv.stem}_transform.json"
-    )
+    ).resolve()
     cmd = [
         sys.executable,
         str(lf_script),

@@ -73,6 +73,43 @@ BUNDLE_SCHEMA_VERSION = 1
 DEFAULT_FOV_TOLERANCE = 1e-3
 
 
+def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
+    """Subtract the best-fit plane from ``matrix`` (NaN safe).
+
+    The same computation as the repository helper
+    ``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` -- same
+    ``meshgrid`` axes, same ``np.linalg.lstsq(..., rcond=None)`` call on the
+    finite pixels, same ``data - plane`` evaluation order -- inlined so that no
+    run of this skill imports ``plot_funcs``, which imports ``nanonispy`` at
+    module level (this skill reads its matrices through ``numpy`` and has no use
+    for that dependency).
+
+    Only finite pixels take part in the fit; the fitted plane is evaluated over
+    the whole image, so NaN pixels stay NaN and the finite region gets the usual
+    plane-subtracted result.  Fewer than three finite points cannot define a
+    plane: the input is returned unchanged (the repository helper reports that
+    through its logger, this one through stderr).
+    """
+    xdim, ydim = matrix.shape
+    y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        print(
+            f"WARNING: subtract_mean_plane: only {n_finite} finite point(s); "
+            f"cannot fit a plane, returning the input unchanged.",
+            file=sys.stderr,
+        )
+        return matrix.copy()
+    basis = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
+    coeffs, _, _, _ = np.linalg.lstsq(
+        basis[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
+    plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
+    return data - plane
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -199,7 +236,6 @@ def main(argv=None):
     args = parse_args(argv)
     sys.path.insert(0, args.stm_lib)
     from stm_data_processing.utils.bragg_peak import compute_fft2, load_image
-    from stm_data_processing.utils.plot_funcs import subtractMeanPlane
 
     csv_path = Path(args.input)
     bundle_path = Path(args.transform)
@@ -220,7 +256,7 @@ def main(argv=None):
     payload = bundle["payload"]
 
     topo = load_matrix(csv_path, resolve_delimiter(args.delimiter), load_image)
-    topo = np.flipud(subtractMeanPlane(topo))  # first row = top scan line
+    topo = np.flipud(subtract_mean_plane(topo))  # first row = top scan line
     n = int(topo.shape[0])
     reference_fov = float(payload["field_of_view_nm_reference"])
     fov_mismatch = abs(float(args.size_nm) - reference_fov) / max(reference_fov, 1e-12)

@@ -12,13 +12,15 @@ three preprocessing steps in this fixed order::
     3. z -= z.min()                               # min -> 0
 
 ``axis=1`` is the fast (X) axis, so each slow-scan line loses its own level.
-Step 2 calls the repository helper
-``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` (NaN safe) on the
-transposed matrix: transposing does not change the plane that gets fitted (the
-basis ``{1, i, j}`` spans the same surface either way), it only changes the
-last-digit rounding of the plane evaluation, and the transposed call is what
-reproduces the approved reference topography byte for byte once the convention
-flip below is undone.
+Step 2 uses this script's own ``subtract_mean_plane``: bit for bit the
+repository helper
+``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` (NaN safe), inlined
+on purpose because ``plot_funcs`` imports ``nanonispy`` at module level and this
+skill must run without that dependency.  It is called on the transposed matrix:
+transposing does not change the plane that gets fitted (the basis ``{1, i, j}``
+spans the same surface either way), it only changes the last-digit rounding of
+the plane evaluation, and the transposed call is what reproduces the approved
+reference topography byte for byte once the convention flip below is undone.
 
 **Orientation (top-down convention).**  A ``.3ds`` records its pixels
 bottom-up: in :mod:`stm_data_processing.io.nanonis_loader` the 3ds path walks a
@@ -67,13 +69,48 @@ os.environ.setdefault(
 import h5py
 import numpy as np
 
-from stm_data_processing.utils.plot_funcs import subtractMeanPlane
-
 #: ``/params`` column holding the tip height of each pixel.
 Z_COLUMN = "Z (m)"
 #: A grid file records its extent as one ``;``-separated record,
 #: ``x0;y0;width;height;angle`` (metres, radians); the width sits at index 2.
 GRID_SIZE_INDEX = 2
+
+
+def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
+    """Subtract the best-fit plane from ``matrix`` (NaN safe).
+
+    The same computation as the repository helper
+    ``stm_data_processing.utils.plot_funcs.subtractMeanPlane`` -- same
+    ``meshgrid`` axes, same ``np.linalg.lstsq(..., rcond=None)`` call on the
+    finite pixels, same ``data - plane`` evaluation order -- inlined so that no
+    grid-pipeline run imports ``plot_funcs``, which imports ``nanonispy`` at
+    module level (the grid pipeline reads ``.h5`` through ``h5py`` and has no
+    use for that dependency).
+
+    Only finite pixels take part in the fit; the fitted plane is evaluated over
+    the whole image, so NaN pixels stay NaN and the finite region gets the usual
+    plane-subtracted result.  Fewer than three finite points cannot define a
+    plane: the input is returned unchanged (the repository helper reports that
+    through its logger, this one through stderr).
+    """
+    xdim, ydim = matrix.shape
+    y, x = np.meshgrid(np.arange(ydim), np.arange(xdim))
+    data = np.asarray(matrix)
+    finite = np.isfinite(data)
+    n_finite = int(np.count_nonzero(finite))
+    if n_finite < 3:
+        print(
+            f"WARNING: subtract_mean_plane: only {n_finite} finite point(s); "
+            f"cannot fit a plane, returning the input unchanged.",
+            file=sys.stderr,
+        )
+        return matrix.copy()
+    basis = np.column_stack([x.ravel(), y.ravel(), np.ones_like(x.ravel())])
+    coeffs, _, _, _ = np.linalg.lstsq(
+        basis[finite.ravel()], data.ravel()[finite.ravel()], rcond=None
+    )
+    plane = coeffs[0] * x + coeffs[1] * y + coeffs[2]
+    return data - plane
 
 
 def parse_args(argv=None):
@@ -162,7 +199,7 @@ def load_z_map(h5_path: Path) -> np.ndarray:
 def preprocess(z: np.ndarray) -> np.ndarray:
     """The three preprocessing steps of this skill, in order (see the module docstring)."""
     z = z - np.median(z, axis=1, keepdims=True)
-    z = subtractMeanPlane(z.T).T
+    z = subtract_mean_plane(z.T).T
     return z - z.min()
 
 
