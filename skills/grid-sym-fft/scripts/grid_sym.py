@@ -7,8 +7,8 @@ names), and for every bias point of the grid runs the full chain::
 
     a. extract   each role = mean(forward channel, its [bwd] twin)
     b. raw FFT   F = fftshift(fft2(x)), x = map with NaN filled by nanmedian
-    c. correct   resample the map along the LF displacement field (flipud +
-                 resampling ONLY, target values untouched) -> corrected FFT
+    c. correct   resample the map along the LF displacement field (resampling
+                 ONLY, target values untouched) -> corrected FFT
     d. Z3        Z = (F + R120 F + R240 F)/3 in the complex domain, rotation
                  about the DC pixel (the only place the spectrum is rotated)
     e. C3(dc)    A = |F|; C3dc = (A + R120 A + R240 A)/3 (the only difference
@@ -17,9 +17,11 @@ names), and for every bias point of the grid runs the full chain::
 Every stage writes its data and an image (data next to image, one directory per
 quantity), and every FFT-producing stage writes complex128 ``_fft2.npy`` plus a
 ``log|...|`` plot.  The correction stage uses Skill A's transferable
-displacement-field bundle and only re-samples: ``corrected(r) = T(r + u(r))``
-after a coordinate-only ``flipud`` (see ``scripts/apply_lf_transform.py`` in
-the repo root for the convention).  It never touches the target values -- no
+displacement-field bundle and only re-samples: ``corrected(r) = T(r + u(r))``,
+with **no** flip of the target map: ``/data`` and ``/params`` are written on one
+flat pixel index, so a map read by channel name is already in the frame the u
+field lives in (see the "coordinate frames" section of ``SKILL.md`` and
+``apply_transform()``).  It never touches the target values -- no
 ``stm_lf_apply.py`` (that one removes a plane), only ``lf_lib.warp_by_field``.
 
 **Two-run color-scale protocol.**  The user looks at real candidate figures
@@ -375,13 +377,15 @@ def _energy_ratio(out: np.ndarray, ref: np.ndarray) -> float:
 
 
 def apply_transform(role_map: np.ndarray, size_nm: float, payload, u_nm, valid):
-    """flipud + resample along u -- never a value-domain change.
+    """Resample ``role_map`` along u -- never a value-domain change.
 
-    Mirrors ``scripts/apply_lf_transform.py``: the grid maps and the fitted
-    topography share one frame (``/data`` and ``/params`` were written from the
-    same flat pixel index), and the LF field is fitted on the top-down topo, so
-    the map is flipped into ``u``'s index frame before ``warp_by_field``.  That
-    flip is a coordinate convention, not a value operation.
+    No flip here.  The h5 ``/params`` and ``/data`` arrays share one flat pixel
+    index (row 0 is the smallest physical Y), and the LF displacement field is
+    fitted in exactly that frame: ``grid_topo.py`` flips the CSV it writes, and
+    ``stm_lf_correct.py`` flips it back before fitting, so ``u`` is defined on
+    the h5 frame the maps are read in.  Feeding ``warp_by_field`` a flipped map
+    would apply a mirrored u.  (``stm_lf_apply.py`` does flip its input, because
+    *its* input is the CSV frame, not the h5 frame.)
     """
     n = role_map.shape[0]
     reference_n = int(payload["n_px_reference"])
@@ -393,9 +397,8 @@ def apply_transform(role_map: np.ndarray, size_nm: float, payload, u_nm, valid):
         u_nm, valid = lf_lib.resample_field(
             u_nm, valid, reference_fov, n, float(size_nm)
         )
-    array = np.flipud(role_map)
     corrected, n_out, half, magnitude = lf_lib.warp_by_field(
-        array,
+        role_map,
         u_nm,
         float(size_nm),
         valid=valid,
@@ -416,7 +419,10 @@ def _logmag(F: np.ndarray) -> np.ndarray:
 
 def plot_matrix(fig, ax, mat, vmin, vmax, cmap="viridis", title=""):
     ax.set_title(title, fontsize=9)
-    im = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax, origin="upper")
+    # Same display convention as the Lawler-Fujita family
+    # (stm_lf_correct.py:1013/1029, stm_lf_apply.py:386/402): row 0 (the smallest
+    # physical Y) at the bottom, so corrected maps and the fitted topo agree.
+    im = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax, origin="lower")
     cbar = fig.colorbar(im, ax=ax, shrink=0.9)
     return im, cbar
 
@@ -718,7 +724,7 @@ class Pipeline:
                 )
 
     def run_correct(self, raw_maps, bias_meV):
-        """Stage c: correct every map (flipud+resample only) -> CSV+PNG+FFT."""
+        """Stage c: correct every map (resample only) -> CSV+PNG+FFT."""
         corrected = {}
         for role_desc in self.roles:
             role = role_desc["role"]

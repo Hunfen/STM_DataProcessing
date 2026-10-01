@@ -5,7 +5,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 # grid-sym-fft（grid → 角色抽取 → LF 位移场矫正 → 复数 FFT → Z3 / 绕 DC 的 C3，v1.0）
 
-**范围**：读取 grid `.h5`，给出全部 channel 及其 fwd/bwd 配对，由用户指定每个要抽的角色（如 `current` / `didv`，角色名自由）→ 每个角色 = 前向通道与其 `[bwd]` 配对取平均，每偏压一张 map → 用 **Skill A（`grid-lf-pipeline`）** 导出的可迁移位移场包做**只 flipud + 重采样、绝不改值域**的矫正 → 出矫正前/后的复数 FFT → 绕 DC 像素做 **Z3**（复数域）与 **C3**（先取幅度）三重对称化。第一组 FFT（b 阶段）之后**按角色各**生成 `--window-candidates` 张色标候选 + 该角色自己的 contact sheet 供用户挑选；选定后**同一角色**的所有 FFT 图共用该角色的窗口（**角色之间绝不共用**：`current` 与 `didv` 单位不同，log|F| 中位数相差 ~26，池化窗口会把一个角色整幅压到色标顶部、另一个压到底部）。**rmap / zmap 明确不在范围内**。
+**范围**：读取 grid `.h5`，给出全部 channel 及其 fwd/bwd 配对，由用户指定每个要抽的角色（如 `current` / `didv`，角色名自由）→ 每个角色 = 前向通道与其 `[bwd]` 配对取平均，每偏压一张 map → 用 **Skill A（`grid-lf-pipeline`）** 导出的可迁移位移场包做**只重采样、绝不改值域、也绝不翻转**的矫正（map 按名字从 `/data` 取出后已在位移场的帧里，见 §2.2「坐标系约定」） → 出矫正前/后的复数 FFT → 绕 DC 像素做 **Z3**（复数域）与 **C3**（先取幅度）三重对称化。第一组 FFT（b 阶段）之后**按角色各**生成 `--window-candidates` 张色标候选 + 该角色自己的 contact sheet 供用户挑选；选定后**同一角色**的所有 FFT 图共用该角色的窗口（**角色之间绝不共用**：`current` 与 `didv` 单位不同，log|F| 中位数相差 ~26，池化窗口会把一个角色整幅压到色标顶部、另一个压到底部）。**rmap / zmap 明确不在范围内**。
 
 本 skill **不拟合位移场**（那是 Skill A 的职责），也不修改 `skills/lawler-fujita-correction` 下任何文件——它按相对路径调用 `lawler-fujita-correction` 的 `lf_lib.warp_by_field`（与仓库根 `scripts/apply_lf_transform.py` 同一套只重采样逻辑）。脚本、log 与本文档都不给物理结论。
 
@@ -38,7 +38,36 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 > grid_channels.py **只打印映射**；真正的抽取在 `grid_sym.py`。
 
-### 2.2 `scripts/grid_sym.py`（抽取 → 矫正 → 复数 FFT → Z3 / C3）
+### 2.2 坐标系约定（**改 map 之前先读这一节**）
+
+四个产物（h5、topo CSV、位移场包 u、本 skill 的 map）之间的帧关系是固定的，写死如下（2026-10 用
+`/params` 的 X/Y 列做地面真值逐条实测）：
+
+| # | 事实 | 依据 |
+| --- | --- | --- |
+| 1 | h5 的 `/params` 与 `/data` **共用同一扁平索引**：行号沿物理 Y **递增**（`/params` 的 `Y (m)` 第 0 行最小、末行最大；实测列 0 从 +183.22 nm 单调升到 +212.20 nm） | `grid2h5` 的写盘顺序 |
+| 2 | `grid-lf-pipeline/scripts/grid_topo.py:196` 写 topo CSV 时 **flipud 一次**：CSV 帧 = h5 原始帧翻转（CSV 第一行 = 扫描顶行 = 最大 Y） | 代码 |
+| 3 | `lawler-fujita-correction/scripts/stm_lf_correct.py:629` 读 CSV 后**又 flipud 一次**才拟合 ⇒ **位移场 u 定义在 h5 原始帧**（`n_px_reference = 304` 就是该帧的画布） | 代码 |
+| 4 | 拟合产物按该内部帧**直接存**（`stm_lf_correct.py:983-984`）⇒ 输入 CSV 与输出 CSV 相差一次 flip；`stm_lf_apply.py:259` 对**它的**输入同样 flipud ⇒ 该工具期望的输入是**第 2 条那种 CSV 帧** | 代码 |
+| 5 | `grid_sym.py:extract_role_map()` 取 `/data` **不翻** ⇒ map 已经在 u 的帧里 ⇒ **喂给 `warp_by_field` 前不得再翻**（多翻一次 = 位移场被上下镜像施加；2026-10 实测同一物理标记在两条路径上相差 **276 px**，纯镜像应为 `n-1-2r = 263 px`） | 代码 + 标记注入实测 |
+
+一句话：**h5 原始帧 = 位移场帧；本 skill 全程不翻转**。CSV 帧（topo CSV / `stm_lf_apply.py` 的输入）
+与它差一次 flip，那是 Skill A 内部两条入口各自约定的事，与本 skill 无关。
+
+**显示约定**：实空间图与 FFT 图统一用 matplotlib `origin="lower"`（`plot_matrix()`，`grid_sym.py:425`），
+与 LF 家族一致（`stm_lf_correct.py:1013/1029`、`stm_lf_apply.py:386/402`）——即**数组第 0 行画在画布底部**，
+于是矫正后的 didv 图与矫正后的 topo 图朝向一致（同一物理标记在两张图里的相对行位置一致，实测差 0.56 %）。
+用 `origin="upper"`（旧行为）会让本 skill 的图与 LF 产物上下颠倒。
+
+**机械自检（标记法，不看图）**：造一张**零背景**的高斯标记图（σ=2 px，h5 帧行 `r`），把它按 h5 帧
+喂给 `apply_transform`，把它的 `flipud`（同一物理像素在 CSV 帧里的样子）喂给 `stm_lf_apply.py`，
+然后比两份 corrected CSV 里标记的**亚像素质心行**——必须相同（实测 11-15 与 11-08 都是 **0.000 px**，
+判据 ≤3 px）。零背景很关键：在真实 map 上做同样的事，标记与图自身结构混在一起，centroid 会偏几个像素，
+把量测误差误读成帧差。把 `np.flipud` 加回 `apply_transform` 后必须重新出现镜像量 `n-1-2r`
+（本仓库 11-15：`r=20, n=304` → 263 px 的纯镜像、实测 276.19 px，多出的 13 px 是 u 在两个位置上的差异），
+否则这条自检是空转。完整可跑版本见 §8 第 7 条。
+
+### 2.3 `scripts/grid_sym.py`（抽取 → 矫正 → 复数 FFT → Z3 / C3）
 
 ```bash
 # 第一次运行：先出色标候选（a+b + 候选 + contact sheet），exit 0
@@ -64,7 +93,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 **b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充）；`F = np.fft.fftshift(np.fft.fft2(x))`，complex128 存 npy；出 `log|F|` 图。这一组图后面跟色标候选。
 
-**c. 矫正**：用 `--transform` 指向的位移场包矫正每个角色每张 map，**只 flipud + 重采样、绝不改值域**（禁止调用会去平面的 `stm_lf_apply.py`；走 `lawler-fujita-correction` 的 `lf_lib.warp_by_field` 或仓库根 `scripts/apply_lf_transform.py` 这条只重采样的路）。画布按 `2*half` 增长（`half = ceil(max|u|) + pad`）。写 corrected CSV + PNG + 该阶段自己的复数 FFT + `log|F|` 图。
+**c. 矫正**：用 `--transform` 指向的位移场包矫正每个角色每张 map，**只重采样、绝不改值域、也绝不翻转**（map 按名字从 `/data` 取出后已经在位移场的帧里，见 §2.2「坐标系约定」；禁止调用会去平面的 `stm_lf_apply.py`，只走 `lawler-fujita-correction` 的 `lf_lib.warp_by_field`）。画布按 `2*half` 增长（`half = ceil(max|u|) + pad`）。写 corrected CSV + PNG + 该阶段自己的复数 FFT + `log|F|` 图。
 
 **d. Z3**：对每张矫正后 map 的 `F`，`Z = (F + R120 F + R240 F)/3` 在**复数域**做，旋转**绕 DC 像素**：`R` 为平面内 120/240 度旋转矩阵，`offset = c - R c`，`c = fftshift 后 DC 的像素坐标（浮点，偶数 N 时为 N/2）`，`scipy.ndimage.affine_transform(matrix=R, offset=c-R c, order=3, mode='nearest')`。存 complex128 npy + `log|Z|` 图，log 报 DC 保留（应为 1.0000）、三重残差输出/输入之比、能量比。
 
@@ -121,7 +150,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 **位移场包从哪来**：先跑 Skill A `grid_lf_fit.py <stem>_topo.csv -L <nm> -o <out>/lf`，得到 `<out>/lf/<stem>_transform.json + .h5`；把该目录（或该 json 文件）交给本 skill 的 `--transform`。
 
-**为什么是「只重采样」**：`apply_lf_transform.py`（与本 skill 同一套 `warp_by_field` 用法）只做 `flipud`（坐标约定，非值操作）+ `out(r)=T(r+u(r))`，从不减平面/去均值/归一化；`stm_lf_apply.py` 会减拟合平面，`corrected(r)=T(r+u(r))` 只是 Skill A 自己的复现路径，**迁移到别的 map 时禁止用**——否则目标图自己的 DC 电平与倾斜会被抹掉（实测对 +100 pA / 线性斜坡输入输出差仅 ~1e-22）。本 skill 矫正后 map 的值域与原图一致（例如 current 通道仍 ~5e-10 A 电平）。
+**为什么是「只重采样」**：本 skill 的 c 阶段只做 `out(r)=T(r+u(r))`（`lf_lib.warp_by_field`），从不减平面/去均值/归一化，也不翻转（0 次 flipud，见 §2.2）；仓库根 `scripts/apply_lf_transform.py` 面向的是 topo CSV 那种帧，它那一次 `flipud` **不适用于本 skill**（本 skill 直接按名字从 `/data` 取名，不经过 topo CSV）。`stm_lf_apply.py` 会减拟合平面，`corrected(r)=T(r+u(r))` 只是 Skill A 自己的复现路径，**迁移到别的 map 时禁止用**——否则目标图自己的 DC 电平与倾斜会被抹掉（实测对 +100 pA / 线性斜坡输入输出差仅 ~1e-22）。本 skill 矫正后 map 的值域与原图一致（例如 current 通道仍 ~5e-10 A 电平）。
 
 ## 5 两次运行交互协议
 
@@ -232,6 +261,49 @@ EOF
 # 6) 候选图可见性（PIL，绝不靠肉眼）：每张候选图在坐标区内
 #    端点（饱和）像素 < 5 %，且落在窗口中间 80 % 区间内的像素 ≥ 50 %
 #    （坐标区取 matplotlib 同一 figure 几何的 ax.get_window_extent()）
+
+# 7) 坐标系（标记法，不看图）：同一物理标记在本 skill 的 corrected CSV 与
+#    LF 家族 apply 工具的 corrected CSV 里必须落在**同一行**（≤3 px）。
+#    末行会打印镜像量 n-1-2r —— 把 np.flipud 加回 apply_transform 后必须重新
+#    出现这个镜像量，否则这条自检是空转。
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - GRID.h5 OUT/SkillA/lf /tmp/out_frame 30 304 <<'EOF'
+import subprocess, sys
+from pathlib import Path
+import numpy as np
+h5, lfdir, work, L, n = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), float(sys.argv[4]), int(sys.argv[5])
+work.mkdir(parents=True, exist_ok=True)
+bundle = sorted(lfdir.glob("*_transform.json"))[0]
+sys.path.insert(0, "skills/grid-sym-fft/scripts")
+import grid_sym as gs
+
+ROW, COL = 20, 152
+rows, cols = np.mgrid[:n, :n]
+blob = np.exp(-(((rows - ROW) ** 2 + (cols - COL) ** 2) / (2 * 2.0 ** 2)))
+payload, u_nm, valid, _ = gs.load_transform(gs.resolve_transform(str(bundle)))
+size_nm = gs._scan_size_nm(h5)
+
+
+def cen(img):                                # sub-pixel marker row (zeros background)
+    v = np.where(np.isfinite(img), img, 0.0)
+    w = np.clip(v - 0.05 * v.max(), 0.0, None)
+    rr = np.mgrid[: v.shape[0], : v.shape[1]][0]
+    return float((rr * w).sum() / w.sum())
+
+
+a, n_out, half, _ = gs.apply_transform(blob, size_nm, payload, u_nm, valid)
+csv = work / "marker.csv"                    # the same physical pixel in the CSV frame
+np.savetxt(csv, np.flipud(blob), delimiter=",", fmt="%.10e")   # that stm_lf_apply expects
+subprocess.run([sys.executable, "skills/lawler-fujita-correction/scripts/stm_lf_apply.py",
+                str(csv), "--transform", str(bundle), "-L", f"{size_nm:g}",
+                "-o", str(work / "lf")], check=True)
+l = np.loadtxt(work / "lf" / f"marker_corrected.csv", delimiter=",")
+ra, rl = cen(a), cen(l)
+print(f"marker row: grid_sym.apply_transform {ra:.3f}  stm_lf_apply {rl:.3f}  "
+      f"|delta| = {abs(ra - rl):.3f} px")
+print(f"mirror amount if a flip is (re)introduced: n-1-2*ROW = {n - 1 - 2 * ROW} px")
+assert abs(ra - rl) <= 3, "frames disagree: the map must NOT be flipped before warp_by_field"
+print("frame check ok (the map and u share the h5 frame)")
+EOF
 ```
 
 
