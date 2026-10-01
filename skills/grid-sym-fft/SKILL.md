@@ -145,7 +145,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 候选窗口按 `vmin% + (100 − vmax)% < 5 %` 选（index 0 最宽、index 8 对比最强），即任何一档的端点压死像素都 < 5 %——整幅一个颜色的候选图没有信息，用户看不了。**注意**：这条约束不允许 "vmin = p50" 那类深背景风格（会有 50 % 像素压在底端），要那种观感请用 `--fft-window-role` 显式给窗口。
 
-用户选定后用 `--pick-window K`（读上一轮的候选表；**`K` 是每个角色各自候选表的 `index`，0-based，即该角色目录下 `window_{K:02d}.png` 的编号**，合法范围 `0 <= K < N`），或 `--fft-window-role ROLE VMIN VMAX`（可重复，按角色给显式窗口），或 `--fft-window VMIN VMAX`（= 同一对数值套给所有角色）重跑，写入 `<OUTDIR>/fft_window.json`（格式 `{"window_version": 2, "roles": {<role>: {vmin, vmax}}}`）；此后每个角色自己的所有 FFT 图（fft_raw / fft_corrected / z3 / c3dc）用**该角色**的窗口。已存在 `fft_window.json` 时：**给了任一显式入口就覆盖它**（并打一行 NOTE 说明被覆盖的旧值与生效的入口，见 §5），**没给显式入口才复用**（幂等）；若是旧的单窗口格式（无 `roles` 键）则警告后套给所有角色。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
+用户选定后用 `--pick-window K`（读上一轮的候选表；**`K` 是每个角色各自候选表的 `index`，0-based，即该角色目录下 `window_{K:02d}.png` 的编号**，合法范围 `0 <= K < N`），或 `--fft-window-role ROLE VMIN VMAX`（可重复，按角色给显式窗口），或 `--fft-window VMIN VMAX`（= 同一对数值套给所有角色）重跑，写入 `<OUTDIR>/fft_window.json`（格式 `{"window_version": 2, "roles": {<role>: {vmin, vmax}}}`）；此后每个角色自己的所有 FFT 图（fft_raw / fft_corrected / z3 / c3dc）用**该角色**的窗口。候选模式**优先于**盘上的选择：`--window-candidates N` 永远重算候选并覆盖候选表（覆盖时打 NOTE），不受 `fft_window.json` 影响；候选表若没有基准字段（t16 以前的旧表），`--pick-window` 会打一行 NOTE 说明"该表未记录基准、其窗可能在另一套平面上定标"——不再把未知当成已知。已存在 `fft_window.json` 时：**给了任一显式入口就覆盖它**（并打一行 NOTE 说明被覆盖的旧值与生效的入口，见 §5），**没给显式入口才复用**（幂等）；若是旧的单窗口格式（无 `roles` 键）则警告后套给所有角色。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
 
 ### 2.5 空间窗（FFT 前对 map 加窗，默认 hamming；两套并存）
 
@@ -161,7 +161,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | Z3/C3dc | 两套各自从**自己那个 F** 出发：无窗 `z3_symmetrize(F)`、加窗 `z3_symmetrize(F_W)`（C3dc 同理，`C3dc = (|F| + R120|F| + R240|F|)/3`）。绝不拿无窗的 F 去算加窗的 Z3 |
 | 色标 | 两套共用**该角色已选的同一个色标窗**（K 档或 `fft_window.json`）；加窗平面**不重算**窗口。因为候选按当前空间窗生成，色标窗对**加窗**套是对口径的，**无窗（pure）套反而是离基准的那一套**：每族每偏压打一行 `fft window clip ...`（加窗 vs 无窗的端点压死比例与总差），> 0.5 pp 再打一行 warning 指明哪一套离基准（实测 `current` 首张 bias 两套相差 +9.2 pp） |
 | 记录 | `fft_window.json` 新增 `spatial_window` 段：`{"name", "suffix", "taps", "files"}`，`files` 是本次**实际写出的加窗文件清单**（相对 `<OUT>`）；`pipeline.log` 也有一行。`roles`（色标窗）语义不变 |
-| 候选基准 | 候选表与候选图**跟随当前空间窗**（默认 hamming；`--spatial-window none` 时即无窗平面）。表里每档给两列：`plane_<win>%`（画布口径，与最终图一致）与 `plane_none%`（同一档窗在无窗平面上的数字，供对照） |
+| 候选基准 | 候选表与候选图**跟随当前空间窗**（默认 hamming；`--spatial-window none` 时即无窗平面），且**按值可验**：`fft_window_candidates.json` 顶层写 `candidate_basis`（= 本次空间窗名，`spatial_window.candidate_basis` 同值），其 `roles.<role>.pooled_log_p50` 必须等于**从该套 `*_fft2[_<win>].npy` 独立算出的 p50**、且**不等于**另一套的 p50（§8 第 10 条）。表里每档给两列：`plane_<win>%`（画布口径，与最终图一致）与 `plane_none%`（同一档窗在无窗平面上的数字，供对照） |
 | 记录 | `fft_window.json` 属**配置记录**：`{"name", "suffix", "candidate_basis", "taps", "files"}`；`candidate_basis` 记候选表所用基准（正常等于 `name`；若用另一个 `--spatial-window` 挑的窗则不同并打印 NOTE）。**该文件允许字节变化**——t14 那条"逐字节不变"的要求自此只适用于数据数组（`.csv`/`.npy`）与图，不适用于这个 JSON。它是"上一次选择的记录"，不是权威：显式命令行入口一律覆盖它（§5 第 3 条） |
 
 与用户旧目录名的对应关系（本 skill 一个 `<OUT>` 同时含两套，不再分目录）：
@@ -214,9 +214,9 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 ## 5 两次运行交互协议
 
-1. **跑 `--window-candidates N`** → 出 a+b + **每个角色** N 张候选 + 该角色的 contact sheet + 按角色分组的候选表，缓存到 `fft_window_candidates.json`，**exit 0**。
+1. **跑 `--window-candidates N`** → 出 a+b + **每个角色** N 张候选 + 该角色的 contact sheet + 按角色分组的候选表，缓存到 `fft_window_candidates.json`，**exit 0**。**候选模式无条件重算**：目录里已有 `fft_window.json`（或旧候选表）也照跑候选分支（2026-10 修——之前会被「复用已保存窗」静默压过，整条命令变成 no-op、exit 0、什么都不写），覆盖旧候选表时打一行 `# NOTE: … is recomputed and overwritten by --window-candidates N (basis --spatial-window …)`，并另打一行说明 `fft_window.json` 不被本次运行触碰（由下一次 `--pick-window`/`--fft-window*` 覆盖）。
 2. **用户从候选表挑编号 K** → **跑 `--pick-window K`**（每个角色各取自己第 K 档），或按角色给显式窗口 `--fft-window-role ROLE VMIN VMAX`（可重复）→ 写 `fft_window.json`，出全套 a+b+c+d+e。
-3. **优先级：显式命令行 > 盘上的 `fft_window.json`**（2026-10 修，之前是文件优先，导致 `--pick-window` 被静默忽略）：
+3. **优先级：候选模式 > 显式命令行 > 盘上的 `fft_window.json`**（2026-10 修，之前是文件优先，导致 `--pick-window` 与 `--window-candidates` 双双被静默忽略）：**候选模式 `--window-candidates N` 排在最前**——它是一次「重做候选」的请求，盘上已有的选择不能拦它；而它与三条显式窗入口**互斥**（同时给即 fail-closed，见 §6），因为候选运行出表后就 exit，与「跑全套」是两件事。
    - 给任一条显式入口（`--pick-window K` / `--fft-window VMIN VMAX` / `--fft-window-role ROLE VMIN VMAX`）→ **忽略并覆盖**盘上的文件，写回新选择，并打印/记录一行
      `# NOTE: <outdir>/fft_window.json existed with <旧值>; overridden by <入口> (the file is rewritten with this selection)` 到 stdout 与 `pipeline.log`；
    - 不给显式入口 + 盘上有文件 → 直接复用（幂等），全套照跑（旧值原样保留，不打印 NOTE）；
@@ -234,6 +234,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | h5 缺 `/params` 的 `Z (m)` 列 | 报错，退出非零 |
 | 尚未选窗却要求出全套（无 `fft_window.json`，又未给 `--pick-window`/`--fft-window`/`--fft-window-role`） | 提示先跑 `--window-candidates`，退出非零 |
 | 盘上有 `fft_window.json` **且** 给了显式入口 | 不报错：覆盖并打印 `# NOTE: ... overridden by <入口>`（§5 第 3 条） |
+| `--window-candidates N` 与 `--pick-window`/`--fft-window`/`--fft-window-role` 同时给 | 报错退出非零（候选运行只出表就 exit，与「跑全套」矛盾；先跑候选再 pick） |
 | `--pick-window K` 但候选表不存在 / K 越界 | 报错，退出非零 |
 | `--pick-window K` 但候选表是**池化时代**的旧格式（无 `roles` 键） | 报错并提示重跑 `--window-candidates N`（旧窗口对每个角色都是错的），退出非零 |
 | `--fft-window-role ROLE ...` 的 ROLE 不在本次 `--map` 里 | 报错并列出本次角色，退出非零 |
@@ -444,6 +445,41 @@ for role, fwd, bwd in (("current", "Current (A)", "Current [bwd] (A)"),
     print(f"fft_raw {role}: |mine - {win}| / max|F| = {rel:.3e}")
     assert rel == 0.0, "windowed FFT must reproduce bit for bit from the h5 map"
 print("spatial window check ok")
+EOF
+```
+# 10) 候选基准必须按【值】自证（不要拿实现自己读的那批数组复算——那是同源自证）
+#     判据：fft_window_candidates.json 顶层 candidate_basis == 本次 --spatial-window；
+#     且 roles.<role>.pooled_log_p50 == 从【该套】*_fft2[_<win>].npy 独立算出的 p50（≤1e-6），
+#     并 != 从另一套算出的 p50。附：用同一批 vmin/vmax 重渲染两套，产物 PNG 应与基准那套逐字节相同。
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - /tmp/out hamming <<'EOF'
+import json, sys
+from pathlib import Path
+import numpy as np
+run, win = Path(sys.argv[1]), sys.argv[2]
+table = json.loads((run / "fft_window_candidates.json").read_text())
+assert table.get("candidate_basis") == win, (table.get("candidate_basis"), win)
+def pooled(w):
+    files = sorted((run / "fft_raw" / role).glob(
+        "*_fft2.npy" if w == "none" else f"*_fft2_{w}.npy"))
+    if not files:
+        return np.zeros(0)                      # the other set may not exist
+    vals = [np.log(np.abs(np.load(p))) for p in files]
+    return np.concatenate([v[np.isfinite(v)] for v in vals])
+for role in table["roles"]:
+    a = table["roles"][role]["pooled_log_p50"]
+    b = float(np.percentile(pooled(win), 50))
+    other = "none" if win != "none" else "hamming"
+    cross = pooled(other)          # a none-run holds no hamming planes (and vice versa)
+    if cross.size:
+        c = float(np.percentile(cross, 50))
+        print(f"{role}: table {a!r} vs mine({win}) {b!r} |d|={abs(a - b):.3e} ; "
+              f"mine({other}) {c!r} |d|={abs(a - c):.3e}")
+        assert abs(a - c) > 1e-3, "the basis cannot be distinguished from the other set"
+    else:
+        print(f"{role}: table {a!r} vs mine({win}) {b!r} |d|={abs(a - b):.3e} ; "
+              f"({other} planes absent in this run, cross-check skipped)")
+    assert abs(a - b) <= 1e-6, "the table is NOT built on the basis planes"
+print("candidate basis check ok (value-based)")
 EOF
 ```
 

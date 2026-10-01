@@ -1161,7 +1161,18 @@ def main(argv=None):
         or args.fft_window is not None
         or bool(args.fft_window_role)
     )
-    override_note = None
+    # ``--window-candidates N`` is a request to REDO the table, so it takes
+    # priority over the saved selection too: letting the on-disk fft_window.json
+    # win made the whole candidate run a silent no-op (exit 0, nothing written).
+    candidates_mode = args.window_candidates is not None
+    if candidates_mode and explicit:
+        raise SystemExit(
+            "ERROR: --window-candidates N cannot be combined with --pick-window / "
+            "--fft-window / --fft-window-role: the candidate run exits before the "
+            "full chain (it only produces the table to pick from).  Run "
+            "--window-candidates N first, then --pick-window K."
+        )
+    pre_notes = []
     if explicit and window_file.is_file():
         try:
             previous = json.loads(window_file.read_text())
@@ -1205,11 +1216,27 @@ def main(argv=None):
             ]
             entry = " + ".join(parts)
             suffix = ""
-        override_note = (
+        pre_notes.append(
             f"# NOTE: {window_file} existed with {was}; overridden by {entry}{suffix} "
             f"(the file is rewritten with this selection)"
         )
-    if window_file.is_file() and not explicit:
+    if candidates_mode:
+        cand_file = outdir / CANDIDATES_FILE
+        if cand_file.is_file():
+            pre_notes.append(
+                f"# NOTE: {cand_file} is recomputed and overwritten by "
+                f"--window-candidates {args.window_candidates} "
+                f"(basis --spatial-window {args.spatial_window})"
+            )
+        if window_file.is_file():
+            pre_notes.append(
+                f"# NOTE: {window_file} exists and is left untouched by the "
+                f"candidate run; the next --pick-window / --fft-window* run "
+                f"overwrites it with the new selection"
+            )
+        mode = "candidates"
+        windows = {r: {"vmin": None, "vmax": None} for r in role_names}
+    elif window_file.is_file() and not explicit:
         saved = json.loads(window_file.read_text())
         if "roles" in saved:
             windows = {r: dict(w) for r, w in saved["roles"].items()}
@@ -1293,9 +1320,6 @@ def main(argv=None):
                 f"VMIN VMAX (all roles) or --fft-window-role ROLE VMIN VMAX"
             )
         mode = "full"
-    elif args.window_candidates is not None:
-        mode = "candidates"
-        windows = {r: {"vmin": None, "vmax": None} for r in role_names}
     else:
         raise SystemExit(
             "ERROR: no FFT color window selected and none on disk. Run "
@@ -1330,11 +1354,24 @@ def main(argv=None):
             doc = {}
         except ValueError:  # json.JSONDecodeError is a ValueError
             doc = {}
-        candidate_basis = doc.get("spatial_window", {}).get("name", args.spatial_window)
-        if candidate_basis != args.spatial_window:
+        # flat key first (t18), then the nested block (t16); a table written
+        # before either carries no basis at all -- then the basis is unknown and
+        # the reader must be told rather than silently assumed to match
+        recorded = doc.get("candidate_basis")
+        if recorded is None:
+            recorded = doc.get("spatial_window", {}).get("name")
+        if recorded is None:
             print(
-                f"# NOTE: the colour window was picked from candidates built on the "
-                f"{candidate_basis!r} planes, but this run draws "
+                f"# NOTE: {cand_file} carries no candidate_basis field (written "
+                f"before the basis was recorded); its windows may have been "
+                f"calibrated on another spatial window than "
+                f"{args.spatial_window!r}"
+            )
+        elif recorded != args.spatial_window:
+            candidate_basis = recorded
+            print(
+                f"# NOTE: the colour window was picked from candidates built on "
+                f"the {candidate_basis!r} planes, but this run draws "
                 f"{args.spatial_window!r} planes"
             )
 
@@ -1350,8 +1387,8 @@ def main(argv=None):
         spatial_window=args.spatial_window,
         candidate_basis=candidate_basis,
     )
-    if override_note:
-        pipe.log(override_note)
+    for note in pre_notes:
+        pipe.log(note)
 
     # stages a + b always run first (extraction + raw FFT)
     raw_maps, bias_meV = pipe.run_extract()
@@ -1456,6 +1493,9 @@ def main(argv=None):
             )
         saved = {
             "source": str(src),
+            # flat, unambiguous basis marker: the planes this table was built on
+            # (asserted by value in SKILL.md 8/10)
+            "candidate_basis": args.spatial_window,
             "spatial_window": {
                 "name": args.spatial_window,
                 "candidate_basis": args.spatial_window,
