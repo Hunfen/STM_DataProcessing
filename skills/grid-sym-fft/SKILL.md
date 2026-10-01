@@ -102,15 +102,22 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 .venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
     --map ... --transform <...> -o OUT \
     --fft-window-role current -22.5 -17 --fft-window-role didv 4 9
-# --fft-window VMIN VMAX 仍可用，语义 = 同一对数值套给**所有**角色
-# （只在角色单位恰好一致时才是想要的；否则必然有一个角色被压死）
+# 或显式指定空间窗（默认 hamming；独立 flag，见 §2.5）
+.venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
+    --map ... --transform <...> -o OUT --spatial-window hanning   # none | hamming | hanning
+# 两个 flag 各管一件事，不共用：
+#   --spatial-window {none,hamming,hanning}  数据窗（fft2 之前乘 2D 窗）
+#   --fft-window VMIN VMAX                   色标窗，**必须两个浮点数**（套给所有角色；
+#                                            角色单位不同，推荐 --fft-window-role）
+# 单 token 的 --fft-window（例如 --fft-window 3）会 fail-closed（exit 2）并提示改用
+# --spatial-window——一个 flag 两种含义曾在脚本/文档/会话里反复咬人。
 ```
 
 按下列顺序执行，**每一步都写数据 + 图 + log，且每一步都配 FFT**：
 
 **a. 抽取**：每个角色 = 前向通道与其同名 `[bwd]` 配对（`Current (A)` ↔ `Current [bwd] (A)`）取平均，每偏压一张 map（bias 标签从 `/bias` 读，遍历全部 bias 点；配对规则与两个名字、两个索引都写进 log）。写 CSV + PNG（**实空间图 = viridis**，窗口 = 该图 `nanmedian ± 5σ`，窗口数值写进 log；画法见 §2.3）。CSV 必须等于两方向平均（可用 `/data` 的 fwd/bwd 两片独立复算核对；只取前向时差可达 ~1e-10 量级）。
 
-**b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充）；`F = np.fft.fftshift(np.fft.fft2(x))`，complex128 存 npy；出 `log|F|` 图（**FFT 图 = plasma**，见 §2.3）。这一组图后面跟色标候选。
+**b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充），**再加空间窗** `x*W`（`W = outer(w,w)`、`w = np.hamming(n)` 或 `np.hanning(n)`，见 §2.5；`--spatial-window none` 时 `W` 不存在）；`F = np.fft.fftshift(np.fft.fft2(x*W))`，complex128 存 npy；出 `log|F|` 图（**FFT 图 = plasma**，见 §2.3）。**每个偏压写两套**：无窗（既有文件名）+ 加窗（名字带窗名后缀）。这一组图后面跟色标候选（**候选与候选图按当前空间窗的平面算**，见 §2.5）。
 
 **c. 矫正**：用 `--transform` 指向的位移场包矫正每个角色每张 map，**只重采样、绝不改值域、也绝不翻转**（map 按名字从 `/data` 取出后已经在位移场的帧里，见 §2.2「坐标系约定」；禁止调用会去平面的 `stm_lf_apply.py`，只走 `lawler-fujita-correction` 的 `lf_lib.warp_by_field`）。画布按 `2*half` 增长（`half = ceil(max|u|) + pad`）。写 corrected CSV + PNG + 该阶段自己的复数 FFT + `log|F|` 图。
 
@@ -118,7 +125,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 **e. 绕 DC 的 C3**：先取幅度 `A = |F|`，再同样绕 DC 像素转 120/240 并平均 `C3dc = (A + R120 A + R240 A)/3`（与 Z3 **唯一区别就是先取模**）。存 npy + `log|C3dc|` 图。三次插值振铃会给出少量负值，故 log 用 `log|C3dc|`，并把负值个数与相对幅度记进 log。
 
-**f. 色标（按角色，永不跨角色池化）**：第一组（b 阶段）FFT 图之后，**对每个角色各**生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 该角色自己的一张 contact sheet，落在 `<OUT>/window_candidates/<role>/`。每个角色的候选窗口取自**该角色自己**的 log|F| 分布（该角色全部 bias 平面的并集），因此 current 一套（~−24…−15）、didv 一套（~+2.5…+10.5）互不影响。候选必须同画布尺寸（PIL 断言全部一致）。
+**f. 色标（按角色，永不跨角色池化）**：第一组（b 阶段）FFT 图之后，**对每个角色各**生成 `--window-candidates N` 张（**N 必填：该参数没有默认值**）不同 vmin/vmax 的候选 + 该角色自己的一张 contact sheet，落在 `<OUT>/window_candidates/<role>/`。每个角色的候选窗口取自**该角色自己**的 log|F| 分布（**当前空间窗**下该角色全部 bias 平面的并集），因此 current 一套（~−24…−15）、didv 一套（~+2.5…+10.5）互不影响。候选必须同画布尺寸（PIL 断言全部一致）。**候选表与候选图都建立在当前空间窗的平面上**（默认 hamming），所以「你看到的候选 == 最终画布」；同一档窗在**无窗平面**上的数字也同时印出（`plane_none%` 列）供对照。
 
 **窗口与图是两个口径，表里必须分开印（2026-10 修）**：窗口的 vmin/vmax 是该角色**并集分布**的分位数（选窗要用它，因为窗口要套到该角色所有 bias 平面），而候选**图**只能画其中一张 plane——为此取该角色中分位数向量（p0.5/p50/p99.5）最接近其并集分布的那张偏压平面（表里记 `representative_bias_index` / `representative_bias_meV`）。两者会有小幅漂移，所以候选表对每档同时给两套数字，**字段名带口径后缀，禁止同名不同义**：
 
@@ -138,21 +145,55 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 候选窗口按 `vmin% + (100 − vmax)% < 5 %` 选（index 0 最宽、index 8 对比最强），即任何一档的端点压死像素都 < 5 %——整幅一个颜色的候选图没有信息，用户看不了。**注意**：这条约束不允许 "vmin = p50" 那类深背景风格（会有 50 % 像素压在底端），要那种观感请用 `--fft-window-role` 显式给窗口。
 
-用户选定后用 `--pick-window K`（读上一轮的候选表；**`K` 是每个角色各自候选表的 `index`，0-based，即该角色目录下 `window_{K:02d}.png` 的编号**，合法范围 `0 <= K < N`），或 `--fft-window-role ROLE VMIN VMAX`（可重复，按角色给显式窗口），或 `--fft-window VMIN VMAX`（= 同一对数值套给所有角色）重跑，写入 `<OUTDIR>/fft_window.json`（格式 `{"window_version": 2, "roles": {<role>: {vmin, vmax}}}`）；此后每个角色自己的所有 FFT 图（fft_raw / fft_corrected / z3 / c3dc）用**该角色**的窗口。已存在 `fft_window.json` 时直接读取复用（幂等）；若是旧的单窗口格式（无 `roles` 键）则警告后套给所有角色。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
+用户选定后用 `--pick-window K`（读上一轮的候选表；**`K` 是每个角色各自候选表的 `index`，0-based，即该角色目录下 `window_{K:02d}.png` 的编号**，合法范围 `0 <= K < N`），或 `--fft-window-role ROLE VMIN VMAX`（可重复，按角色给显式窗口），或 `--fft-window VMIN VMAX`（= 同一对数值套给所有角色）重跑，写入 `<OUTDIR>/fft_window.json`（格式 `{"window_version": 2, "roles": {<role>: {vmin, vmax}}}`）；此后每个角色自己的所有 FFT 图（fft_raw / fft_corrected / z3 / c3dc）用**该角色**的窗口。已存在 `fft_window.json` 时：**给了任一显式入口就覆盖它**（并打一行 NOTE 说明被覆盖的旧值与生效的入口，见 §5），**没给显式入口才复用**（幂等）；若是旧的单窗口格式（无 `roles` 键）则警告后套给所有角色。尚未选窗时只做 a+b 并退出 0，提示用户选窗后重跑。
+
+### 2.5 空间窗（FFT 前对 map 加窗，默认 hamming；两套并存）
+
+用户旧流程的参考目录里同时存在无窗与加窗变体（`didv_corrected_upscaling_fft_C3dc_hamming/`、
+`didv_corrected_upscaling_fft_hamming/`、`corrected_didv_fft_hamming/`、
+`didv_corrected_upscaling_fft_Z3/{pure,hanning,hamming}_z3/`），本 skill 因此**每张 map 出两套**。
+
+| 项 | 约定 |
+| --- | --- |
+| 窗函数 | `--spatial-window {none,hamming,hanning}`（**独立 flag**，不与 `--fft-window` 共用），**默认 hamming**；`none` = 历史行为（只有无窗那套，逐字节不变）。作用位置：`F = fftshift(fft2(x * W))`，即窗加在 **fft2 之前**的空间域（不是频域滤波） |
+| 1D/2D | `W = np.outer(w, w)`，`w = np.hamming(n)`（或 `np.hanning(n)`），`n` = 该阶段的输入画布边长：`fft_raw` 用 map 边长（本例 304），`fft_corrected`/`z3`/`c3dc` 用矫正画布边长（本例 350）。窗永远作用在 **NaN 填充之后**的图上 |
+| 命名 | 无窗那套**文件名不变**：`<label>_fft2.npy`、`<label>_fft.png`。加窗那套在**同一目录**下加窗名：`<label>_fft2_hamming.npy`、`<label>_fft_hamming.png`（`--spatial-window hanning` 时后缀是 `_hanning`）。四个族（`fft_raw`/`fft_corrected`/`z3`/`c3dc`）都如此——族由**目录**区分、窗由**文件名后缀**区分，无歧义 |
+| Z3/C3dc | 两套各自从**自己那个 F** 出发：无窗 `z3_symmetrize(F)`、加窗 `z3_symmetrize(F_W)`（C3dc 同理，`C3dc = (|F| + R120|F| + R240|F|)/3`）。绝不拿无窗的 F 去算加窗的 Z3 |
+| 色标 | 两套共用**该角色已选的同一个色标窗**（K 档或 `fft_window.json`）；加窗平面**不重算**窗口。因为候选按当前空间窗生成，色标窗对**加窗**套是对口径的，**无窗（pure）套反而是离基准的那一套**：每族每偏压打一行 `fft window clip ...`（加窗 vs 无窗的端点压死比例与总差），> 0.5 pp 再打一行 warning 指明哪一套离基准（实测 `current` 首张 bias 两套相差 +9.2 pp） |
+| 记录 | `fft_window.json` 新增 `spatial_window` 段：`{"name", "suffix", "taps", "files"}`，`files` 是本次**实际写出的加窗文件清单**（相对 `<OUT>`）；`pipeline.log` 也有一行。`roles`（色标窗）语义不变 |
+| 候选基准 | 候选表与候选图**跟随当前空间窗**（默认 hamming；`--spatial-window none` 时即无窗平面）。表里每档给两列：`plane_<win>%`（画布口径，与最终图一致）与 `plane_none%`（同一档窗在无窗平面上的数字，供对照） |
+| 记录 | `fft_window.json` 属**配置记录**：`{"name", "suffix", "candidate_basis", "taps", "files"}`；`candidate_basis` 记候选表所用基准（正常等于 `name`；若用另一个 `--spatial-window` 挑的窗则不同并打印 NOTE）。**该文件允许字节变化**——t14 那条"逐字节不变"的要求自此只适用于数据数组（`.csv`/`.npy`）与图，不适用于这个 JSON。它是"上一次选择的记录"，不是权威：显式命令行入口一律覆盖它（§5 第 3 条） |
+
+与用户旧目录名的对应关系（本 skill 一个 `<OUT>` 同时含两套，不再分目录）：
+
+| 用户旧目录 | 本 skill 里的等价位置 |
+| --- | --- |
+| `didv_corrected_upscaling_fft/`（无窗）/ `.../didv_corrected_upscaling_fft_hamming/` | `fft_corrected/<role>/<label>_fft2.npy` / `<label>_fft2_hamming.npy`（图 `_fft.png` / `_fft_hamming.png`） |
+| `.../didv_corrected_upscaling_fft_Z3/{pure,hanning,hamming}_z3/` | `z3/<role>/<label>_fft2.npy`（pure=无窗）、`..._fft2_hanning.npy`、`..._fft2_hamming.npy` |
+| `.../didv_corrected_upscaling_fft_C3dc_hamming/` | `c3dc/<role>/<label>_fft2_hamming.npy` |
+| `corrected_didv_fft_hamming/` | `fft_corrected/<role>/<label>_fft2_hamming.npy`（同一物） |
+
+（旧目录名里的 `upscaling` = 4× 上采样后再 FFT，**本 skill 不做**，是另一件事。）
+**口径说明**：默认 hamming 下「选窗的平面」与「最终画的平面」是同一套，色标不再对加窗图偏紧；无窗（pure）套用同一个色标窗时可能与基准差一个量级（见上表 warning），那是**故意的**——pure 套保留原样、不改窗。
 
 ## 3 产物布局
 
-数据与图同目录、每个量一个目录（`<i>` = bias 索引，`<bias>meV` 从 `/bias` 读并 ×1000，如 `0_30meV`、`3_-5meV`）：
+数据与图同目录、每个量一个目录（`<win>` = 空间窗名，只在 `--spatial-window` ≠ none 时出现；`<i>` = bias 索引，`<bias>meV` 从 `/bias` 读并 ×1000，如 `0_30meV`、`3_-5meV`）：
 
 ```
 <OUT>/raw/<role>/<i>_<bias>meV.csv|.png            # PNG: 1:1, viridis, 无 colorbar/轴
-<OUT>/fft_raw/<role>/<i>_<bias>meV_fft2.npy|_fft.png  # PNG: 1:1, plasma, 无 colorbar/轴
+<OUT>/fft_raw/<role>/<i>_<bias>meV_fft2.npy|_fft.png        # 无窗；PNG 1:1, plasma, 无 colorbar/轴
+<OUT>/fft_raw/<role>/<i>_<bias>meV_fft2_<win>.npy|_fft_<win>.png        # 加窗（§2.5）
 <OUT>/corrected/<role>/<i>_<bias>meV.csv|.png        # PNG: 1:1, viridis
-<OUT>/fft_corrected/<role>/<i>_<bias>meV_fft2.npy|_fft.png  # 1:1, plasma
-<OUT>/z3/<role>/<i>_<bias>meV_fft2.npy|_fft.png      # 1:1, plasma
-<OUT>/c3dc/<role>/<i>_<bias>meV_fft2.npy|_fft.png    # 1:1, plasma
+<OUT>/fft_corrected/<role>/<i>_<bias>meV_fft2.npy|_fft.png              # 无窗, plasma
+<OUT>/fft_corrected/<role>/<i>_<bias>meV_fft2_<win>.npy|_fft_<win>.png  # 加窗
+<OUT>/z3/<role>/<i>_<bias>meV_fft2.npy|_fft.png      # 无窗, plasma
+<OUT>/z3/<role>/<i>_<bias>meV_fft2_<win>.npy|_fft_<win>.png            # 加窗
+<OUT>/c3dc/<role>/<i>_<bias>meV_fft2.npy|_fft.png    # 无窗, plasma
+<OUT>/c3dc/<role>/<i>_<bias>meV_fft2_<win>.npy|_fft_<win>.png          # 加窗
 <OUT>/window_candidates/<role>/window_KK.png|contact_sheet.png  # 每角色一套候选（第一次运行）
-<OUT>/fft_window.json            # 选定窗口 {"window_version": 2, "roles": {<role>: {vmin, vmax}}}
+<OUT>/fft_window.json            # {"window_version": 2, "roles": {<role>: {vmin, vmax}},
+                                 #  "spatial_window": {name, suffix, taps, files}}   # §2.5
 <OUT>/fft_window_candidates.json # 缓存候选表（供 --pick-window 复用）
 <OUT>/pipeline.log               # 逐步关键数值：raw 窗口、FFT 窗口、画布增长、
                                  # Z3/C3 的 DC 保留、三重残差输入/输出、能量比、
@@ -175,7 +216,12 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 1. **跑 `--window-candidates N`** → 出 a+b + **每个角色** N 张候选 + 该角色的 contact sheet + 按角色分组的候选表，缓存到 `fft_window_candidates.json`，**exit 0**。
 2. **用户从候选表挑编号 K** → **跑 `--pick-window K`**（每个角色各取自己第 K 档），或按角色给显式窗口 `--fft-window-role ROLE VMIN VMAX`（可重复）→ 写 `fft_window.json`，出全套 a+b+c+d+e。
-3. `fft_window.json` 已存在 → 直接复用（幂等），全套照跑。
+3. **优先级：显式命令行 > 盘上的 `fft_window.json`**（2026-10 修，之前是文件优先，导致 `--pick-window` 被静默忽略）：
+   - 给任一条显式入口（`--pick-window K` / `--fft-window VMIN VMAX` / `--fft-window-role ROLE VMIN VMAX`）→ **忽略并覆盖**盘上的文件，写回新选择，并打印/记录一行
+     `# NOTE: <outdir>/fft_window.json existed with <旧值>; overridden by <入口> (the file is rewritten with this selection)` 到 stdout 与 `pipeline.log`；
+   - 不给显式入口 + 盘上有文件 → 直接复用（幂等），全套照跑（旧值原样保留，不打印 NOTE）；
+   - 不给显式入口 + 盘上也没有 → fail-closed（非零退出，见 §6）。
+   - 多条显式入口同时给时，**顺序与以前一致**：`--pick-window` 赢，`--fft-window-role` 覆盖 `--fft-window`（NOTE 里会写明哪个入口生效、哪些被忽略）。
 4. **角色单位不同（current 与 didv 差 ~26 个 log）时，同一对 vmin/vmax 不可能同时适合两个角色**——这正是 `--pick-window` 按角色取、`--fft-window-role` 按角色给的原因。
 
 ## 6 fail-closed（非零退出且不写半成品）
@@ -186,7 +232,8 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | 给的是 `[bwd]` 名字 | 拒绝（fwd 名字是规范入口），退出非零 |
 | `--transform` 缺失 / 目录里不唯一（0 或 ≥2 个 `*_transform.json`） | 报错，退出非零 |
 | h5 缺 `/params` 的 `Z (m)` 列 | 报错，退出非零 |
-| 尚未选窗却要求出全套（无 `fft_window.json`，又未给 `--pick-window`/`--fft-window`） | 提示先跑 `--window-candidates`，退出非零 |
+| 尚未选窗却要求出全套（无 `fft_window.json`，又未给 `--pick-window`/`--fft-window`/`--fft-window-role`） | 提示先跑 `--window-candidates`，退出非零 |
+| 盘上有 `fft_window.json` **且** 给了显式入口 | 不报错：覆盖并打印 `# NOTE: ... overridden by <入口>`（§5 第 3 条） |
 | `--pick-window K` 但候选表不存在 / K 越界 | 报错，退出非零 |
 | `--pick-window K` 但候选表是**池化时代**的旧格式（无 `roles` 键） | 报错并提示重跑 `--window-candidates N`（旧窗口对每个角色都是错的），退出非零 |
 | `--fft-window-role ROLE ...` 的 ROLE 不在本次 `--map` 里 | 报错并列出本次角色，退出非零 |
@@ -208,6 +255,8 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 7. **色标窗口绝不能跨角色池化**（2026-10 实测的真 bug，用户看到 6 张 contact sheet 全是纯色）：`current` 的 log|F| 在 −27…−8.7（中位 −19.95），`didv` 在 −1.9…+16.3（中位 +6.27），池化后分位数落在 −21…+10，于是每张候选对 didv 是整幅超 vmax、对 current 是整幅低于 vmin。修前用 PIL 统计候选图坐标区：**端点（饱和）像素 59.9–98.7 %、窗口中间 80 % 区间内 ~0 %**；按角色分开后为 **0.002–1.83 % / 73.6–99.7 %**。判据与脚本：对每张候选图取坐标区（matplotlib 同一 figure 几何的 `ax.get_window_extent()`）统计「颜色等于 **`FFT_CMAP`** 两端点」与「落在窗口中间 80 %」的像素占比，前者必须 < 5 %、后者必须 ≥ 50 %（候选图也走 `FFT_CMAP`；本 skill 的数据图同样用它，见 §2.3）。
 
 8. **数据图无 colorbar、1:1、pad=0**（2026-10 用户要求，见 §2.3）：`raw/ corrected/ fft_raw/ fft_corrected/ z3/ c3dc/` 的 PNG **没有** colorbar/坐标轴/标题/留白，**边长恰好等于数组边长**（每元素 1 像素），窗口仍是调用方选的 vmin/vmax。`window_candidates/` 与 `contact_sheet.png` 是**例外**（选窗工具，保留标注与 colorbar）。判据：把 PNG 从「数组 + 窗口 + cmap」重算出来逐像素比（`save_array_image` 的映射：`LUT(int(clip((v-vmin)/(vmax-vmin))*256))`，`origin="lower"`，NaN→`#b0b0b0`），数据像素必须逐点 ≤1/255 吻合——这条同时排除了 colorbar（任何色条/轴都会占像素、破坏 1:1 映射）。
+
+9. **两套的端点压死比例会差一个量级，而色标窗只对其中一套对口径**（2026-10 实测，基准已改为跟随空间窗）：候选按当前空间窗生成后，色标窗对**加窗**套对口径；**无窗（pure）套**用同一个窗时会明显更紧或更松——本例 `current` 首个 bias 两套相差 +9.2 pp（无窗 0.520 %、加窗 9.749 %）。工具对每族每偏压打一行 `fft window clip ...`（含两套数字与总差），>0.5 pp 再打一行 `WARNING fft window ...` 指明哪一套离基准。处置：**只看自己要在图上用的那一套**——要 pure 图就别改窗，要加窗图就用 `plane_<win>%` 那一列挑窗（§2.5）。
 
 ## 8 自检口径
 
@@ -365,6 +414,36 @@ for family, role in [(f, r) for f in ("raw", "corrected", "fft_raw", "fft_correc
         assert np.mean(edge.sum(axis=1) < 720.0) >= 0.99, (png, "edge")
         checked += 1
 print(f"render check ok on {checked} PNGs (1:1, no colour bar, window preserved)")
+EOF
+```
+# 9) 空间窗（自己写 numpy 复算，不许调实现里的函数）：产出数组必须等于
+#    fftshift(fft2(fill(map) * outer(w, w)))，w = np.hamming / np.hanning(n)。
+#    用 h5 的 /data 复算 fft_raw 时应当**逐位相同**（0.0）；用 corrected CSV 复算时，
+#    残差只能来自 CSV 的 %.10e 量化——要给出解析上界 N^2 * 0.5e-11 * max|map| 并核对。
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - /tmp/out hamming hamming <<'EOF'
+import json, sys
+from pathlib import Path
+import h5py, numpy as np
+run, h5, win = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+fill = lambda x: np.where(np.isnan(x), np.nanmedian(x), x)
+def mine(x):
+    a = fill(np.asarray(x, float))
+    w = {"hamming": np.hamming, "hanning": np.hanning}[win](a.shape[0])
+    return np.fft.fftshift(np.fft.fft2(a * np.outer(w, w)))
+with h5py.File(h5, "r") as fh:
+    names = [c.decode() for c in fh["channels"][:]]
+    data = fh["data"][:]
+for role, fwd, bwd in (("current", "Current (A)", "Current [bwd] (A)"),
+                       ("didv", "DSP 7280 Y (%)", "DSP 7280 Y [bwd] (%)")):
+    # float64 first: the maps are float32 on disk, and averaging in float32
+    # would leave a ~5e-10 relative residue that is not a window error
+    m = np.nanmean(np.stack([data[:, :, names.index(fwd), 0].astype(float),
+                             data[:, :, names.index(bwd), 0].astype(float)]), axis=0)
+    got = np.load(run / "fft_raw" / role / f"0_50meV_fft2_{win}.npy")
+    rel = np.abs(mine(m) - got).max() / np.abs(got).max()
+    print(f"fft_raw {role}: |mine - {win}| / max|F| = {rel:.3e}")
+    assert rel == 0.0, "windowed FFT must reproduce bit for bit from the h5 map"
+print("spatial window check ok")
 EOF
 ```
 

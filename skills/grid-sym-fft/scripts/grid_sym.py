@@ -124,6 +124,33 @@ _WINDOW_CANDIDATE_FRACS = [
     (2.20, 97.70),
 ]
 
+#: Spatial (data) windows applied to the map *before* ``fft2``.  ``hamming`` is
+#: the default because the user's reference series carries the windowed variants
+#: (``*_fft_hamming``, ``*_C3dc_hamming``, ``*_Z3/hamming_z3``); ``none`` is the
+#: historical behaviour and keeps every unwindowed file byte-identical.
+SPATIAL_WINDOWS = {"none": None, "hamming": np.hamming, "hanning": np.hanning}
+
+#: Default spatial window (the user's reference series carries the windowed
+#: variants, so the windowed set is what they asked for).
+DEFAULT_SPATIAL_WINDOW = "hamming"
+
+
+#: ``<label>`` -> windowed file names.  The unwindowed set keeps the plain
+#: ``<label>_fft2.npy`` / ``<label>_fft.png`` names; the windowed set adds the
+#: window name, so both live side by side in the same family directory.
+def windowed_npy_name(label: str, window: str) -> str:
+    return f"{label}_fft2_{window}.npy"
+
+
+def windowed_png_name(label: str, window: str) -> str:
+    return f"{label}_fft_{window}.png"
+
+
+#: A windowed plane whose endpoint-clip fraction differs from the unwindowed one
+#: by more than this many percentage points gets a warning (the colour window was
+#: chosen on the *unwindowed* candidate figures).
+WINDOW_CLIP_WARN_PP = 0.5
+
 #: Colormap of every FFT image (log|F|, log|Z|, log|C3dc| and the candidate
 #: figures).  The user's reference series -- ``data_processing/20251110/
 #: 20251110_grid1_30mV500pA_30nm/{didv_corrected_upscaling_fft*,
@@ -313,9 +340,20 @@ def _nanmedian_fill(x: np.ndarray) -> np.ndarray:
     return np.where(np.isnan(x), med, x)
 
 
-def compute_fft(x: np.ndarray) -> np.ndarray:
-    """Complex128, fftshifted, NaN filled by nanmedian of valid pixels."""
-    return np.fft.fftshift(np.fft.fft2(_nanmedian_fill(x))).astype(np.complex128)
+def compute_fft(x: np.ndarray, window: str = "none") -> np.ndarray:
+    """Complex128, fftshifted, NaN filled by nanmedian of valid pixels.
+
+    ``window`` names a spatial window applied to the NaN-filled map *before*
+    ``fft2``, as the separable 2D outer product ``np.outer(w, w)`` with
+    ``w = np.hamming(n)`` / ``np.hanning(n)``; ``"none"`` reproduces the
+    historical unwindowed transform byte for byte.
+    """
+    arr = _nanmedian_fill(x)
+    taps = SPATIAL_WINDOWS[window]
+    if taps is not None:
+        w = taps(arr.shape[0])
+        arr = arr * np.outer(w, w)
+    return np.fft.fftshift(np.fft.fft2(arr)).astype(np.complex128)
 
 
 def _rotation_matrix(angle_deg: float) -> np.ndarray:
@@ -555,16 +593,24 @@ def representative_bias_index(planes, pooled):
     return best
 
 
-def role_fft_log_data(outdir: Path, role: str):
-    """One role's log|F| planes from ``fft_raw/<role>`` -> (planes, pooled values)."""
+def role_fft_log_data(outdir: Path, role: str, window: str = "none"):
+    """One role's log|F| planes from ``fft_raw/<role>`` -> (planes, pooled values).
+
+    ``window`` selects which set is read: the candidate table and the candidate
+    figures must be built on the **same** planes the final canvas will use, so the
+    default spatial window (hamming) is also the default basis here.  The
+    unwindowed names never end in ``_<window>``, so the two sets cannot be
+    confused by the glob.
+    """
     d = outdir / "fft_raw" / role
+    pattern = "*_fft2.npy" if window == "none" else f"*_fft2_{window}.npy"
     planes = []
-    for path in sorted(d.glob("*_fft2.npy")):
+    for path in sorted(d.glob(pattern)):
         F = np.load(path)
         planes.append(np.log(np.abs(F)))
     if not planes:
         raise SystemExit(
-            f"ERROR: no *_fft2.npy under {d}; run --window-candidates after the "
+            f"ERROR: no {pattern} under {d}; run --window-candidates after the "
             f"raw FFT stage has produced them"
         )
     pooled = np.concatenate([p[np.isfinite(p)] for p in planes])
@@ -625,7 +671,7 @@ def render_candidates(candidates, outdir: Path, role: str):
     return paths, sheet_path
 
 
-def default_fft_window(roles, h5_path, bias_meV):
+def default_fft_window(roles, h5_path, bias_meV, window="none"):
     """Per-role p50..p99.9 window used only as a provisional render fallback.
 
     Returns ``{role: {"vmin", "vmax"}}``; the roles are never pooled (see
@@ -639,7 +685,7 @@ def default_fft_window(roles, h5_path, bias_meV):
         chunks = []
         for i in range(len(bias_meV)):
             m = extract_role_map(data, role_desc, i)
-            F = compute_fft(m)
+            F = compute_fft(m, window)
             chunks.append(np.log(np.abs(F))[np.isfinite(F)])
         pooled = np.concatenate(chunks) if chunks else np.zeros(1)
         windows[role] = {
@@ -655,7 +701,19 @@ def default_fft_window(roles, h5_path, bias_meV):
 
 
 class Pipeline:
-    def __init__(self, h5_path, roles, outdir, size_nm, payload, u_nm, valid, windows):
+    def __init__(
+        self,
+        h5_path,
+        roles,
+        outdir,
+        size_nm,
+        payload,
+        u_nm,
+        valid,
+        windows,
+        spatial_window="none",
+        candidate_basis=None,
+    ):
         self.h5_path = h5_path
         self.roles = roles
         self.outdir = outdir
@@ -666,6 +724,14 @@ class Pipeline:
         # {role: {"vmin", "vmax"}} -- one colour window per role, never shared:
         # the roles carry different units (see _WINDOW_CANDIDATE_FRACS).
         self.windows = windows
+        # name of the spatial window ("none" / "hamming" / "hanning") and the list
+        # of windowed files actually written (recorded in fft_window.json)
+        self.spatial_window = spatial_window
+        # which window's planes the candidate table/figures were built on (they
+        # follow the spatial window, so this is normally the same value)
+        self.candidate_basis = candidate_basis or spatial_window
+        self.windowed_files = []
+        self.windowed_taps = set()
         self.log_lines = []
         self.log(
             f"pairing rule: forward name + {BWD_MARKER!r} suffix, resolved by "
@@ -684,12 +750,60 @@ class Pipeline:
                     f"fft color window {role}: [{win['vmin']:.6g}, {win['vmax']:.6g}] "
                     f"(per role, never pooled across roles)"
                 )
+        self.log(
+            f"spatial FFT window: {self.spatial_window!r} "
+            f"(applied to the map before fft2 as the outer product of the 1D "
+            f"window; 'none' keeps the unwindowed files)"
+        )
 
     def window_for(self, role):
         win = self.windows.get(role)
         if win is None or win.get("vmin") is None:
             raise SystemExit(f"ERROR: no FFT colour window selected for role {role!r}")
         return win
+
+    def save_windowed_plane(
+        self, directory, label, role, arr, plain_plane, log_fn=_logmag
+    ):
+        """Write the windowed ``.npy`` + 1:1 PNG and report its endpoint clipping.
+
+        The windowed set is written *next to* the unwindowed one (same family
+        directory) with the window name in the file name.  The colour window is
+        the role's already-chosen one -- never recomputed here -- and the plane's
+        clipping is compared with the unwindowed plane: the candidates the user
+        picked from were unwindowed, so a windowed plane can clip noticeably more.
+        """
+        win = self.spatial_window
+        self.windowed_taps.add(int(arr.shape[0]))
+        npy = directory / windowed_npy_name(label, win)
+        png = directory / windowed_png_name(label, win)
+        np.save(npy, arr)
+        save_fft_image(png, arr, self.window_for(role), log_fn=log_fn)
+        for path in (npy, png):
+            self.windowed_files.append(str(path.relative_to(self.outdir)))
+        colour = self.window_for(role)
+        b1, a1 = plane_clip_pct(log_fn(arr), colour["vmin"], colour["vmax"])
+        b0, a0 = plane_clip_pct(plain_plane, colour["vmin"], colour["vmax"])
+        delta = (b1 + a1) - (b0 + a0)
+        self.log(
+            f"fft window clip {directory.name} {role} {label}: "
+            f"windowed {b1:.3f}/{a1:.3f} % vs unwindowed {b0:.3f}/{a0:.3f} % "
+            f"(total delta {delta:+.3f} pp)"
+        )
+        if abs(delta) > WINDOW_CLIP_WARN_PP:
+            # the candidates follow the spatial window, so the *calibrated* set is
+            # the windowed one; the unwindowed figures (or, if the candidates were
+            # made with another --spatial-window, the windowed ones) are off basis
+            basis = self.candidate_basis
+            off = "unwindowed" if basis == win else f"{win}-windowed"
+            self.log(
+                f"WARNING fft window {directory.name} {role} {label}: the colour "
+                f"window is calibrated on the {basis} planes; the {off} plane pins "
+                f"{b0 + a0:.3f} % of its pixels at a colour endpoint vs "
+                f"{b1 + a1:.3f} % for the {win}-windowed plane ({delta:+.3f} pp > "
+                f"{WINDOW_CLIP_WARN_PP:.2f} pp) -- expect the off-basis figures to "
+                f"clip differently"
+            )
 
     def log(self, msg):
         self.log_lines.append(msg)
@@ -729,10 +843,15 @@ class Pipeline:
             d = self.outdir / "fft_raw" / role
             d.mkdir(parents=True, exist_ok=True)
             for i, b in enumerate(bias_meV):
-                F = compute_fft(maps[(role, i)])
+                m = maps[(role, i)]
+                F = compute_fft(m)
                 label = f"{i}_{round(b)}meV"
                 np.save(d / f"{label}_fft2.npy", F)
                 save_fft_image(d / f"{label}_fft.png", F, self.window_for(role))
+                if self.spatial_window != "none":
+                    self.save_windowed_plane(
+                        d, label, role, compute_fft(m, self.spatial_window), _logmag(F)
+                    )
                 self.log(
                     f"fft_raw {role} {i} meV {round(b)}: "
                     f"F[{self.window_for(role)['vmin']:.3g},"
@@ -768,7 +887,11 @@ class Pipeline:
                 FC = compute_fft(corr)
                 np.save(fdir / f"{label}_fft2.npy", FC)
                 save_fft_image(fdir / f"{label}_fft.png", FC, self.window_for(role))
-                corrected[(role, i)] = (FC, corr)
+                FCW = None
+                if self.spatial_window != "none":
+                    FCW = compute_fft(corr, self.spatial_window)
+                    self.save_windowed_plane(fdir, label, role, FCW, _logmag(FC))
+                corrected[(role, i)] = (FC, corr, FCW)
                 self.log(
                     f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, half {half}, "
                     f"max|u| {mag:.3g} px"
@@ -786,11 +909,19 @@ class Pipeline:
             d = self.outdir / "z3" / role
             d.mkdir(parents=True, exist_ok=True)
             for i, b in enumerate(bias_meV):
-                F, _ = corrected[(role, i)]
+                F, _, FW = corrected[(role, i)]
                 Z = z3_symmetrize(F)
                 label = f"{i}_{round(b)}meV"
                 np.save(d / f"{label}_fft2.npy", Z)
                 save_fft_image(d / f"{label}_fft.png", Z, self.window_for(role))
+                if FW is not None:
+                    ZW = z3_symmetrize(FW)
+                    self.save_windowed_plane(d, label, role, ZW, _logmag(Z))
+                    self.log(
+                        f"z3 windowed {role} {i}: residual_in {_residual_metric(FW):.4g} "
+                        f"-> residual_out {_residual_metric(ZW):.4g}; "
+                        f"energy_ratio {_energy_ratio(ZW, FW):.4f}"
+                    )
                 dc_out = _dc_preservation(Z, F)
                 # reference: the 120 deg rotation must itself leave the DC pixel of
                 # the real spectrum alone.  ``offset = c - R c`` makes output(c) =
@@ -818,10 +949,26 @@ class Pipeline:
             d = self.outdir / "c3dc" / role
             d.mkdir(parents=True, exist_ok=True)
             for i, b in enumerate(bias_meV):
-                F, _ = corrected[(role, i)]
+                F, _, FW = corrected[(role, i)]
                 C = c3dc_symmetrize(F)
                 label = f"{i}_{round(b)}meV"
                 np.save(d / f"{label}_fft2.npy", C)
+                if FW is not None:
+                    CW = c3dc_symmetrize(FW)
+                    self.save_windowed_plane(
+                        d,
+                        label,
+                        role,
+                        CW,
+                        _logmag(C),
+                        log_fn=lambda x: np.log(np.abs(x)),
+                    )
+                    self.log(
+                        f"c3dc windowed {role} {i}: residual_in "
+                        f"{_residual_metric(np.abs(FW)):.4g} -> residual_out "
+                        f"{_residual_metric(CW):.4g}; energy_ratio "
+                        f"{_energy_ratio(CW, np.abs(FW)):.4f}"
+                    )
                 neg = int(np.count_nonzero(C < 0))
                 neg_mag = float(np.abs(C[C < 0]).max()) if neg else 0.0
                 scale = float(np.max(np.abs(C))) if C.size else 1.0
@@ -854,8 +1001,27 @@ class Pipeline:
         with (self.outdir / "pipeline.log").open("w") as fh:
             fh.write("\n".join(self.log_lines) + ("\n" if self.log_lines else ""))
         if include_window:
+            # ``roles`` is the colour window (read back by later runs); the
+            # ``spatial_window`` block records which data window this run applied
+            # and the exact list of windowed files it wrote.
             with (self.outdir / FFT_WINDOW_FILE).open("w") as fh:
-                json.dump({"window_version": 2, "roles": self.windows}, fh, indent=2)
+                json.dump(
+                    {
+                        "window_version": 2,
+                        "roles": self.windows,
+                        "spatial_window": {
+                            "name": self.spatial_window,
+                            "suffix": None
+                            if self.spatial_window == "none"
+                            else f"_{self.spatial_window}",
+                            "candidate_basis": self.candidate_basis,
+                            "taps": sorted(self.windowed_taps),
+                            "files": self.windowed_files,
+                        },
+                    },
+                    fh,
+                    indent=2,
+                )
                 fh.write("\n")
 
 
@@ -866,6 +1032,22 @@ class Pipeline:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # --fft-window is ONLY the colour window (two floats).  A single token (e.g.
+    # ``--fft-window 3``) is a usage error, and the message must say where the
+    # spatial window lives now -- one flag with two meanings bit us once already
+    # (see SKILL.md 2.5), so keep the failure loud and pointed.
+    _error = parser.error
+
+    def _error_with_spatial_hint(message):
+        if "--fft-window" in message and "--spatial-window" not in message:
+            message = (
+                f"{message}  --fft-window is the FFT COLOUR window and takes "
+                f"exactly two floats VMIN VMAX; to pick a SPATIAL window use "
+                f"--spatial-window {{{', '.join(sorted(SPATIAL_WINDOWS))}}}."
+            )
+        _error(message)
+
+    parser.error = _error_with_spatial_hint
     parser.add_argument("input", help="grid .h5 file")
     parser.add_argument(
         "--map", action="append", default=[], metavar='ROLE="CHANNEL NAME"'
@@ -894,15 +1076,28 @@ def parse_args(argv=None):
         "fft_window.json and run the full chain",
     )
     parser.add_argument(
+        "--spatial-window",
+        choices=sorted(SPATIAL_WINDOWS),
+        default=DEFAULT_SPATIAL_WINDOW,
+        help="spatial window applied to the map BEFORE fft2, as the outer product "
+        f"of the 1D window (default {DEFAULT_SPATIAL_WINDOW!r}).  Every FFT family "
+        "then writes two sets: the unwindowed files keep their names, the windowed "
+        "ones add the window name (e.g. 0_50meV_fft2_hamming.npy / "
+        "0_50meV_fft_hamming.png); 'none' writes only the unwindowed set.  The "
+        "candidate table and figures are built on this window's planes, so the "
+        "candidates you choose from are the canvas you get.",
+    )
+    parser.add_argument(
         "--fft-window",
         nargs=2,
         type=float,
         default=None,
         metavar=("VMIN", "VMAX"),
-        help="explicit FFT color window applied to EVERY role; write "
+        help="explicit FFT COLOUR window applied to EVERY role; write "
         "fft_window.json and run the full chain.  The roles carry different "
         "units, so this only does what you want when they happen to match -- use "
-        "--fft-window-role for a per-role window",
+        "--fft-window-role for a per-role window.  Takes exactly two floats; the "
+        "spatial window is a separate flag (--spatial-window).",
     )
     parser.add_argument(
         "--fft-window-role",
@@ -958,7 +1153,63 @@ def main(argv=None):
     # units, so one shared window is meaningless (see _WINDOW_CANDIDATE_FRACS).
     role_names = [r["role"] for r in roles]
     window_file = outdir / FFT_WINDOW_FILE
-    if window_file.is_file():
+    # An explicit command-line entry ALWAYS beats the file on disk: fft_window.json
+    # records the *previous* selection, and letting it win (the old behaviour)
+    # silently ignored --pick-window, so re-picking meant deleting the file by hand.
+    explicit = (
+        args.pick_window is not None
+        or args.fft_window is not None
+        or bool(args.fft_window_role)
+    )
+    override_note = None
+    if explicit and window_file.is_file():
+        try:
+            previous = json.loads(window_file.read_text())
+        except OSError:
+            previous = None
+        except ValueError:
+            previous = None
+        if not isinstance(previous, dict):
+            was = "unreadable content"
+        elif "roles" in previous:
+            was = ", ".join(
+                f"{r} [{w['vmin']:g}, {w['vmax']:g}]"
+                for r, w in previous["roles"].items()
+            )
+        else:
+            was = f"legacy single window [{previous['vmin']:g}, {previous['vmax']:g}]"
+        if args.pick_window is not None:
+            entry = f"--pick-window {args.pick_window}"
+            ignored = [
+                flag
+                for flag, given in (
+                    ("--fft-window", args.fft_window is not None),
+                    ("--fft-window-role", bool(args.fft_window_role)),
+                )
+                if given
+            ]
+            suffix = (
+                f" ({' and '.join(ignored)} also given but ignored, as before)"
+                if ignored
+                else ""
+            )
+        else:
+            parts = []
+            if args.fft_window is not None:
+                parts.append(
+                    f"--fft-window {args.fft_window[0]:g} {args.fft_window[1]:g}"
+                )
+            parts += [
+                f"--fft-window-role {spec[0]} {float(spec[1]):g} {float(spec[2]):g}"
+                for spec in args.fft_window_role
+            ]
+            entry = " + ".join(parts)
+            suffix = ""
+        override_note = (
+            f"# NOTE: {window_file} existed with {was}; overridden by {entry}{suffix} "
+            f"(the file is rewritten with this selection)"
+        )
+    if window_file.is_file() and not explicit:
         saved = json.loads(window_file.read_text())
         if "roles" in saved:
             windows = {r: dict(w) for r, w in saved["roles"].items()}
@@ -1057,8 +1308,50 @@ def main(argv=None):
     print(f"# grid: {src}")
     print(f"# transform: {bundle_json} -> {u_path}")
     print(f"# field of view: {size_nm} nm")
+    print(
+        f"# spatial FFT window: {args.spatial_window}"
+        + (
+            " (unwindowed files unchanged; windowed copies add "
+            f"'_{args.spatial_window}' to the name)"
+            if args.spatial_window != "none"
+            else " (only the unwindowed set is written)"
+        )
+    )
 
-    pipe = Pipeline(src, roles, outdir, size_nm, payload, u_nm, valid, windows)
+    # which window's planes the picked colour window came from: read it back from
+    # the candidate table when there is one (it follows the spatial window, so a
+    # mismatch means the candidates were made with a different --spatial-window)
+    cand_file = outdir / CANDIDATES_FILE
+    candidate_basis = args.spatial_window
+    if cand_file.is_file():
+        try:
+            doc = json.loads(cand_file.read_text())
+        except OSError:
+            doc = {}
+        except ValueError:  # json.JSONDecodeError is a ValueError
+            doc = {}
+        candidate_basis = doc.get("spatial_window", {}).get("name", args.spatial_window)
+        if candidate_basis != args.spatial_window:
+            print(
+                f"# NOTE: the colour window was picked from candidates built on the "
+                f"{candidate_basis!r} planes, but this run draws "
+                f"{args.spatial_window!r} planes"
+            )
+
+    pipe = Pipeline(
+        src,
+        roles,
+        outdir,
+        size_nm,
+        payload,
+        u_nm,
+        valid,
+        windows,
+        spatial_window=args.spatial_window,
+        candidate_basis=candidate_basis,
+    )
+    if override_note:
+        pipe.log(override_note)
 
     # stages a + b always run first (extraction + raw FFT)
     raw_maps, bias_meV = pipe.run_extract()
@@ -1067,7 +1360,7 @@ def main(argv=None):
         # provisional per-role window so they are viewable; the candidate figures
         # give the user the final choices and the full rerun redraws every FFT
         # plot with the picked window.
-        pipe.windows = default_fft_window(roles, src, bias_meV)
+        pipe.windows = default_fft_window(roles, src, bias_meV, args.spatial_window)
         for role, win in pipe.windows.items():
             pipe.log(
                 f"provisional fft color window {role}: "
@@ -1092,10 +1385,25 @@ def main(argv=None):
         saved_roles = {}
         for role_desc in roles:
             role = role_desc["role"]
-            planes, pooled = role_fft_log_data(outdir, role)
+            # The candidates must live on the SAME planes the final canvas uses,
+            # so the basis is the current spatial window (default hamming).  The
+            # pure (unwindowed) planes are read too, only to report what the same
+            # window would pin there -- never to build the table or the figures.
+            planes, pooled = role_fft_log_data(outdir, role, args.spatial_window)
+            if args.spatial_window == "none":
+                planes_none = planes
+            else:
+                planes_none, _ = role_fft_log_data(outdir, role, "none")
+                if len(planes_none) != len(planes):
+                    raise SystemExit(
+                        f"ERROR: {role}: {len(planes)} windowed vs "
+                        f"{len(planes_none)} unwindowed fft_raw planes; rerun the "
+                        f"whole stage so both sets cover the same bias points"
+                    )
             cands = candidate_window_list(pooled, n)
             rep = representative_bias_index(planes, pooled)
             plane_vals = planes[rep][np.isfinite(planes[rep])]
+            plane_none_vals = planes_none[rep][np.isfinite(planes_none[rep])]
             for c in cands:
                 c["_plane"] = planes[rep]
                 # the numbers that belong to the canvas: measured on the very
@@ -1108,6 +1416,13 @@ def main(argv=None):
                 c["plane_over_budget_pct"] = (
                     c["clip_total_pct_plane"] - c["clip_budget_pct"]
                 )
+                # same window, same bias, but on the unwindowed plane (what the
+                # window would pin if it had been picked there); reported for
+                # comparison only
+                nb, na = plane_clip_pct(plane_none_vals, c["vmin"], c["vmax"])
+                c["clip_below_pct_plane_none"] = nb
+                c["clip_above_pct_plane_none"] = na
+                c["clip_total_pct_plane_none"] = nb + na
             paths, sheet = render_candidates(cands, cand_dir / role, role)
             saved_roles[role] = {
                 "unit": role_desc["unit"],
@@ -1139,19 +1454,31 @@ def main(argv=None):
                 f"preview plane {rep} ({round(bias_meV[rep])} meV), "
                 f"{len(cands)} windows -> {sheet}"
             )
-        saved = {"source": str(src), "roles": saved_roles}
+        saved = {
+            "source": str(src),
+            "spatial_window": {
+                "name": args.spatial_window,
+                "candidate_basis": args.spatial_window,
+            },
+            "roles": saved_roles,
+        }
         (outdir / CANDIDATES_FILE).write_text(json.dumps(saved, indent=2) + "\n")
 
         print("\nCandidate FFT color windows, per role (choose with --pick-window K):")
+        basis = args.spatial_window
         print(
             "column meanings: vmin/vmax = the window (percentiles of the role's "
             "pooled log|F|);\n"
-            "  pooled<,> = pixels outside the window in that pooled distribution "
-            "(what the window is designed for);\n"
-            "  plane<,> = pixels outside the window on the plane the candidate "
-            "figure actually draws (the number that belongs to the canvas);\n"
-            "  budget = the design budget of that candidate; over = plane total - "
-            "budget (marked ! and warned about when it exceeds "
+            f"  pooled<,> = pixels outside the window in that pooled distribution "
+            f"(what the window is designed for);\n"
+            f"  plane_{basis}<,> = pixels outside the window on the plane the "
+            f"candidate figure actually draws ({basis} basis -- the number that "
+            f"belongs to the canvas);\n"
+            f"  plane_none<,> = the same window measured on the unwindowed plane of "
+            f"the same bias point (for comparison; equal to the above when "
+            f"--spatial-window none);\n"
+            f"  budget = the design budget of that candidate; over = plane total - "
+            f"budget (marked ! and warned about when it exceeds "
             f"{PLANE_CLIP_TOL_PCT:.2f} pp)."
         )
         for role in role_names:
@@ -1165,14 +1492,18 @@ def main(argv=None):
             print(
                 f"{'#':>3} {'vmin':>11} {'vmax':>11} "
                 f"{'pooled< %':>9} {'pooled> %':>9} "
-                f"{'plane< %':>9} {'plane> %':>9} {'budget %':>9} {'over pp':>8}"
+                f"{f'plane_{basis}< %':>14} {f'plane_{basis}> %':>14} "
+                f"{'plane_none< %':>13} {'plane_none> %':>13} "
+                f"{'budget %':>9} {'over pp':>8}"
             )
             for c in info["candidates"]:
                 flag = " !" if c["plane_over_budget_pct"] > PLANE_CLIP_TOL_PCT else ""
                 print(
                     f"{c['index']:>3} {c['vmin']:>11.4g} {c['vmax']:>11.4g} "
                     f"{c['clip_below_pct_pooled']:>9.2f} {c['clip_above_pct_pooled']:>9.2f} "
-                    f"{c['clip_below_pct_plane']:>9.3f} {c['clip_above_pct_plane']:>9.3f} "
+                    f"{c['clip_below_pct_plane']:>14.3f} {c['clip_above_pct_plane']:>14.3f} "
+                    f"{c['clip_below_pct_plane_none']:>13.3f} "
+                    f"{c['clip_above_pct_plane_none']:>13.3f} "
                     f"{c['clip_budget_pct']:>9.2f} {c['plane_over_budget_pct']:>+8.3f}{flag}"
                 )
         print(
