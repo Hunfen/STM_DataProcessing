@@ -124,6 +124,18 @@ _WINDOW_CANDIDATE_FRACS = [
     (2.20, 97.70),
 ]
 
+#: Colormap of every FFT image (log|F|, log|Z|, log|C3dc| and the candidate
+#: figures).  The user's reference series -- ``data_processing/20251110/
+#: 20251110_grid1_30mV500pA_30nm/{didv_corrected_upscaling_fft*,
+#: didv_original_fft, rmap_fft, zmap_fft}/`` -- is plasma: nearest-LUT median
+#: distance 0.8 against plasma vs >=33 for magma, 40 for inferno, 43 for turbo,
+#: 52 for cividis and 55 for viridis (5 images measured directly, 23 by the
+#: captain).  Single source: changing the convention is one edit here.
+FFT_CMAP = "plasma"
+
+#: Colormap of the real-space maps (raw / corrected) -- unchanged.
+MAP_CMAP = "viridis"
+
 #: Percentiles used to pick the plane that represents a role (see
 #: ``representative_bias_index``).
 _REPRESENTATIVE_QUANTILES = (0.5, 50.0, 99.5)
@@ -417,43 +429,59 @@ def _logmag(F: np.ndarray) -> np.ndarray:
     return np.log(np.abs(F).astype(np.float64, copy=False))
 
 
-def plot_matrix(fig, ax, mat, vmin, vmax, cmap="viridis", title=""):
-    ax.set_title(title, fontsize=9)
+def save_array_image(out_png: Path, mat, vmin, vmax, cmap: str, png_dpi=300):
+    """Write ``mat`` **1:1**: one PNG pixel per array element, nothing else.
+
+    No colour bar, no axes, ticks or title, no cropping (``pad_inches=0`` and no
+    ``bbox_inches``): the canvas is exactly ``n_rows x n_cols`` pixels, so the PNG
+    can be used directly (overlaid, averaged, fed to another tool) without
+    stripping a frame.  ``interpolation="nearest"`` keeps the mapping exact.
+    ``vmin``/``vmax`` are the caller's chosen window -- never re-derived here.
+    ``png_dpi`` only sets the physical-size metadata: the canvas is ``n_rows x
+    n_cols`` pixels whatever it is (300 dpi, same as the LF family and the
+    user's reference series).
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_rows, n_cols = int(mat.shape[0]), int(mat.shape[1])
+    # No-data pixels (the corrected canvas is NaN outside the valid displacement
+    # field) get the Lawler-Fujita family's opaque bad colour instead of the
+    # default transparent/white, so the picture is a plain opaque RGB image with
+    # no white frame -- same convention as stm_lf_correct.py:1011.
+    cmap_bad = plt.get_cmap(cmap).copy()
+    cmap_bad.set_bad(lf_lib.BAD_COLOR)
+    fig = plt.figure(
+        figsize=(n_cols / png_dpi, n_rows / png_dpi), dpi=png_dpi, frameon=False
+    )
+    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
     # Same display convention as the Lawler-Fujita family
     # (stm_lf_correct.py:1013/1029, stm_lf_apply.py:386/402): row 0 (the smallest
     # physical Y) at the bottom, so corrected maps and the fitted topo agree.
-    im = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax, origin="lower")
-    cbar = fig.colorbar(im, ax=ax, shrink=0.9)
-    return im, cbar
-
-
-def save_raw_image(out_png: Path, mat, vmin, vmax, title, dpi=120):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(6, 6))
-    plot_matrix(fig, ax, mat, vmin, vmax, cmap="viridis", title=title)
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=dpi)
-    plt.close(fig)
-
-
-def save_fft_image(out_png: Path, F, window, title, dpi=120, log_fn=_logmag):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    logv = log_fn(F)
-    fig, ax = plt.subplots(figsize=(6, 6))
-    plot_matrix(
-        fig, ax, logv, window["vmin"], window["vmax"], cmap="viridis", title=title
+    ax.imshow(
+        mat,
+        cmap=cmap_bad,
+        vmin=vmin,
+        vmax=vmax,
+        origin="lower",
+        interpolation="nearest",
+        aspect="auto",
     )
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=dpi)
+    ax.set_axis_off()
+    fig.savefig(out_png, dpi=png_dpi, pad_inches=0)
     plt.close(fig)
+
+
+def save_map_image(out_png: Path, mat, vmin, vmax, cmap: str = MAP_CMAP):
+    """Real-space map (raw / corrected) -> 1:1 PNG, ``MAP_CMAP``."""
+    save_array_image(out_png, mat, vmin, vmax, cmap)
+
+
+def save_fft_image(out_png: Path, F, window, cmap: str = FFT_CMAP, log_fn=_logmag):
+    """FFT plane -> 1:1 PNG of ``log|F|`` under the caller's window, ``FFT_CMAP``."""
+    save_array_image(out_png, log_fn(F), window["vmin"], window["vmax"], cmap)
 
 
 def candidate_window_list(logvals, n):
@@ -572,7 +600,7 @@ def render_candidates(candidates, outdir: Path, role: str):
             f"{cand['clip_above_pct_plane']:.2f} %",
             fontsize=8,
         )
-        im = ax.imshow(plane, cmap="viridis", vmin=cand["vmin"], vmax=cand["vmax"])
+        im = ax.imshow(plane, cmap=FFT_CMAP, vmin=cand["vmin"], vmax=cand["vmax"])
         fig.colorbar(im, ax=ax, shrink=0.9)
         fig.savefig(out, dpi=120)
         w, h = Image.open(out).size
@@ -686,14 +714,7 @@ class Pipeline:
                 med = float(np.median(finite))
                 std = float(np.std(finite))
                 win = (med - 5 * std, med + 5 * std)
-                save_raw_image(
-                    d / f"{label}.png",
-                    m,
-                    win[0],
-                    win[1],
-                    f"{role} {i} bias {round(b)} meV  "
-                    f"(raw, median +/- 5 sigma [{win[0]:.3g}, {win[1]:.3g}])",
-                )
+                save_map_image(d / f"{label}.png", m, win[0], win[1])
                 buf[(role, i)] = m
                 self.log(
                     f"raw {role} {i} meV {round(b)}: median +/- 5 sigma window "
@@ -711,12 +732,7 @@ class Pipeline:
                 F = compute_fft(maps[(role, i)])
                 label = f"{i}_{round(b)}meV"
                 np.save(d / f"{label}_fft2.npy", F)
-                save_fft_image(
-                    d / f"{label}_fft.png",
-                    F,
-                    self.window_for(role),
-                    f"{role} {i} bias {round(b)} meV  |FFT| (raw)",
-                )
+                save_fft_image(d / f"{label}_fft.png", F, self.window_for(role))
                 self.log(
                     f"fft_raw {role} {i} meV {round(b)}: "
                     f"F[{self.window_for(role)['vmin']:.3g},"
@@ -746,21 +762,12 @@ class Pipeline:
                 finite = corr[np.isfinite(corr)]
                 med = float(np.median(finite))
                 std = float(np.std(finite))
-                save_raw_image(
-                    cdir / f"{label}.png",
-                    corr,
-                    med - 5 * std,
-                    med + 5 * std,
-                    f"{role} {i} bias {round(b)} meV  (LF corrected)",
+                save_map_image(
+                    cdir / f"{label}.png", corr, med - 5 * std, med + 5 * std
                 )
                 FC = compute_fft(corr)
                 np.save(fdir / f"{label}_fft2.npy", FC)
-                save_fft_image(
-                    fdir / f"{label}_fft.png",
-                    FC,
-                    self.window_for(role),
-                    f"{role} {i} bias {round(b)} meV  |FFT| (LF corrected)",
-                )
+                save_fft_image(fdir / f"{label}_fft.png", FC, self.window_for(role))
                 corrected[(role, i)] = (FC, corr)
                 self.log(
                     f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, half {half}, "
@@ -783,12 +790,7 @@ class Pipeline:
                 Z = z3_symmetrize(F)
                 label = f"{i}_{round(b)}meV"
                 np.save(d / f"{label}_fft2.npy", Z)
-                save_fft_image(
-                    d / f"{label}_fft.png",
-                    Z,
-                    self.window_for(role),
-                    f"{role} {i} bias {round(b)} meV  log|Z| (C3, complex)",
-                )
+                save_fft_image(d / f"{label}_fft.png", Z, self.window_for(role))
                 dc_out = _dc_preservation(Z, F)
                 # reference: the 120 deg rotation must itself leave the DC pixel of
                 # the real spectrum alone.  ``offset = c - R c`` makes output(c) =
@@ -829,8 +831,6 @@ class Pipeline:
                     d / f"{label}_fft.png",
                     C,
                     self.window_for(role),
-                    f"{role} {i} bias {round(b)} meV  log|C3dc| "
-                    f"(neg {neg} px, mag {rel_neg:.2e})",
                     log_fn=lambda x: np.log(np.abs(x)),
                 )
                 dc_out = _dc_preservation(C, np.abs(F))

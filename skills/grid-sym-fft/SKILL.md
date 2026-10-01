@@ -67,7 +67,26 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 （本仓库 11-15：`r=20, n=304` → 263 px 的纯镜像、实测 276.19 px，多出的 13 px 是 u 在两个位置上的差异），
 否则这条自检是空转。完整可跑版本见 §8 第 7 条。
 
-### 2.3 `scripts/grid_sym.py`（抽取 → 矫正 → 复数 FFT → Z3 / C3）
+### 2.3 画法约定（**所有数据图**，2026-10 用户要求）
+
+用户原话：「生成的图片你不要再加 colorbar 了，我没法直接用，按照我给你的那个文件夹中的画法，直接 pad=0」。
+参考目录：`data_processing/20251110/20251110_grid1_30mV500pA_30nm/` 下全部 fft 相关目录
+（实测 `didv_corrected_upscaling_fft_C3dc_hamming/*.png` 是 2250×2250、四边 2 px 内非白比例 **1.000**、
+逐像素 LUT 匹配 **plasma** 中位距 0.8，magma/inferno/turbo/cividis/viridis 分别 33/40/43/52/55）。
+
+| 项 | 约定 |
+| --- | --- |
+| 内容 | **只有数据像素**：无 colorbar、无坐标轴/刻度/标题/边框、无留白（`fig.add_axes([0,0,1,1])` + `ax.set_axis_off()` + `savefig(pad_inches=0)`，不加 `bbox_inches`） |
+| 几何 | **1:1 像素**：PNG 边长 == 数组边长（`figsize = n/png_dpi`，`png_dpi=300` 与参考图/LF 家族同 dpi；`interpolation="nearest"`） |
+| 窗口 | **沿用调用方选定的 vmin/vmax**（K 档候选或 `fft_window.json`），渲染函数绝不自己按 min/max 归一 |
+| colormap | **FFT 图（`fft_raw` / `fft_corrected` / `z3` / `c3dc`）= `FFT_CMAP = "plasma"`**；**实空间图（`raw` / `corrected`）= `MAP_CMAP = "viridis"`**。两个常量都在 `grid_sym.py` 顶部一处定义（single source），改一处即全局生效 |
+| NaN | 用 LF 家族的 `lf_lib.BAD_COLOR = "#b0b0b0"`（不透明灰）画，不用 matplotlib 默认的透明/白——矫正画布四周本来就是无位移场的 NaN，透明会留下"白边"、也不便于直接叠图 |
+| 例外 | `window_candidates/<role>/window_KK.png` 与 `contact_sheet.png` **保留现状**（带 vmin/vmax/压死 % 标注 + colorbar）：它们是选窗工具，去掉标注就没法选；它们同样用 `FFT_CMAP` |
+
+渲染入口：`save_array_image()`（1:1 无装饰）→ `save_map_image()`（实空间，viridis）与
+`save_fft_image()`（`log|F|`，plasma）。机械自检见 §8 第 8 条（把 PNG 从数据重算出来逐像素比）。
+
+### 2.4 `scripts/grid_sym.py`（抽取 → 矫正 → 复数 FFT → Z3 / C3）
 
 ```bash
 # 第一次运行：先出色标候选（a+b + 候选 + contact sheet），exit 0
@@ -89,9 +108,9 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 按下列顺序执行，**每一步都写数据 + 图 + log，且每一步都配 FFT**：
 
-**a. 抽取**：每个角色 = 前向通道与其同名 `[bwd]` 配对（`Current (A)` ↔ `Current [bwd] (A)`）取平均，每偏压一张 map（bias 标签从 `/bias` 读，遍历全部 bias 点；配对规则与两个名字、两个索引都写进 log）。写 CSV + PNG（viridis，窗口 = 该图 `nanmedian ± 5σ`，窗口数值写进 log）。CSV 必须等于两方向平均（可用 `/data` 的 fwd/bwd 两片独立复算核对；只取前向时差可达 ~1e-10 量级）。
+**a. 抽取**：每个角色 = 前向通道与其同名 `[bwd]` 配对（`Current (A)` ↔ `Current [bwd] (A)`）取平均，每偏压一张 map（bias 标签从 `/bias` 读，遍历全部 bias 点；配对规则与两个名字、两个索引都写进 log）。写 CSV + PNG（**实空间图 = viridis**，窗口 = 该图 `nanmedian ± 5σ`，窗口数值写进 log；画法见 §2.3）。CSV 必须等于两方向平均（可用 `/data` 的 fwd/bwd 两片独立复算核对；只取前向时差可达 ~1e-10 量级）。
 
-**b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充）；`F = np.fft.fftshift(np.fft.fft2(x))`，complex128 存 npy；出 `log|F|` 图。这一组图后面跟色标候选。
+**b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充）；`F = np.fft.fftshift(np.fft.fft2(x))`，complex128 存 npy；出 `log|F|` 图（**FFT 图 = plasma**，见 §2.3）。这一组图后面跟色标候选。
 
 **c. 矫正**：用 `--transform` 指向的位移场包矫正每个角色每张 map，**只重采样、绝不改值域、也绝不翻转**（map 按名字从 `/data` 取出后已经在位移场的帧里，见 §2.2「坐标系约定」；禁止调用会去平面的 `stm_lf_apply.py`，只走 `lawler-fujita-correction` 的 `lf_lib.warp_by_field`）。画布按 `2*half` 增长（`half = ceil(max|u|) + pad`）。写 corrected CSV + PNG + 该阶段自己的复数 FFT + `log|F|` 图。
 
@@ -126,12 +145,12 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 数据与图同目录、每个量一个目录（`<i>` = bias 索引，`<bias>meV` 从 `/bias` 读并 ×1000，如 `0_30meV`、`3_-5meV`）：
 
 ```
-<OUT>/raw/<role>/<i>_<bias>meV.csv|.png
-<OUT>/fft_raw/<role>/<i>_<bias>meV_fft2.npy|_fft.png
-<OUT>/corrected/<role>/<i>_<bias>meV.csv|.png
-<OUT>/fft_corrected/<role>/<i>_<bias>meV_fft2.npy|_fft.png
-<OUT>/z3/<role>/<i>_<bias>meV_fft2.npy|_fft.png
-<OUT>/c3dc/<role>/<i>_<bias>meV_fft2.npy|_fft.png
+<OUT>/raw/<role>/<i>_<bias>meV.csv|.png            # PNG: 1:1, viridis, 无 colorbar/轴
+<OUT>/fft_raw/<role>/<i>_<bias>meV_fft2.npy|_fft.png  # PNG: 1:1, plasma, 无 colorbar/轴
+<OUT>/corrected/<role>/<i>_<bias>meV.csv|.png        # PNG: 1:1, viridis
+<OUT>/fft_corrected/<role>/<i>_<bias>meV_fft2.npy|_fft.png  # 1:1, plasma
+<OUT>/z3/<role>/<i>_<bias>meV_fft2.npy|_fft.png      # 1:1, plasma
+<OUT>/c3dc/<role>/<i>_<bias>meV_fft2.npy|_fft.png    # 1:1, plasma
 <OUT>/window_candidates/<role>/window_KK.png|contact_sheet.png  # 每角色一套候选（第一次运行）
 <OUT>/fft_window.json            # 选定窗口 {"window_version": 2, "roles": {<role>: {vmin, vmax}}}
 <OUT>/fft_window_candidates.json # 缓存候选表（供 --pick-window 复用）
@@ -184,9 +203,11 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 2. **旋转必须绕 DC 像素**：`fftshift` 后偶数 N 的 DC 在索引 `N/2`（不是数组几何中心 `(N-1)/2`）。用 `scipy.ndimage.affine_transform(matrix=R, offset=c-R c, order=3, mode='nearest')`，`c=(N/2, N/2)`（浮点）；这样 DC 保留到 ~1e-16。用 `ndimage.rotate`（绕 `(N-1)/2`）会把中心尖峰糊掉。
 3. **c3dc 的 log 必须用 `log|C3dc|`**：三次插值振铃给出少量负值（本例 8–16 像素/图、最大负值幅度约为 DC 峰值的 0.07、负值功率占全谱 ~1.7%），负值个数与相对幅度要写进 log。
 4. **log 里的 `DC_retained 1.0000` 是无信息装饰项**：旋转按 `offset = c - R c` 构造，恒有 `output(c) = input(c)`（`mode='nearest'` 下越界采样也不涉及 DC），所以这个比值在构造上恒等于 1，不管对称化是否有效。判断 Z3/C3 是否真的生效请看 `residual_in -> residual_out` 与 `energy_ratio`；不要把这个 1.0000 当证据引用。
-5. **未经选窗的 FFT 图窗口是临时的**：candidates 运行给 fft_raw 用**该角色** p50–p99.9 的临时窗；用户选窗后全套重画，每个角色的 FFT 图用该角色选定的窗口。
+5. **未经选窗的 FFT 图窗口是临时的**：candidates 运行给 fft_raw 用**该角色** p50–p99.9 的临时窗；用户选窗后全套重画，每个角色的 FFT 图用该角色选定的窗口（画法不变，只换窗口）。
 6. **候选图必须同画布尺寸**：固定 figure 尺寸 + 不 `bbox_inches='tight'`，保证逐像素可比；PIL 断言全部一致后才拼 contact sheet（图注拆短行，防 tight bbox 撑大画布）。
-7. **色标窗口绝不能跨角色池化**（2026-10 实测的真 bug，用户看到 6 张 contact sheet 全是纯色）：`current` 的 log|F| 在 −27…−8.7（中位 −19.95），`didv` 在 −1.9…+16.3（中位 +6.27），池化后分位数落在 −21…+10，于是每张候选对 didv 是整幅超 vmax、对 current 是整幅低于 vmin。修前用 PIL 统计候选图坐标区：**端点（饱和）像素 59.9–98.7 %、窗口中间 80 % 区间内 ~0 %**；按角色分开后为 **0.002–1.83 % / 73.6–99.7 %**。判据与脚本：对每张候选图取坐标区（matplotlib 同一 figure 几何的 `ax.get_window_extent()`）统计「颜色等于 viridis 两端点」与「落在窗口中间 80 %」的像素占比，前者必须 < 5 %、后者必须 ≥ 50 %。
+7. **色标窗口绝不能跨角色池化**（2026-10 实测的真 bug，用户看到 6 张 contact sheet 全是纯色）：`current` 的 log|F| 在 −27…−8.7（中位 −19.95），`didv` 在 −1.9…+16.3（中位 +6.27），池化后分位数落在 −21…+10，于是每张候选对 didv 是整幅超 vmax、对 current 是整幅低于 vmin。修前用 PIL 统计候选图坐标区：**端点（饱和）像素 59.9–98.7 %、窗口中间 80 % 区间内 ~0 %**；按角色分开后为 **0.002–1.83 % / 73.6–99.7 %**。判据与脚本：对每张候选图取坐标区（matplotlib 同一 figure 几何的 `ax.get_window_extent()`）统计「颜色等于 **`FFT_CMAP`** 两端点」与「落在窗口中间 80 %」的像素占比，前者必须 < 5 %、后者必须 ≥ 50 %（候选图也走 `FFT_CMAP`；本 skill 的数据图同样用它，见 §2.3）。
+
+8. **数据图无 colorbar、1:1、pad=0**（2026-10 用户要求，见 §2.3）：`raw/ corrected/ fft_raw/ fft_corrected/ z3/ c3dc/` 的 PNG **没有** colorbar/坐标轴/标题/留白，**边长恰好等于数组边长**（每元素 1 像素），窗口仍是调用方选的 vmin/vmax。`window_candidates/` 与 `contact_sheet.png` 是**例外**（选窗工具，保留标注与 colorbar）。判据：把 PNG 从「数组 + 窗口 + cmap」重算出来逐像素比（`save_array_image` 的映射：`LUT(int(clip((v-vmin)/(vmax-vmin))*256))`，`origin="lower"`，NaN→`#b0b0b0`），数据像素必须逐点 ≤1/255 吻合——这条同时排除了 colorbar（任何色条/轴都会占像素、破坏 1:1 映射）。
 
 ## 8 自检口径
 
@@ -303,6 +324,47 @@ print(f"marker row: grid_sym.apply_transform {ra:.3f}  stm_lf_apply {rl:.3f}  "
 print(f"mirror amount if a flip is (re)introduced: n-1-2*ROW = {n - 1 - 2 * ROW} px")
 assert abs(ra - rl) <= 3, "frames disagree: the map must NOT be flipped before warp_by_field"
 print("frame check ok (the map and u share the h5 frame)")
+EOF
+
+# 8) 画法（1:1 + 无 colorbar + 无轴）：把 PNG 从「数组 + 窗口 + cmap」重算出来逐像素比。
+#    数据像素必须全部 ≤1/255 吻合；PNG 边长必须等于数组边长；四边 2 px 内非白比例 ≥0.99。
+#    任何 colorbar/坐标轴/留白都会占像素、破坏这个 1:1 映射，所以这一条同时是"无 colorbar"的判据。
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - /tmp/out <<'EOF'
+import sys, json
+from pathlib import Path
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt, numpy as np
+from PIL import Image
+sys.path.insert(0, "skills/grid-sym-fft/scripts")
+import grid_sym as gs
+run = Path(sys.argv[1])
+win = json.loads((run / "fft_window.json").read_text())["roles"]
+rgb = lambda c: np.asarray(plt.get_cmap(c)(np.arange(256) / 256.0)[:, :3]) * 255.0
+BAD = np.array(matplotlib.colors.to_rgb(gs.lf_lib.BAD_COLOR)) * 255.0
+checked = 0
+for family, role in [(f, r) for f in ("raw", "corrected", "fft_raw", "fft_corrected", "z3", "c3dc")
+                     for r in ("current", "didv")]:
+    for png in sorted((run / family / role).glob("*.png")):
+        stem = png.stem
+        if family in ("raw", "corrected"):
+            mat = np.loadtxt(png.with_suffix(".csv"), delimiter=",")
+            med, std = np.nanmedian(mat), np.nanstd(mat)
+            vmin, vmax, cmap = med - 5 * std, med + 5 * std, gs.MAP_CMAP
+        else:
+            mat = np.log(np.abs(np.load(png.with_name(stem.replace("_fft", "") + "_fft2.npy"))))
+            vmin, vmax, cmap = win[role]["vmin"], win[role]["vmax"], gs.FFT_CMAP
+        bad = ~np.isfinite(mat)
+        idx = np.clip(((np.clip((np.nan_to_num(mat) - vmin) / (vmax - vmin), 0, 1)) * 256).astype(int), 0, 255)
+        want = rgb(cmap)[idx]; want[bad] = BAD; want = np.flipud(want)
+        got = np.asarray(Image.open(png).convert("RGB")).astype(float)
+        assert got.shape == want.shape, (png, got.shape, want.shape)
+        d = np.abs(got - want).max(axis=2)
+        assert np.all(d[~np.flipud(bad)] <= 1.0), (png, float(d[~np.flipud(bad)].max()))
+        edge = np.concatenate([got[:2].reshape(-1, 3), got[-2:].reshape(-1, 3),
+                               got[:, :2].reshape(-1, 3), got[:, -2:].reshape(-1, 3)])
+        assert np.mean(edge.sum(axis=1) < 720.0) >= 0.99, (png, "edge")
+        checked += 1
+print(f"render check ok on {checked} PNGs (1:1, no colour bar, window preserved)")
 EOF
 ```
 
