@@ -7,6 +7,14 @@ the skill's preprocessing (``flipud(subtract_mean_plane(...))``, first row = top
 scan line), states the reference lattice explicitly and writes the plots and the
 report.
 
+Frame convention (2026-10-14): the working frame of every computation is
+``flipud(subtract_mean_plane(...))``, but **the products are written in the input
+frame** -- the first row of ``<stem>_corrected.csv``/``.h5``/``.png`` is the first
+row of the input CSV.  The corrected array is therefore flipped back exactly once,
+after both anchor self-checks, and every product of a run is derived from that one
+array (the CSV array, the h5 ``corrected`` dataset and the topography png are the
+same array; the h5 ``fft2`` dataset is the array written to the ``.npy``).
+
 The **anchor ring is explicit**: the package's data-anchored detection labels one
 ring as the first ring, and that ring need not be the 1x1 ring -- when the r3 ring
 sits inside the 1x1 ring (radius ratio 1/sqrt(3)), the detection can anchor on the
@@ -31,6 +39,9 @@ Outputs:
     <outdir>/<stem>_corrected_fft.png   FFT plot (inferno, log, percentile norm)
     <outdir>/correction.log             the console report
     <outdir>/correction_report.json     the same numbers, machine readable
+
+All four array products are written in the frame of the input CSV (first row of the
+output = first row of the input).
 
 The h5 file holds the two arrays of the correction as the datasets ``corrected``
 (float64, exactly the array written to the CSV) and ``fft2`` (complex128,
@@ -658,7 +669,13 @@ def main(argv=None):
             "not contain such a pair."
         )
 
-    corrected = np.asarray(correction.image, dtype=float)
+    # Frame convention (2026-10-14): the products go out in the frame of the INPUT
+    # CSV -- first row of the output = first row of the input.  Everything above (the
+    # detection, the stretch fit, the resampling and both anchor self-checks) runs in
+    # the working frame flipud(...) (first row = top scan line), so the corrected
+    # array is flipped back exactly once, here, and every product below -- CSV, h5,
+    # npy and both pngs -- is derived from this one array.
+    corrected = np.flipud(np.asarray(correction.image, dtype=float))  # input frame
     out_csv = outdir / f"{stem}_corrected.csv"
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
     fft2_corrected = compute_fft2(corrected, correction.size_nm, subtract_plane=False)

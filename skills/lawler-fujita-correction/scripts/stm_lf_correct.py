@@ -26,6 +26,16 @@ degrees], the lock-in amplitude maps, the displacement components ``u_x`` and
 ``u_y`` [nm] and the validity mask are the datasets of ``<stem>_lf.h5``, each next
 to its ``<stem>_lf_<name>.png`` preview.
 
+Frame convention (2026-10-14): the working frame of every computation is
+``flipud(subtract_mean_plane(...))``, but **the products are written in the input
+frame** -- the first row of ``<stem>_corrected.csv``/``.h5``/``.png`` is the first
+row of the input CSV.  The corrected array is therefore flipped back exactly once,
+after the residual self-check, and every product of a run is derived from that one
+array (the CSV array, the h5 ``corrected`` dataset and the topography png are the
+same array; the h5 ``fft2`` dataset is the array written to the ``.npy``).  The LF
+maps of ``<stem>_lf.h5`` (theta / amplitude / u / mask) stay in the working frame:
+they are solver state on the reference grid, not an image of the input.
+
 ``--save-transform FILE`` writes the transferable bundle: the JSON above plus the
 u-field h5 next to it, which ``stm_lf_apply.py`` applies to another dataset of the
 same scan.
@@ -981,6 +991,14 @@ def main(argv=None):
         )
 
     out_csv = outdir / f"{stem}_corrected.csv"
+    # Frame convention (2026-10-14): the products go out in the frame of the INPUT
+    # CSV -- first row of the output = first row of the input.  Everything above (the
+    # lock-in, the displacement solve, the warp and the residual self-check) runs in
+    # the working frame flipud(...) (first row = top scan line), so the corrected
+    # array is flipped back exactly once, here, and every product below -- CSV, h5,
+    # npy and both pngs -- is derived from this one array.  The LF maps of
+    # <stem>_lf.h5 stay in the working frame (solver state, not an image).
+    corrected = np.flipud(corrected)  # input frame
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
     fft2_corrected = compute_fft2(corrected, size_out, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"

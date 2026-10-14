@@ -17,6 +17,7 @@ description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 
 | 项 | 说明 |
 | --- | --- |
 | 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部** |
+| 帧 | **产物与输入同帧**（2026-10-14 起）：`<stem>_corrected.csv` / `.h5` / `.png` 的第一行 = **输入 CSV 的第一行**。检测/拟合/重采样仍在这个输入帧的 `flipud` 工作帧里做，写回前翻回去一次（见 §2） |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方，1x1 晶格常数 `a`（默认 0.246 nm）；**取向取数据自身的 (1,0) 方向**，不做点群推断 |
 | 锚定环 | 必须显式指定：`--anchor-ring 1x1`（默认）/ `r3`（见 §2.1） |
@@ -46,7 +47,16 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 （纯拉伸、零旋转，加权最小二乘，失败时闭式回退并记 `meta`）→ `scipy.ndimage.affine_transform`
 重采样（`order=3`，`cval=NaN`），画布 `n_out`、**矫正后视场 = `L · n_out / n`**。
 加 `--save-transform FILE` 时，拟合结束后额外把该变换写成独立 JSON（契约见 §3）；
-**不加这个开关时所有既有输出（log / 报告 / csv / npy / png）逐字节不变**。
+**不加这个开关时不写这个 JSON**（开关本身不改动其它产物；本轮帧约定改了数组产物的帧，见下）。
+
+**帧约定（2026-10-14）**：上面所有计算都在工作帧 `flipud(subtract_mean_plane(...))` 里进行，
+但**产物按输入帧写出**——重采样结果在两段锚定自检之后**翻转一次**再落盘，因此
+`<stem>_corrected.csv` / `.h5` / `.png` 的第一行就是**输入 CSV 的第一行**（不给使用者一个
+相对输入翻过一次的图）。CSV 数组、h5 的 `corrected` 数据集与地形 png 是**同一个数组**，
+h5 的 `fft2` 数据集与 `.npy` 是**同一个数组**；翻转只发生在写回前的这一处，去平面/去均值/
+归一化等预处理一行未动。apply 段（`stm_apply_transform.py`）同样按**该次运行的目标 CSV** 的
+帧写出。此前（≤2026-10-13）产出的基准是旧帧，与它们比较时一侧需翻转（见
+`grid-lf-pipeline` §6 第 ③ 步）。
 
 ### 2.1 锚定环必须显式指定（v2 核心）
 
@@ -95,6 +105,8 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 输出（`-o OUT`）：`<stem>_corrected.csv`、`<stem>_corrected.h5`、`<stem>_corrected_fft2.npy`
 （复数 FFT2，含 Hanning 窗与 NaN 平面填充）、`<stem>_corrected.png`（gwyddion）、
 `<stem>_corrected_fft.png`（inferno 对数）、`correction.log`、`correction_report.json`。
+四个数组产物（CSV、h5 的 `corrected` / `fft2`、`.npy`、两个 png）**与输入 CSV 同帧**：
+输出第一行 = 输入第一行（见 §2 帧约定）。
 
 **HDF5 数组产物**（`<stem>_corrected.h5`，仓库统一 h5 约定，见 `docs/hdf5_convention.md`）：
 
@@ -132,9 +144,10 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 apply 段只做**重采样**：与拟合段同样的读入/分隔符自动识别与预处理
 （`flipud(subtract_mean_plane(...))`，同一内联平面拟合）→ 用**目标图自己的像素数 n** 重算数组矩阵
 `A = P·M⁻¹·P`、画布 `n_out = 2·(⌈max|A⁻¹·角点|⌉ + pad) + 1` 与 offset（`order` / `pad` 取自 JSON）
-→ `scipy.ndimage.affine_transform`（`cval=NaN`）→ 输出与拟合段同名的产物
+→ `scipy.ndimage.affine_transform`（`cval=NaN`）→ **翻转一次**写回 → 输出与拟合段同名的产物
 （`<stem>_corrected.csv`、`_corrected_fft2.npy`、`_corrected.png`、`_corrected_fft.png`）、
-`correction.log`（含上面的契约行）与 `apply_report.json`。
+`correction.log`（含上面的契约行）与 `apply_report.json`。产物的帧 = **这张目标图自己的帧**
+（输出第一行 = 目标 CSV 第一行），不是参考图的帧。
 **不重新检测峰、不重跑锚定自检**；矫正后视场 `= L · n_out / n`。
 `method == "identity_fallback"` 时（拟合段本来就没能矫正）目标图**原样复制**：
 `n_out = n`、视场不变、不加 NaN，log 里打 WARNING。
@@ -155,7 +168,7 @@ apply 段只做**重采样**：与拟合段同样的读入/分隔符自动识别
 `written`（六个产物路径）。注意 `anchor_verdict` 是**参考图**的结论：apply 段不做自检，
 是否可信取决于参考图与目标图是否可比。
 
-## 4 一键 self-test（8 项）
+## 4 一键 self-test（9 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -164,7 +177,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 # 可选：--workdir DIR、--keep
 ```
 
-覆盖与验收阈值（实测 **8/8** 通过，约 1.5 min）：
+覆盖与验收阈值（实测 **9/9** 通过，约 2 min）：
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -176,11 +189,18 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 | 6 | 两段式变换（单条检查，内部 (a)–(e) 子步骤）：(a) `--save-transform` 导出的 JSON 20 个字段齐全、`affine_q` 与 `correction_report.json` 逐位一致；(b) 同一参考图 apply → `_corrected.csv` 与拟合段一致（`np.allclose rtol=atol=1e-10`，NaN 掩码相同且实测逐字节相同）；(c) 换尺寸目标（生成器 160 → 画布 183 px）的 `n_out` 按**目标 n** 重算（期望 205，与参考图 435 不同）、log 契约行视场 = `L·n_out/n`、`apply_report.json` 写出；(d) 本地 `_image_transform` 镜像与包内 `bragg_peak.correct._image_transform` 在矩阵 / `n_out` / offset 上逐位一致；(e) `identity_fallback` 变换 → 目标原样复制且 log 含 WARNING | (a)–(e) 全部通过 |
 | 7 | 矫正 stage 的 `<stem>_corrected.h5`：root 三属性、`generator = "stm_topo_correct.py"`、`gzip`/4、显式 chunk = 约定 chunk、`track_times=False` | 约定完全符合；`fft2` 与 `.npy` `np.array_equal`（`complex128`）、`corrected` 用 `%.10e` 重渲染后与 CSV 文本逐字符相同（`float64`） |
 | 8 | 两段式两个 stage 的 h5 产物：拟合段同上；同网格 apply 段的 `corrected`/`fft2` 与拟合段**逐位相同**（dtype 相同）；换尺寸与 `identity_fallback` 两段也写出合规 h5（`generator = "stm_apply_transform.py"`） | 两个 stage 的 h5 都合规 + 同网格逐位相同 |
+| 9 | **帧方向门**（2026-10-14）：合成点阵 + **偏心零背景高斯标记**（幅值 10，晶格起伏约 ±3；标记中心在画布行 0.30 处，离画布中心约 130 px），跑拟合段与 apply 段，从产物里量标记的**质心行**；反例判据是同一判据作用在**翻转后**的输出上 | 拟合段 CSV 与 apply 段 CSV 的标记行与输入帧位置 `row_in + (n_out − n)/2` 差 ≤ 3 px（实测 +0.10 px / +0.10 px）；翻转后按同一判据必须落空 > 3 px（实测 +153 px）；地形 png 与 h5 `corrected` 数组**逐字节**可重渲（同一数组、同一帧） |
 
-包不可导入时检查 1、6、7、8 各自以 informational 跳过（同原 self-test 的分支）。
+包不可导入时检查 1、6、7、8、9 各自以 informational 跳过（同原 self-test 的分支）。
 
 ## 5 修改记录
 
+2026-10（帧约定，本版）：`stm_topo_correct.py` 与 `stm_apply_transform.py` 的数组产物改为
+**输出与输入同帧**——重采样仍在 `flipud(subtract_mean_plane(...))` 工作帧里做，写回前**翻转一次**，
+于是 `<stem>_corrected.csv` / `.h5` / `.png` 的第一行 = 该次运行的输入 CSV 的第一行
+（此前是相对输入翻过一次的旧帧）。翻转只有这一处，去平面/去均值/归一化与全部报告数值不变。
+self-test 8 → 9 项（新增**帧方向门**：合成点阵 + 偏心高斯标记，量标记质心行必须落在输入帧
+（≤3 px），并把"输出翻转后按同一判据必须落空"作为反例判据；该门去掉翻回一步即变红）。见 `CHANGES.md`。
 2026-09（HDF5 数组产物，本版）：矫正数组改为 **HDF5 优先**——`stm_topo_correct.py` 与
 `stm_apply_transform.py` 额外写出 `<stem>_corrected.h5`（数据集 `corrected` = 写进 CSV 的数组、
 `fft2` = 写进 `.npy` 的数组），由本 skill **自包含**的新模块 `scripts/h5io.py` 按仓库 h5 约定写出

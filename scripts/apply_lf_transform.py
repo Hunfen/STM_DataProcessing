@@ -11,6 +11,8 @@ original data; ``u`` is the in-plane displacement field of a bundle written by
 grid).  So this script does exactly that and nothing else::
 
     read T -> flipud (put it in u's index frame) -> sample at r + u(r) -> write
+    -> flipud back (the written product is in the frame of T: its first row is T's
+    first row; since 2026-10-14 the same convention holds for the two skill scripts)
 
 It never touches the target's values: no ``subtractMeanPlane``, no mean
 removal, no normalisation.  ``stm_lf_apply.py`` does subtract a fitted plane
@@ -133,7 +135,10 @@ def main(argv=None):
     outdir = Path(args.outdir) if args.outdir else src.parent
     outdir.mkdir(parents=True, exist_ok=True)
     out = outdir / f"{src.stem}_corrected.csv"
-    np.savetxt(out, corrected, delimiter=",", fmt="%.10e")
+    # The resampling works in u's index frame; the product goes out in the frame of
+    # the input matrix, so it is flipped back exactly once here.
+    written = np.flipud(corrected)
+    np.savetxt(out, written, delimiter=",", fmt="%.10e")
 
     print("# corrected(r) = T(r + u(r))  --  resample only, target values untouched")
     print(f"# input: {src}  ({n} x {n} px, {args.size_nm:g} nm)")

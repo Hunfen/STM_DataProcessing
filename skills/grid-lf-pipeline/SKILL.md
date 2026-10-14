@@ -66,7 +66,8 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 （默认 3）与 `--save-transform`；另有两个可选转发项 `--ring-tol` / `--ring-cluster-tol`，**只在调用方显式给出时**
 才转发（不给就由被调用脚本自己的默认值决定，保证这两个容差在 CLI 与库之间只有一个来源）：
 **`grid_lf_fit.py` 自己没有 `--stm-lib` 选项、也不向被调用脚本传它**——
-`stm_lf_correct.py` 走它自己的 `--stm-lib` 默认值（仓库 `src/`，见 `stm_lf_correct.py:213-216`）。
+`stm_lf_correct.py` 走它自己的 `--stm-lib` 默认值（仓库 `src/`，见 `stm_lf_correct.py:223-226` 的
+`--stm-lib` argparse 块：`"--stm-lib",` / `default=...` / `help=...` / `)`；**行号漂了就按这个锚点找**，2026-10-14 复核过）。
 传给它的 `--save-transform` 是**绝对路径**（`grid_lf_fit.py:156-160` 对默认名和显式值都做 `.resolve()`），
 所以 bundle JSON 里的 `u_field_file` 是绝对路径、Skill B 不需要相对解析；Skill B 仍保留「相对则按 bundle
 所在目录解析」的回退（`skills/grid-sym-fft/scripts/grid_sym.py:193-195`）。可迁移位移场包
@@ -133,8 +134,18 @@ shasum -a 256 /tmp/gridskill-a/topo.csv \
     <既有>/20251110_grid1_30mV500pA_30nm_topo.csv   # 必须逐字节相同
 
 # 步 ③ LF 拟合必须可复现既有 run（同一 byte 输入、同一 -L / --lambda-nm 3）：
-# 产出 <stem>_corrected.csv 与既有 lf/<stem>_topo_corrected.csv 逐元素相对差 ≤1e-9（实测逐字节=0）
+#   注意帧：2026-10-14 之前产出的 lf/<stem>_topo_corrected.csv 是**旧帧**（相对输入 topo
+#   翻了一次，第一行 = 输入的最后一行）；现在 lawler-fujita-correction 的产物与输入同帧
+#   （输出第一行 = 输入第一行）。所以与旧基准比较时要把**旧基准翻一次**再比，
+#   否则两侧相差整整一个上下翻转（不是数值误差）。新旧产物各自逐字节可复现，故翻转后仍应≤1e-9。
 .venv/bin/python skills/grid-lf-pipeline/scripts/grid_lf_fit.py /tmp/gridskill-a/topo.csv -L 30 -o /tmp/gridskill-a/lf
+.venv/bin/python -c "
+import numpy as np
+new = np.loadtxt('/tmp/gridskill-a/lf/topo_corrected.csv', delimiter=',')
+old = np.flipud(np.loadtxt('<既有>/lf/<stem>_topo_corrected.csv', delimiter=','))
+rel = np.abs(new - old) / np.maximum(np.abs(old), 1e-30)
+print('max relative difference vs the flipped old baseline:', np.nanmax(rel))
+"
 ```
 
 **本 skill 不修改 `skills/lawler-fujita-correction` 下任何文件**——只按相对路径运行它的 `stm_lf_correct.py`，

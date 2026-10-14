@@ -1,11 +1,13 @@
 """One-command self-test of the affine-correction skill: the geometry stage on a
-synthetic image with a known anisotropy, plus the two-stage transform workflow
-(``--save-transform`` export and ``stm_apply_transform.py`` on another canvas).
+synthetic image with a known anisotropy, the two-stage transform workflow
+(``--save-transform`` export and ``stm_apply_transform.py`` on another canvas), and
+the frame direction gate (a synthetic lattice plus an off-centre Gaussian marker:
+the first row of every product must be the first row of the input CSV).
 
 Everything checked here is geometry (a stretch matrix, a lattice constant derived
-from a measured ring radius, the anchor self-check verdict and the resampling
-round trip); no physical statement is made and no number is needed from the
-phase-analysis skill.
+from a measured ring radius, the anchor self-check verdict, the resampling round trip
+and the direction of the written frame); no physical statement is made and no number
+is needed from the phase-analysis skill.
 
     cd /path/to/STM_DataProcessing
     MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 \
@@ -41,6 +43,7 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import correction_lib as cl  # noqa: E402
 import h5io  # noqa: E402
 
 SQRT3 = float(np.sqrt(3.0))
@@ -522,6 +525,102 @@ def write_stretched_case(n, path, stretch=None, radius_frac=0.458, pad=10, order
 
 
 # --------------------------------------------------------------------------- #
+# frame direction gate (2026-10-14): the products carry the INPUT frame
+# --------------------------------------------------------------------------- #
+MARKER_AMPLITUDE = 10.0
+MARKER_CENTRE = (0.30, 0.25)  # (row, column) as a fraction of the canvas
+MARKER_SIGMA_FRAC = 1.0 / 24.0
+FRAME_TOLERANCE_PX = 3.0
+
+
+def marker_sigma(n):
+    """Smoothing scale of the marker detector: deletes the lattice, keeps the marker."""
+    return max(8.0, n / 24.0)
+
+
+def marker_row(matrix, sigma):
+    """Centroid row (px) of the Gaussian marker in ``matrix``.
+
+    The lattice lives at the 1x1 ring, i.e. at a period of a few pixels, while the
+    marker is a wide smooth blob: one Gaussian low pass at ``sigma`` deletes the
+    lattice and leaves the marker alone, and the centroid is taken over the smoothed
+    pixels above 60 % of the smoothed maximum.  ``sigma`` comes from the caller (both
+    sides of a comparison use the scale of the *input* canvas, so the detector itself
+    contributes no frame-dependent bias), and the NaN padding of a grown canvas is
+    excluded.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    data = np.asarray(matrix, dtype=float)
+    finite = np.isfinite(data)
+    fill = float(np.mean(data[finite])) if bool(finite.any()) else 0.0
+    smoothed = gaussian_filter(np.where(finite, data, fill), sigma=float(sigma))
+    weight = np.clip(smoothed - 0.6 * smoothed.max(), 0.0, None)
+    total = float(weight.sum())
+    if total <= 0.0:
+        return float("nan")
+    rows = np.arange(data.shape[0], dtype=float)[:, None]
+    return float((weight * rows).sum() / total)
+
+
+def png_renders_array(png_path, array):
+    """True when the png is a byte-exact render of ``array`` by the skill's plot code.
+
+    Both scripts draw the topography as ``imshow(array, cmap=cmap_bad,
+    origin="lower")`` on a 6x6 in figure with the axes off, saved as
+    ``dpi=300, bbox_inches="tight", pad_inches=0``.  Reproducing exactly that here and
+    comparing the file bytes is the strongest available statement of "the png is this
+    array": nothing about the array, its frame or its orientation can differ without
+    changing the bytes.
+    """
+    import matplotlib.pyplot as plt
+
+    cl.setup_style()
+    stm_lib = "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"
+    cmap, _source = cl.load_colormap(stm_lib)
+    cmap_bad = cmap.copy()
+    cmap_bad.set_bad(color=cl.BAD_COLOR)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(array, cmap=cmap_bad, origin="lower")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis("off")
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+    return bool(png_path.is_file() and png_path.read_bytes() == buffer.getvalue())
+
+
+def marker_case(n, path):
+    """Synthetic lattice plus one off-centre zero-background Gaussian marker.
+
+    The marker is ``MARKER_AMPLITUDE`` strong against a lattice whose undulation is
+    about ±3, so it is the global maximum of the image by a wide margin; it sits at
+    ``MARKER_CENTRE`` (row 0.30, column 0.25 of the canvas), far from the centre and
+    from every edge, so a flip of the written frame moves its centroid row by ~200 px.
+    The case is written **without** a stretch on purpose: the correction is then
+    near-identity and the only row change left is the symmetric canvas growth, so the
+    check sees the frame and nothing else.
+
+    Returns the csv path, the marker's centroid row in the written matrix and the
+    field of view that puts the synthetic's reference ring on the nominal lattice
+    constant (the rule of :func:`write_stretched_case`, without the stretch).
+    """
+    image, _r1 = synthetic_image(n, 0.458)
+    rows, cols = np.mgrid[:n, :n]
+    centre_row = MARKER_CENTRE[0] * (n - 1)
+    centre_col = MARKER_CENTRE[1] * (n - 1)
+    sigma = MARKER_SIGMA_FRAC * n
+    image = image + MARKER_AMPLITUDE * np.exp(
+        -((rows - centre_row) ** 2 + (cols - centre_col) ** 2) / (2.0 * sigma**2)
+    )
+    np.savetxt(path, image, delimiter=",", fmt="%.10e")
+    ideal_b1 = 4.0 * np.pi / (SQRT3 * 0.246)
+    field_of_view = 2.0 * np.pi * (0.458 * n) / ideal_b1
+    return path, marker_row(image, marker_sigma(n)), field_of_view
+
+
+# --------------------------------------------------------------------------- #
 # the two-stage transform workflow (export + apply on another canvas)
 # --------------------------------------------------------------------------- #
 def test_transform_stage(n, workdir):
@@ -788,9 +887,11 @@ def test_transform_stage(n, workdir):
     )
     ident_csv = apply_ident_dir / f"{ref_csv.stem}_corrected.csv"
     expected = io.StringIO()
+    # The product is written in the input frame: the identity fallback copies the
+    # preprocessed target with the working frame's flip undone exactly once.
     np.savetxt(
         expected,
-        np.flipud(subtract_mean_plane(load_image(ref_csv))),
+        subtract_mean_plane(load_image(ref_csv)),
         delimiter=",",
         fmt="%.10e",
     )
@@ -894,6 +995,129 @@ def test_transform_stage(n, workdir):
     )
 
 
+def test_direction_gate(n, workdir):
+    section(
+        "frame direction gate: output first row = input first row (off-centre marker)"
+    )
+    try:
+        sys.path.insert(0, "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src")
+        import stm_data_processing  # noqa: F401
+    except Exception as exc:
+        check(
+            "frame direction gate skipped",
+            True,
+            f"the package is not importable here ({type(exc).__name__}); run the "
+            f"self-test with the repository interpreter to cover this gate",
+            "informational",
+        )
+        return
+
+    env = dict(os.environ)
+    env["MPLCONFIGDIR"] = str(workdir / ".mplcache")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    (workdir / ".mplcache").mkdir(parents=True, exist_ok=True)
+    base = workdir / "direction"
+    base.mkdir(parents=True, exist_ok=True)
+
+    csv_path, row_in, field_of_view = marker_case(n, base / "marker.csv")
+    sigma = marker_sigma(n)
+    fit_dir = base / "fit"
+    transform_path = base / "transform.json"
+    fit = run_script(
+        "stm_topo_correct.py",
+        [
+            str(csv_path),
+            "-L",
+            f"{field_of_view:.6f}",
+            "-o",
+            str(fit_dir),
+            "--anchor-ring",
+            "r3",
+            "--save-transform",
+            str(transform_path),
+        ],
+        env,
+    )
+    apply_dir = base / "apply"
+    applied = run_script(
+        "stm_apply_transform.py",
+        [
+            str(csv_path),
+            "--transform",
+            str(transform_path),
+            "-L",
+            f"{field_of_view:.6f}",
+            "-o",
+            str(apply_dir),
+        ],
+        env,
+    )
+
+    # The one row a run must reproduce: the marker sits at `row_in` in the input frame;
+    # the canvas grows symmetrically, so the same feature is expected at
+    # row_in + (n_out - n) / 2.  Flipping the output would put it at n_out - 1 - row.
+    measured = []
+    fit_n_out = None
+    fit_csv = fit_dir / f"{csv_path.stem}_corrected.csv"
+    apply_csv = apply_dir / f"{csv_path.stem}_corrected.csv"
+    if fit.returncode == 0 and fit_csv.is_file():
+        array = np.loadtxt(fit_csv, delimiter=",")
+        fit_n_out = int(array.shape[0])
+        measured.append(
+            ("stm_topo_correct.py csv", fit_n_out, marker_row(array, sigma))
+        )
+    if applied.returncode == 0 and apply_csv.is_file():
+        array = np.loadtxt(apply_csv, delimiter=",")
+        measured.append(
+            (
+                "stm_apply_transform.py csv",
+                int(array.shape[0]),
+                marker_row(array, sigma),
+            )
+        )
+    png = fit_dir / f"{csv_path.stem}_corrected.png"
+    fit_h5 = fit_dir / f"{csv_path.stem}_corrected.h5"
+    corrected_from_h5 = h5_read(fit_h5, "corrected")
+    png_exact = bool(
+        corrected_from_h5 is not None
+        and png.is_file()
+        and png_renders_array(png, corrected_from_h5)
+    )
+
+    parts = []
+    ok = len(measured) == 2 and png_exact
+    for label, n_out, row in measured:
+        expected = row_in + (n_out - n) / 2.0
+        mirror = (n_out - 1) - row
+        delta, mirror_delta = row - expected, mirror - expected
+        ok = (
+            ok
+            and abs(delta) <= FRAME_TOLERANCE_PX
+            and abs(mirror_delta) > FRAME_TOLERANCE_PX
+        )
+        parts.append(
+            f"{label}: canvas {n} -> {n_out}, marker row {row:.2f} px vs {expected:.2f} px "
+            f"in the input frame (delta {delta:+.2f} px); the flipped output lands at "
+            f"{mirror:.2f} px, {mirror_delta:+.2f} px off the same criterion"
+        )
+    parts.append(
+        f"topography png: byte-exact re-render of the h5 `corrected` array "
+        f"{png_exact} (that array is the one written to the CSV, so the png shows the "
+        f"same array in the same frame)"
+    )
+    check(
+        "frame direction gate: every product of a run is written in the input frame",
+        ok,
+        f"marker centroid row in the input frame {row_in:.2f} px (canvas {n}, "
+        f"{MARKER_CENTRE[0]:.2f} of the canvas in rows, amplitude {MARKER_AMPLITUDE:g} "
+        f"against a lattice undulation of about ±3); exit codes {fit.returncode} / "
+        f"{applied.returncode}; "
+        + ("; ".join(parts) if parts else "no product to measure"),
+        f"|row - input frame row| <= {FRAME_TOLERANCE_PX:g} px, flipped output > "
+        f"{FRAME_TOLERANCE_PX:g} px off, png byte-exact",
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -929,6 +1153,7 @@ def main(argv=None):
 
     test_correction_stage(args.size, workdir)
     test_transform_stage(args.size, workdir)
+    test_direction_gate(args.size, workdir)
 
     failed = [name for name, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")

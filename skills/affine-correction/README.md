@@ -64,7 +64,10 @@ apply 段不做峰检测与锚定自检——`apply_report.json` / log 里的 `a
 `fft2` = 写进 `.npy` 的 `complex128` 数组；root `schema_version = 1` / `generator` /
 `creation_date`，显式 chunk + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`）。
 **`.npy` FFT2 同时保留**：`skills/phase-analysis/` 用它做 `--fft2` 输入（phase-analysis
-不在本次产物迁移范围）。CSV/PNG/JSON/log 的名称与内容不变。
+不在本次产物迁移范围）。CSV/PNG/JSON/log 的名称与内容不受 HDF5 迁移影响（帧约定见下）。
+**帧（2026-10-14 起）**：`<stem>_corrected.*` 与**该次运行的输入 CSV 同帧**——输出第一行 =
+输入 CSV 的第一行；此前（≤2026-10-13）产出的基准是旧帧（相对输入翻过一次），比较时一侧需翻转。
+见 `SKILL.md` §2 帧约定与 `CHANGES.md` 的 2026-10 条。
 下游接口契约（`corrected canvas ... field of view X nm` 行、`affine_q` 等）见 `SKILL.md` §3。
 
 ## 修改记录

@@ -17,7 +17,8 @@ description: Lawler–Fujita 晶格相位矫正（Fujita et al., PNAS 2014, SI �
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtract_mean_plane(...))` 转到数组坐标，与 affine skill 一致；`subtract_mean_plane` 是本 skill 内联的 NaN 安全平面拟合，见 `scripts/stm_lf_correct.py:82`） |
+| 输入 | 正方形拓扑数值矩阵 CSV/txt（可含 NaN）。**第一行 = 扫描起始行 = 图像顶部**（脚本内部 `flipud(subtract_mean_plane(...))` 转到数组坐标，与 affine skill 一致；`subtract_mean_plane` 是本 skill 内联的 NaN 安全平面拟合，见 `scripts/stm_lf_correct.py:92` 的 `def subtract_mean_plane`——**行号漂了就按这个函数名找**，2026-10-14 复核过） |
+| 帧 | **产物与输入同帧**（2026-10-14 起）：`<stem>_corrected.csv` / `.h5` / `.png` 的第一行 = **该次运行的输入 CSV 的第一行**；`<stem>_lf.h5` 的 theta / amplitude / u / mask 与包的 u 场仍留在内部工作帧（求解器状态，不是输入图的像）。见 §2 帧约定 |
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方 1x1 环，晶格常数 `a`（默认 0.246 nm）；**半径取理想值 `2L/(√3a)` px，取向取数据自身**（见 §2.3） |
 | 锚定环 | **理想半径锚定**：`lf_lib.hexagon_ring_near_radius()` 在由 `a`（0.246 nm）与视场 `L` 定出的理想 1x1 半径 `2L/(√3a)` 的 ±`--ring-tol`（默认 10 %）窗内取最强反射为参考方向，要求其 ±120° 伙伴（三条独立基矢、彼此 60°）并返回三者及其 Friedel 镜像；`stm_lf_correct.py` 按三级来源依次尝试（① legacy 半径聚类 ② 理想半径窗内的检出峰 ③ \|FFT\| 环带），每级都须能给出三条 lock-in 方向才被采纳，全部失败时打印峰表（\|q\|/角度/snr）与逐源拒绝原因，再走 identity 回退（不静默） |
@@ -40,6 +41,15 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 .venv/bin/python skills/lawler-fujita-correction/scripts/stm_lf_apply.py \
   TARGET.csv --transform OUT/bundle.json -L 50 -o OUT_TARGET
 ```
+
+**帧约定（2026-10-14）**：`stm_lf_correct.py` 与 `stm_lf_apply.py` 的内部计算都在工作帧
+`flipud(subtract_mean_plane(...))`（第一行 = 顶扫行）里进行，但**产物按该次运行的输入 CSV 的帧
+写出**——重采样结果在残差自检之后**翻转一次**再落盘，因此 `<stem>_corrected.csv` / `.h5` /
+`.png` 的第一行就是**输入 CSV 的第一行**（不再相对输入翻过一次）。CSV 数组、h5 的 `corrected`
+数据集与地形 png 是**同一个数组**，h5 的 `fft2` 数据集与 `.npy` 是**同一个数组**；
+`<stem>_lf.h5` 里的 theta / amplitude / u / mask **仍留在工作帧**（参考网格上的求解器状态，
+不是输入图的像），`<bundle>.h5` 的 u 场同理（apply 段按同一工作帧读入）。此前（≤2026-10-13）
+产出的基准是旧帧，与它们比较时一侧需翻转（见 `grid-lf-pipeline` §6 第 ③ 步）。
 
 ### 2.1 模型与约定（脚本内固定，自检端到端验证）
 
@@ -130,7 +140,7 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 
 | 产物 | 说明 |
 | --- | --- |
-| `<stem>_corrected.csv` | 矫正后拓扑（正方形，`%.10e` 逗号分隔，NaN 填充） |
+| `<stem>_corrected.csv` | 矫正后拓扑（正方形，`%.10e` 逗号分隔，NaN 填充），**与本次运行的输入 CSV 同帧**（输出第一行 = 输入第一行，见 §2 帧约定） |
 | `<stem>_corrected.h5` | HDF5 数组产物：`corrected`（`float64`，与 CSV 同一数组）+ `fft2`（`complex128`，与 `.npy` 同一数组）；本 skill 自包含的 `scripts/h5io.py` 按仓库 h5 约定写出（`schema_version = 1`、`generator`、`creation_date`、`n_px`（int，填充后画布边长），显式 chunk ≤ 1 MiB + `gzip`/4 + `track_times=False`；两个数组无物理单位故无 `units`） |
 | `<stem>_corrected_fft2.npy` | 复数 FFT2（`complex128`，fftshift，Hanning 窗 + NaN 平面填充，与 affine skill 同口径）。**保留**：`skills/phase-analysis/` 通过 `--fft2` 读它，phase-analysis 不在本次迁移范围 |
 | `<stem>_corrected.png` / `<stem>_corrected_fft.png` | gwyddion 拓扑图 / inferno 对数 FFT 图 |
@@ -148,7 +158,8 @@ u(r)  ~  u_true(r) + a + S r      (a 平动, S 均匀应变，由参考选择固
 
 **Lawler–Fujita 附加产物**：相位/幅度/位移/掩码全部是**一个 HDF5 文件** `<stem>_lf.h5` 的
 数据集（**文件名一律带 `_lf_` 标记**），每张图另有 `<stem>_lf_<name>.png` 预览；
-不再写 per-map `.npy`。
+不再写 per-map `.npy`。**这些数据集与包的 u 场不做输入帧翻转**：它们是参考网格上的求解器
+状态（相位 `θ`、lock-in 幅度 `|ψ|`、位移 `u`、有效掩码），不是输入拓扑的像。
 
 | 数据集（`<stem>_lf.h5`） | 内容 | `units` | png 预览 |
 | --- | --- | --- | --- |
@@ -231,7 +242,7 @@ h5 内容（`scripts/h5io.py`，仓库 h5 约定）：`u_x`、`u_y`（nm，参�
 | 掩码传递 | `valid` 随场一起重采样；无效像素不施加位移 |
 | 回退包 | `method = "identity_fallback"` 时目标图原样复制 + log WARNING |
 
-## 5 一键 self-test（23 项）
+## 5 一键 self-test（24 项）
 
 ```bash
 cd /path/to/STM_DataProcessing
@@ -246,8 +257,10 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 **判据已于 2026-10 按现行（理想半径锚定）口径重测**（§6「可见性」）：环可见性与「成员间半径离散
 是否超过 2–3 %」无关，那套判据随旧聚类锚定一起作废，本文件的旧数字只作历史注记，不再引用。
 
-覆盖与验收阈值（实测 **23/23** 通过）。下表 # 列为分组内序号（既有约定）；运行时按全局计数，
-#17/#18/#19 对应运行时的第 21/22/23 条。
+覆盖与验收阈值（实测 **24/24** 通过）。下表 # 列为分组内序号（既有约定），与运行时全局编号不同：
+运行时的顺序是 §5 表里 #1… 依次，但 #6b 跑在 #6 之前、#17/#18/#19 实际是第 9/10/11 条，
+新增的**帧方向门**是第 23 条，回退检查是第 24 条（末尾 λ = 30 nm 的 informational 输出不计入）。
+校验计数可用：`grep -c '\[PASS\]' <日志>` = 24。
 
 | # | 检查 | 验收阈值 |
 | --- | --- | --- |
@@ -274,6 +287,7 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 | 17 | `written` 登记 `corrected_h5` 且文件存在 | `written.corrected_h5` 键在 + `Path.is_file()` |
 | 18 | `_corrected.h5` 根属性 `n_px` 与数据集 shape 一致（从文件读回） | `attrs['n_px'] == corrected.shape[0] == fft2.shape[0]` |
 | 19 | 报告记录 `ring_cluster_tol` / `ring_tol` 等于 CLI 值 | 默认运行 = 0.02 / 0.10 |
+| 20 | **帧方向门**（2026-10-14）：512 px 合成点阵 + **偏心零背景高斯标记**（幅值 10 对晶格起伏约 ±3；标记中心在画布行 0.30 处），跑 `stm_lf_correct.py`、`stm_lf_apply.py` 与仓库根 `scripts/apply_lf_transform.py`，从各自产物里量**标记质心行**；反例判据是同一判据作用在**翻转后**的输出上 | 三个 CSV 的标记行与输入帧位置 `row_in + (n_out − n)/2` 差 ≤ 3 px（实测 −1.15 / −1.15 / −1.28 px，含真实的 ≤1.3 px 位移场位移）；翻转后按同一判据必须落空 > 3 px（实测 +205 px）；地形 png 与 h5 `corrected` 数组**逐字节**可重渲（同一数组、同一帧） |
 
 另有 1 条 **informational** 输出：默认 λ = 30 nm 在合成数据上只保留 0.117 nm（63.7 %）的位移，
 说明默认低通对应的是远小于 1 % 应变的畸变（不参与判定）。
@@ -313,6 +327,15 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 
 ## 7 修改记录
 
+2026-10（帧约定，本版）：`stm_lf_correct.py` / `stm_lf_apply.py` 与仓库根
+`scripts/apply_lf_transform.py` 统一为**输出与输入同帧**——重采样仍在
+`flipud(subtract_mean_plane(...))` 工作帧里做，写回前**翻转一次**，于是
+`<stem>_corrected.csv` / `.h5` / `.png` 的第一行 = 该次运行的输入 CSV 的第一行（此前是相对
+输入翻过一次的旧帧）；`<stem>_lf.h5` 的相位/幅度/位移/掩码与包的 u 场**不翻转**（求解器状态）。
+翻转只有这一处，去平面/去均值/归一化与全部报告数值不变，同网格 apply 与拟合段仍逐字节相同。
+self-test 23 → 24 项（新增**帧方向门**：合成点阵 + 偏心高斯标记，三个重采样脚本的产物标记行
+都必须落在输入帧（≤3 px），并把"输出翻转后按同一判据必须落空"作为反例判据；该门去掉翻回一步
+即变红）。见 `CHANGES.md`。
 2026-09（HDF5 数组产物，本版）：全部数组侧产物改为 **HDF5 优先**——新增自包含模块
 `scripts/h5io.py`（仓库 h5 约定：`SCHEMA_VERSION = 1`、`gzip`/4、显式 chunk ≤ 1 MiB、
 root `schema_version`/`generator`/`creation_date`、`units` 属性；skill **不** import

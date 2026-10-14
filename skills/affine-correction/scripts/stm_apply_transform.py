@@ -22,6 +22,12 @@ Preprocessing and geometry:
   stretch and corrected nothing, so the target is copied verbatim (``n_out = n``,
   field of view unchanged, no NaN added).
 
+Frame convention (2026-10-14): the resampling runs in the same working frame as the
+fit stage (``flipud(subtract_mean_plane(...))``), but the products are written in the
+frame of **this run's** input CSV -- the first row of the output is the first row of
+the target.  The resampled array is flipped back exactly once, right before the
+products are written.
+
 Outputs (same naming and plot style as the fit stage):
     <outdir>/<stem>_corrected.csv       corrected topography (square, NaN padded)
     <outdir>/<stem>_corrected.h5        corrected + FFT2 (HDF5, repo h5 convention)
@@ -343,6 +349,12 @@ def main(argv=None):
     )
 
     out_csv = outdir / f"{stem}_corrected.csv"
+    # Frame convention (2026-10-14): the products go out in the frame of THIS run's
+    # input CSV (first row of the output = first row of the target).  The resampling
+    # above works in the fit stage's working frame flipud(...), so the array is
+    # flipped back exactly once, here, and every product below -- CSV, h5, npy and
+    # both pngs -- is derived from this one array.
+    corrected = np.flipud(corrected)  # input frame
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
     fft2_corrected = compute_fft2(corrected, size_out, subtract_plane=False)
     out_fft2 = outdir / f"{stem}_corrected_fft2.npy"

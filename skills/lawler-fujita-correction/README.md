@@ -25,8 +25,11 @@
 - `scipy`（`fft.dctn/idctn`、`ndimage.map_coordinates/distance_transform_edt`）、`numpy`、`matplotlib`
 - `h5py`（HDF5 产物；仓库 `pyproject.toml` 已含）
 - **依赖 `stm_data_processing` 是设计意图，不是缺陷**：本 skill 有意住在仓库里、有意用这个包——
-  `stm_lf_correct.py` 用 `--stm-lib`（默认 = 仓库 `src/`，见 `scripts/stm_lf_correct.py:213-216`）
-  把 `stm_data_processing.utils.bragg_peak` 接进 `sys.path`（`stm_lf_correct.py:612`），`lf_lib.load_colormap`
+  `stm_lf_correct.py` 用 `--stm-lib`（默认 = 仓库 `src/`，见 `scripts/stm_lf_correct.py:223-226` 的
+  `--stm-lib` argparse 块：`"--stm-lib",` / `default="/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"` /
+  `help="STM_DataProcessing src directory"` / `)`；**行号漂了就按这个锚点找**，2026-10-14 复核过）
+  把 `stm_data_processing.utils.bragg_peak` 接进 `sys.path`（`stm_lf_correct.py:622` 的
+  `from stm_data_processing.utils.bragg_peak import (`；同上按锚点找），`lf_lib.load_colormap`
   同理取 `stm.preview_plot.gwyddion`（取不到才回落到 builtin 锚点）。**平面拟合已内联**：
   `scripts/{stm_lf_correct,stm_lf_apply,selftest}.py` 各自有一个逐位等价的 NaN 安全 `subtract_mean_plane`，
   所以 `utils.plot_funcs` **不再是依赖**（它会在模块级 import `nanonispy`）。
@@ -77,7 +80,12 @@ lock-in 只保留满足 `|∇u| < 2π/(|K|λ)` 的畸变结构，`|K| = 4π/(√
 与 `fft2`（`complex128`，与 `.npy` 同一数组），root 有 `schema_version = 1` / `generator` /
 `creation_date` / `n_px`（int，填充后画布边长），逐数据集显式 chunk + `gzip`/4 + `track_times=False`。
 **`<stem>_corrected_fft2.npy` 同时保留**：`skills/phase-analysis/` 用它做 `--fft2` 输入
-（phase-analysis 不在本次产物迁移范围）。CSV/PNG/log 名称与内容不变。
+（phase-analysis 不在本次产物迁移范围）。CSV/PNG/log 名称与内容不受 HDF5 迁移影响（帧约定见下）。
+
+**帧（2026-10-14 起）**：`<stem>_corrected.*` 与**该次运行的输入 CSV 同帧**——输出第一行 =
+输入 CSV 的第一行；此前（≤2026-10-13）产出的基准是旧帧（相对输入翻过一次），比较时一侧需翻转。
+`<stem>_lf.h5` 的 theta / amplitude / u / mask 与包的 u 场**不翻转**（参考网格上的求解器状态，
+不是输入图的像）。见 `SKILL.md` §2 帧约定与 `CHANGES.md` 的 2026-10 条。
 
 下游契约：`correction.log` 必须含 `# corrected canvas: <n_out> x <n_out> px, field of view <X> nm (...)`
 一行（`phase-analysis --size-nm-from-log` 优先解析它），`X = L · n_out / n`。详见 `SKILL.md` §3。
