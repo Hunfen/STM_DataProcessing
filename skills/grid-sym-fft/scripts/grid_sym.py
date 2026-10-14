@@ -24,6 +24,28 @@ field lives in (see the "coordinate frames" section of ``SKILL.md`` and
 ``apply_transform()``).  It never touches the target values -- no
 ``stm_lf_apply.py`` (that one removes a plane), only ``lf_lib.warp_by_field``.
 
+**Two transform branches.**  ``--transform`` accepts either transferable bundle:
+
+* an **LF displacement-field bundle** (Skill A: ``lawler-fujita-correction``) --
+  ``corrected(r) = T(r + u(r))`` through ``lf_lib.warp_by_field``, with the flat
+  layout of ``SKILL.md`` §3;
+* an **affine transform bundle** (``affine-correction``: schema
+  ``topo-correction-transform``) -- ``A = P M^-1 P`` plus the offset/canvas side of
+  the affine skill's ``_image_transform``, applied **directly to the map as read
+  from ``/data``, with no flip at all** (the affine skill's apply stage goes
+  through the topo *CSV* frame and flips there; the h5 frame is that frame's flip,
+  so copying that ``flipud`` here would mirror the correction).  Every product of
+  this branch is prefixed with ``<out>/affine/`` and only the c-e stages are
+  written (``corrected`` / ``fft_corrected`` / ``z3`` / ``c3dc``): there is no
+  ``raw/``, ``fft_raw/`` or ``window_candidates/``, so no colour-candidate run
+  exists for this branch and ``--window-candidates`` is fail-closed.  The per-role
+  colour windows are inherited from the LF run's ``<out>/fft_window.json`` (or from
+  the branch's own ``<out>/affine/fft_window.json`` once written) and this run's
+  selection is written back there.  Provenance is stated truthfully in
+  ``pipeline.log`` and ``<out>/affine/affine_provenance.json`` (the fit's
+  ``anchor_verdict`` / ``n_labelled`` are passed through as they are, and the
+  anchor self-check is *not* re-run here).
+
 **Two-run color-scale protocol.**  The user looks at real candidate figures
 before committing to a FFT colormap (they dislike formula-derived windows):
 
@@ -101,6 +123,17 @@ BWD_MARKER = "[bwd]"
 Z_COLUMN = "Z (m)"
 FFT_WINDOW_FILE = "fft_window.json"
 CANDIDATES_FILE = "fft_window_candidates.json"
+
+#: Affine branch (``--transform`` = an ``affine-correction`` bundle).
+#: Schema of the affine skill's transform JSON; the discriminator between the two
+#: bundle kinds, together with a positive-definite ``affine_q``.
+AFFINE_SCHEMA = "topo-correction-transform"
+#: ``<out>/affine`` -- every product of the affine branch is prefixed with it (the
+#: caller still passes ``-o <out>``), and only the c-e stages are written.
+AFFINE_DIRNAME = "affine"
+AFFINE_PROVENANCE_FILE = "affine_provenance.json"
+#: Maps physical (x, y) order to array (row, col) order and back; ``A = P M^-1 P``.
+AXIS_SWAP = np.array([[0.0, 1.0], [1.0, 0.0]])
 
 # Color-scale candidate generation: (vmin percentile, vmax percentile) of **one
 # role's own** log|F| distribution.  Windows are never pooled across roles --
@@ -236,27 +269,204 @@ def require_z_column(h5_path: Path) -> None:
 def resolve_transform(transform: str) -> Path:
     """Locate the transform JSON from ``--transform`` (a file or a directory).
 
-    A directory must contain exactly one ``*_transform.json``; zero or more
-    than one is fail-closed.
+    A directory must hold exactly one bundle: ``*_transform.json`` (the LF naming
+    of Skill A) or ``transform.json`` (the affine skill's).  Zero or more than one
+    candidate is fail-closed -- and the ambiguous case lists the candidates.
     """
     p = Path(transform)
     if p.is_file():
         return p
     if p.is_dir():
-        matches = sorted(p.glob("*_transform.json"))
+        found = list(p.glob("*_transform.json"))
+        plain = p / "transform.json"
+        if plain.is_file():
+            found.append(plain)
+        # one entry per resolved path, in file-name order
+        matches = sorted({m.resolve(): m for m in found}.values(), key=lambda m: m.name)
         if len(matches) == 0:
             raise SystemExit(
-                f"ERROR: {transform} contains no *_transform.json bundle "
-                f"(found: {[x.name for x in p.iterdir()]})"
+                f"ERROR: {transform} contains no *_transform.json / transform.json "
+                f"bundle (found: {[x.name for x in p.iterdir()]})"
             )
         if len(matches) > 1:
             raise SystemExit(
-                f"ERROR: {transform} contains {len(matches)} *_transform.json "
-                f"bundles; pass the exact file instead. Found: "
-                f"{[m.name for m in matches]}"
+                f"ERROR: {transform} contains {len(matches)} transform bundles "
+                f"({[m.name for m in matches]}); pass the exact file instead"
             )
         return matches[0]
     raise SystemExit(f"ERROR: --transform {transform} does not exist")
+
+
+def read_json_object(path: Path):
+    """Read ``path`` as a JSON object; fail-closed on anything else."""
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as exc:
+        raise SystemExit(f"ERROR: cannot read {path}: {exc}") from exc
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        raise SystemExit(f"ERROR: {path} is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"ERROR: {path} must hold a JSON object, got {type(payload).__name__}"
+        )
+    return payload
+
+
+def affine_q_problem(payload):
+    """Why ``payload`` is not an affine bundle, or ``None`` when it is one.
+
+    An affine bundle is ``schema == AFFINE_SCHEMA`` **plus** a finite 2x2
+    ``affine_q`` with a positive determinant (the map has to be invertible).  The
+    ``fallback`` key is deliberately not part of this test: an affine bundle
+    carries ``fallback: true`` exactly when the fit solved nothing, and it is still
+    an affine bundle.
+    """
+    if payload.get("schema") != AFFINE_SCHEMA:
+        return f"schema is {payload.get('schema')!r}, not {AFFINE_SCHEMA!r}"
+    raw = payload.get("affine_q")
+    try:
+        q = np.asarray(raw, dtype=float)
+    except TypeError, ValueError:
+        return f"affine_q is not numeric ({raw!r})"
+    if q.shape != (2, 2) or not np.all(np.isfinite(q)):
+        return f"affine_q must be a finite 2x2 matrix, got {raw!r}"
+    det = float(np.linalg.det(q))
+    if det <= 0.0:
+        return f"affine_q must have a positive determinant, got det = {det!r}"
+    return None
+
+
+def classify_transform(payload, bundle_json: Path) -> str:
+    """``"affine"`` or ``"lf"`` for one bundle JSON, fail-closed when ambiguous.
+
+    ``schema`` first: ``topo-correction-transform`` with a valid ``affine_q`` is the
+    affine branch; a ``u_field_file`` key is the LF branch.  Both at once (an affine
+    bundle that also points at a u field) and neither are fail-closed with the
+    reason, so a bundle is never silently sent down the wrong stage.
+    """
+    problem = affine_q_problem(payload)
+    is_affine = problem is None
+    is_lf = "u_field_file" in payload
+    if is_affine and is_lf:
+        raise SystemExit(
+            f"ERROR: {bundle_json} looks like BOTH an affine transform bundle "
+            f"(schema {payload.get('schema')!r} with a positive-definite affine_q) "
+            f"and an LF displacement-field bundle (it carries 'u_field_file'); "
+            f"refusing to guess which stage to apply -- pass the bundle of the "
+            f"branch you want"
+        )
+    if not is_affine and not is_lf:
+        raise SystemExit(
+            f"ERROR: {bundle_json} is neither an affine transform bundle "
+            f"({problem}) nor an LF displacement-field bundle (no 'u_field_file' "
+            f"key); pass the JSON Skill A or affine-correction wrote"
+        )
+    return "affine" if is_affine else "lf"
+
+
+def affine_geometry(payload, bundle_json: Path):
+    """The affine numbers the resampling stage needs, validated once."""
+    problem = affine_q_problem(payload)
+    if problem is not None:
+        raise SystemExit(f"ERROR: {bundle_json} is not an affine bundle: {problem}")
+    return {
+        "affine_q": np.asarray(payload["affine_q"], dtype=float),
+        "pad": int(payload.get("pad", 10)),
+        "order": int(payload.get("order", 3)),
+        # same semantics as the affine skill's apply stage: nothing was solved
+        "fallback": bool(payload.get("fallback", False))
+        or payload.get("method") == "identity_fallback",
+        "method": payload.get("method"),
+    }
+
+
+def image_transform(stretch, n, pad):
+    """Array matrix, canvas side and offset of the affine resampling.
+
+    **Local mirror** of ``stm_apply_transform._image_transform`` in the
+    ``affine-correction`` skill (``skills/affine-correction/scripts/
+    stm_apply_transform.py``), which itself mirrors the package's
+    ``bragg_peak.correct._image_transform``: the map is ``A = P M^-1 P`` (``P`` the
+    axis swap), the canvas holds every transformed corner of the ``n``-pixel input
+    plus ``pad`` pixels and the offset aligns the two centres.
+
+    It is mirrored instead of imported so this skill keeps its single dependency
+    (``lf_lib``) and never reaches into another skill's script, and the mirror
+    agrees with the original bit for bit -- that agreement is a self-check in
+    ``SKILL.md`` §8 item 11.
+    """
+    matrix = AXIS_SWAP @ np.linalg.inv(np.asarray(stretch, dtype=float)) @ AXIS_SWAP
+    corners = (
+        np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    )
+    extent = np.abs(np.linalg.inv(matrix) @ corners.T).max(axis=1)
+    n_out = 2 * (int(np.ceil(float(extent.max()))) + int(pad)) + 1
+    offset = (n - 1) / 2.0 - matrix @ np.array([(n_out - 1) / 2.0, (n_out - 1) / 2.0])
+    return matrix, n_out, offset
+
+
+def apply_affine(role_map: np.ndarray, geometry):
+    """Apply the fitted affine map to a map **in the h5 frame**: 0 flips.
+
+    ``A = P M^-1 P`` and the offset of :func:`image_transform` are applied straight
+    to the map as read from ``/data``.  That is the frame ``A`` was fitted in: the
+    h5 ``/data`` and ``/params`` arrays share one flat pixel index, ``grid_topo.py``
+    flips the topo CSV it writes, and the affine fit (``stm_topo_correct.py``) flips
+    that CSV back before fitting.  The affine skill's own apply stage reaches the same
+    frame by flipping *its* CSV input before resampling (and flipping the product back
+    since 2026-10-14) -- copying that input flip here would apply the mirrored
+    correction.  Measured on 2025-11-15 (n = 304, marker at row 20): the two routings
+    differ by the pure mirror ``n_out - 1 - 2r`` ~ 290 px, and a real map's high-pass
+    cross-correlation with the flipped routing drops to ~0.
+
+    ``method == identity_fallback`` means the fit solved nothing: the map is copied
+    onto its own canvas with no NaN added, exactly like the affine skill's apply
+    stage.
+    """
+    n = int(role_map.shape[0])
+    if geometry["fallback"]:
+        return np.array(role_map, dtype=float, copy=True), n
+    matrix, n_out, offset = image_transform(geometry["affine_q"], n, geometry["pad"])
+    corrected = scipy.ndimage.affine_transform(
+        role_map,
+        matrix,
+        offset=offset,
+        output_shape=(n_out, n_out),
+        order=int(geometry["order"]),
+        mode="constant",
+        cval=np.nan,
+        prefilter=int(geometry["order"]) > 1,
+    )
+    return corrected, n_out
+
+
+def read_window_file(path: Path, role_names):
+    """Per-role colour windows of a saved ``fft_window.json``.
+
+    Accepts the current ``{"roles": {...}}`` document and the legacy flat
+    ``{"vmin", "vmax"}`` one (applied to every role after a warning: those windows
+    were pooled across roles, hence wrong for each of them).  A file without a
+    window for every role is fail-closed.
+    """
+    saved = json.loads(path.read_text())
+    if "roles" in saved:
+        windows = {r: dict(w) for r, w in saved["roles"].items()}
+    else:
+        windows = {
+            r: {"vmin": saved["vmin"], "vmax": saved["vmax"]} for r in role_names
+        }
+        print(
+            f"# WARNING: {path} uses the legacy single-window format; "
+            f"applying it to every role.  Rerun --window-candidates N to get "
+            f"per-role windows."
+        )
+    missing = [r for r in role_names if r not in windows]
+    if missing:
+        raise SystemExit(
+            f"ERROR: {path} has no window for role(s) {missing}; it "
+            f"holds {sorted(windows)}"
+        )
+    return windows
 
 
 def load_transform(bundle_json: Path):
@@ -713,6 +923,7 @@ class Pipeline:
         windows,
         spatial_window="none",
         candidate_basis=None,
+        affine=None,
     ):
         self.h5_path = h5_path
         self.roles = roles
@@ -730,6 +941,11 @@ class Pipeline:
         # which window's planes the candidate table/figures were built on (they
         # follow the spatial window, so this is normally the same value)
         self.candidate_basis = candidate_basis or spatial_window
+        # ``None`` = the LF displacement-field branch (unchanged); a geometry dict
+        # = the affine branch (``A = P M^-1 P``, no flip, products under <out>/affine)
+        self.affine = affine
+        # machine-readable provenance of an affine run, written by finish_log()
+        self.affine_provenance = None
         self.windowed_files = []
         self.windowed_taps = set()
         self.log_lines = []
@@ -809,30 +1025,40 @@ class Pipeline:
         self.log_lines.append(msg)
         print(msg)
 
-    def run_extract(self):
-        """Stage a: per-role maps per bias point -> raw CSV + PNG + data held."""
+    def run_extract(self, write=True):
+        """Stage a: per-role maps per bias point -> raw CSV + PNG + data held.
+
+        ``write=False`` is the affine branch, which keeps the maps in memory only:
+        that branch writes the c-e stages, so it must leave no ``raw/`` (and no
+        ``fft_raw/``) behind -- there is then no raw plane either for a colour
+        candidate run to be built on, which is why it is fail-closed there.
+        """
         with h5py.File(self.h5_path, "r") as handle:
             data = handle["data"][:]
         bias_meV = load_bias_meV(self.h5_path)
         buf = {}
         for role_desc in self.roles:
             role = role_desc["role"]
-            d = self.outdir / "raw" / role
-            d.mkdir(parents=True, exist_ok=True)
+            if write:
+                d = self.outdir / "raw" / role
+                d.mkdir(parents=True, exist_ok=True)
             for i, b in enumerate(bias_meV):
                 m = extract_role_map(data, role_desc, i)
                 label = f"{i}_{round(b)}meV"
-                np.savetxt(d / f"{label}.csv", m, delimiter=",", fmt="%.10e")
+                if write:
+                    np.savetxt(d / f"{label}.csv", m, delimiter=",", fmt="%.10e")
                 # raw map colormap: nanmedian +/- 5 sigma of that map
                 finite = m[np.isfinite(m)]
                 med = float(np.median(finite))
                 std = float(np.std(finite))
                 win = (med - 5 * std, med + 5 * std)
-                save_map_image(d / f"{label}.png", m, win[0], win[1])
+                if write:
+                    save_map_image(d / f"{label}.png", m, win[0], win[1])
                 buf[(role, i)] = m
                 self.log(
                     f"raw {role} {i} meV {round(b)}: median +/- 5 sigma window "
                     f"[{win[0]:.6g}, {win[1]:.6g}] shape {m.shape}"
+                    + ("" if write else " (in memory only: this branch writes c-e)")
                 )
         return buf, bias_meV
 
@@ -859,7 +1085,7 @@ class Pipeline:
                 )
 
     def run_correct(self, raw_maps, bias_meV):
-        """Stage c: correct every map (resample only) -> CSV+PNG+FFT."""
+        """Stage c: correct every map (LF resample or affine resample) -> CSV+PNG+FFT."""
         corrected = {}
         for role_desc in self.roles:
             role = role_desc["role"]
@@ -869,13 +1095,16 @@ class Pipeline:
             fdir.mkdir(parents=True, exist_ok=True)
             for i, b in enumerate(bias_meV):
                 m = raw_maps[(role, i)]
-                corr, n_out, half, mag = apply_transform(
-                    m,
-                    self.size_nm,
-                    self.payload,
-                    self.u_nm,
-                    self.valid,
-                )
+                if self.affine is None:
+                    corr, n_out, half, mag = apply_transform(
+                        m,
+                        self.size_nm,
+                        self.payload,
+                        self.u_nm,
+                        self.valid,
+                    )
+                else:
+                    corr, n_out = apply_affine(m, self.affine)
                 label = f"{i}_{round(b)}meV"
                 np.savetxt(cdir / f"{label}.csv", corr, delimiter=",", fmt="%.10e")
                 finite = corr[np.isfinite(corr)]
@@ -892,10 +1121,23 @@ class Pipeline:
                     FCW = compute_fft(corr, self.spatial_window)
                     self.save_windowed_plane(fdir, label, role, FCW, _logmag(FC))
                 corrected[(role, i)] = (FC, corr, FCW)
-                self.log(
-                    f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, half {half}, "
-                    f"max|u| {mag:.3g} px"
-                )
+                if self.affine is None:
+                    self.log(
+                        f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, half "
+                        f"{half}, max|u| {mag:.3g} px"
+                    )
+                elif self.affine["fallback"]:
+                    self.log(
+                        f"correct {role} {i}: canvas {m.shape[0]}->{n_out} "
+                        f"(identity_fallback: the map is copied, no resampling, no "
+                        f"NaN added)"
+                    )
+                else:
+                    self.log(
+                        f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, affine "
+                        f"A = P M^-1 P applied in the h5 frame (no flip), pad "
+                        f"{self.affine['pad']}, order {self.affine['order']}"
+                    )
                 self.log(
                     f"fft_corrected {role} {i}: F[{self.window_for(role)['vmin']:.3g},"
                     f"{self.window_for(role)['vmax']:.3g}]"
@@ -997,9 +1239,99 @@ class Pipeline:
                     f"neg_rel_mag {rel_neg:.2e}"
                 )
 
+    def announce_affine(self, bundle_json, payload, n_in):
+        """Log + build the provenance document of one affine run (single source).
+
+        Every number here is stated once and reused by both the ``pipeline.log``
+        section and ``affine_provenance.json``, so the two cannot drift.  The
+        declarations the branch owes its reader are part of the document:
+        ``applied_in_the_h5_frame_no_flip`` and ``anchor_self_check_re_run = False``
+        -- the fit's ``anchor_verdict`` is passed through as it is and is *not*
+        re-verified here.
+        """
+        geometry = self.affine
+        n_out = (
+            n_in
+            if geometry["fallback"]
+            else image_transform(geometry["affine_q"], n_in, geometry["pad"])[1]
+        )
+        size_out = float(self.size_nm) * n_out / n_in
+
+        def shown(value):
+            return "missing" if value is None else f"{value:.6g}"
+
+        doc = {
+            "branch": "affine",
+            "transform_file": str(bundle_json),
+            "schema": payload.get("schema"),
+            "schema_version": payload.get("schema_version"),
+            "method": geometry["method"],
+            "bundle_fallback_flag": bool(payload.get("fallback", False)),
+            "corrected_this_run": not geometry["fallback"],
+            "affine_q": [[float(v) for v in row] for row in geometry["affine_q"]],
+            "pad": int(geometry["pad"]),
+            "order": int(geometry["order"]),
+            "n_px_in": int(n_in),
+            "n_out": int(n_out),
+            "field_of_view_nm": float(self.size_nm),
+            "corrected_field_of_view_nm": float(size_out),
+            "n_labelled": payload.get("n_labelled"),
+            "anchor_ring": payload.get("anchor_ring"),
+            "anchor_verdict": payload.get("anchor_verdict"),
+            "stretch_scale_sqrt_det": payload.get("stretch_scale_sqrt_det"),
+            "a_nm": payload.get("a_nm"),
+            "a_ref_nm": payload.get("a_ref_nm"),
+            "source_report": payload.get("source_report"),
+            "source_input": payload.get("source_input"),
+            "applied_in_the_h5_frame_no_flip": True,
+            "anchor_self_check_re_run": False,
+            "notes": [
+                "applied in the h5 frame, no flip",
+                "anchor self-check NOT re-run",
+            ],
+        }
+        self.affine_provenance = doc
+        self.log(f"# affine transform: {doc['transform_file']}")
+        self.log(
+            f"#   schema {doc['schema']} v{doc['schema_version']}; method "
+            f"{doc['method']}; bundle fallback flag {doc['bundle_fallback_flag']} "
+            f"-> corrected_this_run {doc['corrected_this_run']}"
+        )
+        self.log(f"#   affine_q M = {doc['affine_q']}")
+        self.log(
+            f"#   pad {doc['pad']}, order {doc['order']}; canvas {doc['n_px_in']} -> "
+            f"{doc['n_out']} px; field of view {doc['field_of_view_nm']:g} -> "
+            f"{doc['corrected_field_of_view_nm']:.6g} nm"
+        )
+        self.log(
+            f"#   fit provenance: n_labelled {doc['n_labelled']}, anchor_ring "
+            f"{doc['anchor_ring']}, anchor_verdict {doc['anchor_verdict']}, stretch "
+            f"scale |det M|^(1/2) {shown(doc['stretch_scale_sqrt_det'])}"
+        )
+        self.log(
+            "#   applied in the h5 frame, no flip (A = P M^-1 P with the "
+            "_image_transform offset, straight on the map read from /data)"
+        )
+        self.log(
+            "#   anchor self-check NOT re-run (the verdict above is the fit stage's "
+            "and is the only evidence for this transform; the products below are "
+            "corrected by it, not verified by it)"
+        )
+        if geometry["fallback"]:
+            self.log(
+                "# WARNING affine: method = identity_fallback -- the fit solved "
+                "nothing, so the maps are copied unchanged (n_out = n, field of view "
+                "unchanged, no NaN added); do not read the corrected/z3/c3dc "
+                "products as corrected"
+            )
+
     def finish_log(self, include_window=True):
         with (self.outdir / "pipeline.log").open("w") as fh:
             fh.write("\n".join(self.log_lines) + ("\n" if self.log_lines else ""))
+        if self.affine_provenance is not None:
+            with (self.outdir / AFFINE_PROVENANCE_FILE).open("w") as fh:
+                json.dump(self.affine_provenance, fh, indent=2)
+                fh.write("\n")
         if include_window:
             # ``roles`` is the colour window (read back by later runs); the
             # ``spatial_window`` block records which data window this run applied
@@ -1055,7 +1387,9 @@ def parse_args(argv=None):
     parser.add_argument(
         "--transform",
         required=True,
-        help="Skill A transform bundle JSON, or a directory holding one",
+        help="LF displacement-field bundle JSON (Skill A, with u_field_file) or "
+        "affine-correction transform bundle JSON (schema topo-correction-transform), "
+        "or a directory holding one of them",
     )
     parser.add_argument("-o", "--outdir", required=True, help="output directory")
     parser.add_argument(
@@ -1140,11 +1474,48 @@ def main(argv=None):
     if not src.is_file():
         raise SystemExit(f"ERROR: {src} does not exist")
     require_z_column(src)
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
 
+    # ---- which branch: LF displacement field or affine stretch ----------
     bundle_json = resolve_transform(args.transform)
-    payload, u_nm, valid, u_path = load_transform(bundle_json)
+    probe = read_json_object(bundle_json)
+    kind = classify_transform(probe, bundle_json)
+    affine_mode = kind == "affine"
+    root_outdir = Path(args.outdir)
+    parent_window_file = root_outdir / FFT_WINDOW_FILE
+    if affine_mode:
+        # Fail-closed BEFORE anything is created: this branch writes no raw/fft_raw
+        # plane, so there is no plane set for a candidate table, and a --pick-window
+        # would read a table that can never exist here.
+        if args.window_candidates is not None:
+            raise SystemExit(
+                f"ERROR: --window-candidates N has no meaning in the affine branch: "
+                f"that branch writes only the c-e stages under "
+                f"{root_outdir / AFFINE_DIRNAME}, so no fft_raw/<role>/*_fft2.npy "
+                f"exists for a candidate table to be built on.  It inherits the "
+                f"per-role colour window from {parent_window_file} (or from its own "
+                f"{root_outdir / AFFINE_DIRNAME / FFT_WINDOW_FILE} once written); to "
+                f"override it use --fft-window-role ROLE VMIN VMAX (or --fft-window "
+                f"VMIN VMAX for every role)."
+            )
+        if args.pick_window is not None:
+            raise SystemExit(
+                f"ERROR: --pick-window K has no meaning in the affine branch: the "
+                f"candidate table is written by a --window-candidates run, which "
+                f"this branch does not have (it writes no fft_raw planes).  Inherit "
+                f"the window from {parent_window_file} or pass "
+                f"--fft-window-role ROLE VMIN VMAX."
+            )
+    outdir = root_outdir / AFFINE_DIRNAME if affine_mode else root_outdir
+    outdir.mkdir(parents=True, exist_ok=True)
+    # Every affine product is prefixed with <out>/affine/ by moving the pipeline's
+    # output root; the LF branch keeps the historical flat layout.
+
+    if affine_mode:
+        geometry = affine_geometry(probe, bundle_json)
+        payload, u_nm, valid, u_path = probe, None, None, None
+    else:
+        geometry = None
+        payload, u_nm, valid, u_path = load_transform(bundle_json)
     roles = resolve_roles(src, args.map)
     size_nm = _scan_size_nm(src)
 
@@ -1237,25 +1608,7 @@ def main(argv=None):
         mode = "candidates"
         windows = {r: {"vmin": None, "vmax": None} for r in role_names}
     elif window_file.is_file() and not explicit:
-        saved = json.loads(window_file.read_text())
-        if "roles" in saved:
-            windows = {r: dict(w) for r, w in saved["roles"].items()}
-        else:
-            # legacy flat file (pre per-role windows): apply to every role
-            windows = {
-                r: {"vmin": saved["vmin"], "vmax": saved["vmax"]} for r in role_names
-            }
-            print(
-                f"# WARNING: {window_file} uses the legacy single-window format; "
-                f"applying it to every role.  Rerun --window-candidates N to get "
-                f"per-role windows."
-            )
-        missing = [r for r in role_names if r not in windows]
-        if missing:
-            raise SystemExit(
-                f"ERROR: {window_file} has no window for role(s) {missing}; it "
-                f"holds {sorted(windows)}"
-            )
+        windows = read_window_file(window_file, role_names)
         mode = "full"
     elif args.pick_window is not None:
         cand_file = outdir / CANDIDATES_FILE
@@ -1321,16 +1674,39 @@ def main(argv=None):
             )
         mode = "full"
     else:
-        raise SystemExit(
-            "ERROR: no FFT color window selected and none on disk. Run "
-            "--window-candidates N first (choose from the printed table), then "
-            "--pick-window K (or --fft-window VMIN VMAX, or one "
-            "--fft-window-role ROLE VMIN VMAX per role), or place "
-            f"{FFT_WINDOW_FILE} in the output directory."
-        )
+        # The affine branch has no candidate run of its own: it inherits the LF
+        # run's per-role window file one level up, and writes this run's selection
+        # back into its own <out>/affine/fft_window.json (finish_log does that).
+        if affine_mode and parent_window_file.is_file():
+            windows = read_window_file(parent_window_file, role_names)
+            mode = "full"
+            print(
+                f"# affine branch: inheriting the per-role colour windows from "
+                f"{parent_window_file} (written back to {window_file})"
+            )
+        elif affine_mode:
+            raise SystemExit(
+                f"ERROR: no FFT color window selected and none on disk.  The affine "
+                f"branch inherits the per-role windows from {parent_window_file} "
+                f"(or from its own {window_file}); run the LF branch first, or pass "
+                f"--fft-window-role ROLE VMIN VMAX (or --fft-window VMIN VMAX for "
+                f"every role)."
+            )
+        else:
+            raise SystemExit(
+                "ERROR: no FFT color window selected and none on disk. Run "
+                "--window-candidates N first (choose from the printed table), then "
+                "--pick-window K (or --fft-window VMIN VMAX, or one "
+                "--fft-window-role ROLE VMIN VMAX per role), or place "
+                f"{FFT_WINDOW_FILE} in the output directory."
+            )
 
-    print(f"# grid: {src}")
-    print(f"# transform: {bundle_json} -> {u_path}")
+    if affine_mode:
+        print(f"# grid: {src}")
+        print(f"# transform: {bundle_json} (affine; products under {outdir})")
+    else:
+        print(f"# grid: {src}")
+        print(f"# transform: {bundle_json} -> {u_path}")
     print(f"# field of view: {size_nm} nm")
     print(
         f"# spatial FFT window: {args.spatial_window}"
@@ -1386,9 +1762,31 @@ def main(argv=None):
         windows,
         spatial_window=args.spatial_window,
         candidate_basis=candidate_basis,
+        affine=geometry,
     )
     for note in pre_notes:
         pipe.log(note)
+
+    if affine_mode:
+        # The affine branch writes only the c-e stages: it extracts the maps in
+        # memory, states its provenance, then corrects and symmetrizes.
+        with h5py.File(src, "r") as handle:
+            n_in = int(handle["data"].shape[0])
+        pipe.announce_affine(bundle_json, probe, n_in)
+        raw_maps, bias_meV = pipe.run_extract(write=False)
+        corrected = pipe.run_correct(raw_maps, bias_meV)
+        pipe.run_z3(corrected, bias_meV)
+        pipe.run_c3dc(corrected, bias_meV)
+        pipe.finish_log(include_window=True)
+        print(
+            f"# affine branch done; products in {outdir}; per-role windows: "
+            + ", ".join(
+                f"{role} [{windows[role]['vmin']:.3g}, {windows[role]['vmax']:.3g}]"
+                for role in role_names
+            )
+        )
+        print(f"# provenance: {outdir / AFFINE_PROVENANCE_FILE}")
+        return 0
 
     # stages a + b always run first (extraction + raw FFT)
     raw_maps, bias_meV = pipe.run_extract()

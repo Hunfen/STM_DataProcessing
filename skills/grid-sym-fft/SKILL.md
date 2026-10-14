@@ -13,9 +13,10 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 | 项 | 说明 |
 | --- | --- |
-| 输入 | `<grid>.h5`（`python -m stm_data_processing.io.grid2h5 <grid>.3ds -o <grid>.h5` 得到）；角色映射（`--map ROLE="CHANNEL NAME"`）；Skill A 的位移场包 |
+| 输入 | `<grid>.h5`（`python -m stm_data_processing.io.grid2h5 <grid>.3ds -o <grid>.h5` 得到）；角色映射（`--map ROLE="CHANNEL NAME"`）；Skill A 的位移场包**或** `affine-correction` 的变换包 |
 | h5 结构 | `/data (ny, nx, nch, npts)`、`/channels`、`/channel_units`、`/bias`（V，偏压标签只能从这里读）、`/params` + `/param_columns`、`/header` |
 | 位移场包 | Skill A 产出的 `<stem>_transform.json`（含 `u_field_file`、`n_px_reference`、`field_of_view_nm_reference`、`pad`、`order`）+ `<stem>_transform.h5`（`u_x` / `u_y` / `valid`，nm / 参考网格）。Skill A 写出的 `u_field_file` 是**绝对路径**（`grid_lf_fit.py` 对 `--save-transform` 做 `.resolve()`）；若遇到相对路径，按 bundle 所在目录解析（`scripts/grid_sym.py:193-195`） |
+| 变换包（两条通路） | `--transform` 同时接受上面那种 **LF 位移场包** 与 **affine 变换包**（`affine-correction` 的 `transform.json`：schema `topo-correction-transform`，含 `affine_q`（2×2 对称正定拉伸 M）、`pad`、`order`、`n_px_reference`、`field_of_view_nm_reference`，以及溯源字段 `method` / `fallback` / `n_labelled` / `anchor_ring` / `anchor_verdict` / `stretch_scale_sqrt_det`）。判别口径见 §2.4，affine 通路的产物路由见 §3 |
 | 视场 L (nm) | 从 h5 header 解析 `Scan>Scanfield`（`;` 分隔，第 3 段宽 ×1e9=nm），否则退回 `Grid settings`；与 Skill A 的 `grid_topo.py` 同源 |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`）。**`PYTHONDONTWRITEBYTECODE=1` 是必需的**：本 skill 与 Skill A 都会 import `skills/lawler-fujita-correction/scripts/lf_lib.py`（`grid_sym.py` 把它接进 `sys.path`），不设它就会在 `skills/lawler-fujita-correction/scripts/` 下留下 `__pycache__/`（仓库不该有这些字节码缓存；`.gitignore` 忽略它们，但目录会堆在 checkout 里） |
 | 依赖 | `numpy`、`h5py`、`scipy.ndimage`、matplotlib、Pillow（contact sheet），以及本仓库 `skills/lawler-fujita-correction/scripts/lf_lib.py`（**相对路径嵌套调用，不修改它**） |
@@ -47,25 +48,31 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | --- | --- | --- |
 | 1 | h5 的 `/params` 与 `/data` **共用同一扁平索引**：行号沿物理 Y **递增**（`/params` 的 `Y (m)` 第 0 行最小、末行最大；实测列 0 从 +183.22 nm 单调升到 +212.20 nm） | `grid2h5` 的写盘顺序 |
 | 2 | `grid-lf-pipeline/scripts/grid_topo.py:196` 写 topo CSV 时 **flipud 一次**：CSV 帧 = h5 原始帧翻转（CSV 第一行 = 扫描顶行 = 最大 Y） | 代码 |
-| 3 | `lawler-fujita-correction/scripts/stm_lf_correct.py:629` 读 CSV 后**又 flipud 一次**才拟合 ⇒ **位移场 u 定义在 h5 原始帧**（`n_px_reference = 304` 就是该帧的画布） | 代码 |
-| 4 | 拟合产物按该内部帧**直接存**（`stm_lf_correct.py:983-984`）⇒ 输入 CSV 与输出 CSV 相差一次 flip；`stm_lf_apply.py:259` 对**它的**输入同样 flipud ⇒ 该工具期望的输入是**第 2 条那种 CSV 帧** | 代码 |
+| 3 | `lawler-fujita-correction/scripts/stm_lf_correct.py:639`（该文件 `main()` 里那句 `topo = np.flipud(subtract_mean_plane(topo))`；**行号漂了就按这个锚点找**，2026-10-14 复核过）读 CSV 后**又 flipud 一次**才拟合 ⇒ **位移场 u 定义在 h5 原始帧**（`n_px_reference = 304` 就是该帧的画布） | 代码 |
+| 4 | `stm_lf_correct.py` 的产物**自 2026-10-14（t1）起与它的输入 CSV 同帧**：重采样仍在内部帧做，写回前翻一次再落盘；`stm_lf_apply.py:265`（同样是 `main()` 里那句 `topo = np.flipud(subtract_mean_plane(topo))`）对**它的**输入 flipud（进入同一内部帧），产物同样按输入 CSV 帧写出 ⇒ 该工具**期望的输入是第 2 条那种 CSV 帧，输出也在那一帧** | 代码（2026-10-14 起；行号同日复核） |
 | 5 | `grid_sym.py:extract_role_map()` 取 `/data` **不翻** ⇒ map 已经在 u 的帧里 ⇒ **喂给 `warp_by_field` 前不得再翻**（多翻一次 = 位移场被上下镜像施加；2026-10 实测同一物理标记在两条路径上相差 **276 px**，纯镜像应为 `n-1-2r = 263 px`） | 代码 + 标记注入实测 |
+| 6 | **affine 通路**：`affine_q` 与 `_image_transform(A, n, pad)` 的 `n_out`/offset **直接作用在 h5 帧的 map 上（0 次 flip）**。affine skill 自己的 apply 段（`stm_apply_transform.py`）读的是 **topo CSV 帧**（§2.2 第 2 条：该帧 = h5 帧翻转一次），所以它在那里 flipud（产物自 2026-10-14 起也按该输入 CSV 帧写出）；把那个输入 flipud 照抄过来就是上下镜像的矫正。实测（同一标记，两条路径都折算到 h5 帧）：affine 通路与 `stm_apply_transform.py` 的产物行差 ≤0.1 px；不折算（忘掉那个 flip）则相差纯镜像量 `n_out-1-2r`（本例 n=304→n_out=331，r=20 时 ~290 px） | 代码 + 标记注入实测（§8 第 7 条） |
 
-一句话：**h5 原始帧 = 位移场帧；本 skill 全程不翻转**。CSV 帧（topo CSV / `stm_lf_apply.py` 的输入）
-与它差一次 flip，那是 Skill A 内部两条入口各自约定的事，与本 skill 无关。
+一句话：**h5 原始帧 = 位移场帧 = affine 包的数组帧；本 skill 全程不翻转**。CSV 帧（topo CSV / 两个 apply 工具的输入与产物帧）
+与它差一次 flip，那是 Skill A / affine skill 内部各自约定的事，与本 skill 无关。
 
 **显示约定**：实空间图与 FFT 图统一用 matplotlib `origin="lower"`（`plot_matrix()`，`grid_sym.py:425`），
-与 LF 家族一致（`stm_lf_correct.py:1013/1029`、`stm_lf_apply.py:386/402`）——即**数组第 0 行画在画布底部**，
+与 LF 家族一致（`stm_lf_correct.py:1031/1047`、`stm_lf_apply.py:398/414`——每对是「实空间图的
+`ax.imshow(corrected, cmap=cmap_bad, origin="lower")` 行 / FFT 图里那个 `origin="lower",` 行」，
+**行号漂了就按这两个锚点找**，2026-10-14 复核过）——即**数组第 0 行画在画布底部**，
 于是矫正后的 didv 图与矫正后的 topo 图朝向一致（同一物理标记在两张图里的相对行位置一致，实测差 0.56 %）。
 用 `origin="upper"`（旧行为）会让本 skill 的图与 LF 产物上下颠倒。
 
 **机械自检（标记法，不看图）**：造一张**零背景**的高斯标记图（σ=2 px，h5 帧行 `r`），把它按 h5 帧
-喂给 `apply_transform`，把它的 `flipud`（同一物理像素在 CSV 帧里的样子）喂给 `stm_lf_apply.py`，
-然后比两份 corrected CSV 里标记的**亚像素质心行**——必须相同（实测 11-15 与 11-08 都是 **0.000 px**，
-判据 ≤3 px）。零背景很关键：在真实 map 上做同样的事，标记与图自身结构混在一起，centroid 会偏几个像素，
-把量测误差误读成帧差。把 `np.flipud` 加回 `apply_transform` 后必须重新出现镜像量 `n-1-2r`
-（本仓库 11-15：`r=20, n=304` → 263 px 的纯镜像、实测 276.19 px，多出的 13 px 是 u 在两个位置上的差异），
-否则这条自检是空转。完整可跑版本见 §8 第 7 条。
+喂给 `apply_transform`（LF 通路）/ `apply_affine`（affine 通路），把它的 `flipud`（同一物理像素在 CSV 帧里的样子）
+喂给 `stm_lf_apply.py` / `stm_apply_transform.py`，然后比两份 corrected CSV 里标记的**亚像素质心行**
+（两条通路的产物都先 `flipud` 回 h5 帧再比——2026-10-14 起两个 apply 工具的产物是「与输入 CSV 同帧」）——
+必须相同（实测 11-15 与 11-08 都是 **0.000 px**，判据 ≤3 px；affine 通路实测 ≤0.1 px）。
+零背景很关键：在真实 map 上做同样的事，标记与图自身结构混在一起，centroid 会偏几个像素，
+把量测误差误读成帧差。**反例判据**：同一比法若不折算那个 flip 就会偏出纯镜像量 `n-1-2r`
+（本仓库 11-15：`r=20, n=304` → LF 通路 263 px 的纯镜像、实测 276.19 px，多出的 13 px 是 u 在两个位置上的差异；
+affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就说明门在空转。
+完整可跑版本见 §8 第 7 条。
 
 ### 2.3 画法约定（**所有数据图**，2026-10 用户要求）
 
@@ -88,6 +95,17 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 ### 2.4 `scripts/grid_sym.py`（抽取 → 矫正 → 复数 FFT → Z3 / C3）
 
+`--transform` 接受**两种包**，脚本自己判（`scripts/grid_sym.py` 的 `classify_transform()`），判不出来就 fail-closed：
+
+| 判别（按顺序，互斥） | 结论 | 依据 |
+| --- | --- | --- |
+| `schema == "topo-correction-transform"` **且** `affine_q` 是有限 2×2、`det > 0` | **affine 通路** | schema 优先 |
+| 含 `u_field_file` 键 | **LF 通路** | 位移场的登记键 |
+| 两者同时成立 / 都不成立 | 非零退出，stderr 说明两个理由 | `fallback` 键**不参与**判别（affine 包在没拟合出东西时也会带 `fallback: true`，那仍是 affine 包） |
+
+`--transform` 传**目录**时同时认 `*_transform.json`（Skill A 的命名）与 `transform.json`（affine skill 的命名）；
+目录里出现 ≥2 个候选（例如 LF 与 affine 各一份）非零退出并列出候选文件名。
+
 ```bash
 # 第一次运行：先出色标候选（a+b + 候选 + contact sheet），exit 0
 .venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
@@ -105,21 +123,37 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 # 或显式指定空间窗（默认 hamming；独立 flag，见 §2.5）
 .venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
     --map ... --transform <...> -o OUT --spatial-window hanning   # none | hamming | hanning
+# affine 通路：同一个 -o OUT，产物自动前缀到 OUT/affine/ 下（只落 c–e 阶段）
+.venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
+    --map current="Current (A)" --map didv="DSP 7280 Y (%)" \
+    --transform OUT2/affine/transform.json -o OUT        # 色标窗继承 OUT/fft_window.json
 # 两个 flag 各管一件事，不共用：
 #   --spatial-window {none,hamming,hanning}  数据窗（fft2 之前乘 2D 窗）
 #   --fft-window VMIN VMAX                   色标窗，**必须两个浮点数**（套给所有角色；
 #                                            角色单位不同，推荐 --fft-window-role）
 # 单 token 的 --fft-window（例如 --fft-window 3）会 fail-closed（exit 2）并提示改用
-# --spatial-window——一个 flag 两种含义曾在脚本/文档/会话里反复咬人。
+# --spatial-window——一个 flag 两种含义曾在脚本/文档/会话里反复咬过。
 ```
 
-按下列顺序执行，**每一步都写数据 + 图 + log，且每一步都配 FFT**：
+**两条通路的差别（同一段代码，只有矫正怎么算是不同的）**：
 
-**a. 抽取**：每个角色 = 前向通道与其同名 `[bwd]` 配对（`Current (A)` ↔ `Current [bwd] (A)`）取平均，每偏压一张 map（bias 标签从 `/bias` 读，遍历全部 bias 点；配对规则与两个名字、两个索引都写进 log）。写 CSV + PNG（**实空间图 = viridis**，窗口 = 该图 `nanmedian ± 5σ`，窗口数值写进 log；画法见 §2.3）。CSV 必须等于两方向平均（可用 `/data` 的 fwd/bwd 两片独立复算核对；只取前向时差可达 ~1e-10 量级）。
+| 项 | LF 通路 | affine 通路 |
+| --- | --- | --- |
+| 矫正 | `lf_lib.warp_by_field`：`corrected(r) = T(r + u(r))`，画布 `n + 2(⌈max|u|⌉ + pad)` | `A = P·M⁻¹·P` + `_image_transform(A, n, pad)` 的 `n_out`/offset，`scipy.ndimage.affine_transform(order, cval=NaN)`；画布按**目标 n 现算**（本数据 304 → 331，不硬编码） |
+| 帧 | h5 帧，0 次 flip（§2.2 第 5 条） | h5 帧，**0 次 flip**（§2.2 第 6 条） |
+| 阶段 | a+b+c+d+e（第一次还出候选） | **只有 c+d+e**：不写 `raw/`、`fft_raw/`、`window_candidates/`（§3） |
+| 产物根 | `<out>/` | **`<out>/affine/`**（调用方仍传 `-o <out>`） |
+| 色标窗 | 自己选（`--window-candidates` → `--pick-window` / `--fft-window*`），写 `<out>/fft_window.json` | **不产生候选**：继承 `<out>/fft_window.json`（自身 `<out>/affine/fft_window.json` 优先），并把本次选择写回 `<out>/affine/fft_window.json`；`--window-candidates` / `--pick-window` 在此通路 fail-closed |
+| identity_fallback | Skill A 的回退语义（本 skill 的 LF 通路在 `load_transform()` 处拒绝无 u 场的包） | 照 `stm_apply_transform.py` 的语义：**拷贝原图**（`n_out = n`、视场不变、不加 NaN）、log 打 WARNING、provenance 记 `corrected_this_run: false`，z3/c3dc **照跑** |
+| 溯源 | `pipeline.log` | `pipeline.log` 里的 provenance 段 + 机器可读 `<out>/affine/affine_provenance.json`（包路径 / schema / method / `affine_q` / pad·order / `n_in→n_out` / `n_labelled` / `anchor_ring` / `anchor_verdict` / `stretch_scale_sqrt_det`，并显式声明 **applied in the h5 frame, no flip** 与 **anchor self-check NOT re-run**——`anchor_verdict` 是拟合段的结论，本 skill 不重跑自检，本数据是 `unverifiable`：别把它读成"已验证"） |
 
-**b. 矫正前 FFT**：`x = map`（NaN 用有效像素 nanmedian 填充），**再加空间窗** `x*W`（`W = outer(w,w)`、`w = np.hamming(n)` 或 `np.hanning(n)`，见 §2.5；`--spatial-window none` 时 `W` 不存在）；`F = np.fft.fftshift(np.fft.fft2(x*W))`，complex128 存 npy；出 `log|F|` 图（**FFT 图 = plasma**，见 §2.3）。**每个偏压写两套**：无窗（既有文件名）+ 加窗（名字带窗名后缀）。这一组图后面跟色标候选（**候选与候选图按当前空间窗的平面算**，见 §2.5）。
+按下列顺序执行，**每一步都写数据 + 图 + log，且每一步都配 FFT**（affine 通路从 c 起）：
 
-**c. 矫正**：用 `--transform` 指向的位移场包矫正每个角色每张 map，**只重采样、绝不改值域、也绝不翻转**（map 按名字从 `/data` 取出后已经在位移场的帧里，见 §2.2「坐标系约定」；禁止调用会去平面的 `stm_lf_apply.py`，只走 `lawler-fujita-correction` 的 `lf_lib.warp_by_field`）。画布按 `2*half` 增长（`half = ceil(max|u|) + pad`）。写 corrected CSV + PNG + 该阶段自己的复数 FFT + `log|F|` 图。
+**a. 抽取**（仅 LF 通路落盘）：每个角色 = 前向通道与其同名 `[bwd]` 配对（`Current (A)` ↔ `Current [bwd] (A)`）取平均，每偏压一张 map（bias 标签从 `/bias` 读，遍历全部 bias 点；配对规则与两个名字、两个索引都写进 log）。写 CSV + PNG（**实空间图 = viridis**，窗口 = 该图 `nanmedian ± 5σ`，窗口数值写进 log；画法见 §2.3）。CSV 必须等于两方向平均（可用 `/data` 的 fwd/bwd 两片独立复算核对；只取前向时差可达 ~1e-10 量级）。affine 通路同样抽取（log 里打同一行，末尾标 `in memory only`），但不落盘。
+
+**b. 矫正前 FFT**（仅 LF 通路）：`x = map`（NaN 用有效像素 nanmedian 填充），**再加空间窗** `x*W`（`W = outer(w,w)`、`w = np.hamming(n)` 或 `np.hanning(n)`，见 §2.5；`--spatial-window none` 时 `W` 不存在）；`F = np.fft.fftshift(np.fft.fft2(x*W))`，complex128 存 npy；出 `log|F|` 图（**FFT 图 = plasma**，见 §2.3）。**每个偏压写两套**：无窗（既有文件名）+ 加窗（名字带窗名后缀）。这一组图后面跟色标候选（**候选与候选图按当前空间窗的平面算**，见 §2.5）。
+
+**c. 矫正**：LF 通路用 `--transform` 指向的位移场包矫正每个角色每张 map（**只重采样、绝不改值域、也绝不翻转**，见 §2.2）；affine 通路用 `A = P·M⁻¹·P` 与同一 offset 直接作用在 h5 帧的 map 上（**同样 0 次翻转**，§2.2 第 6 条；画布按目标 n 现算）。两条都：写 corrected CSV + PNG（viridis，窗口 = 该图 `nanmedian ± 5σ`）+ 该阶段自己的复数 FFT + `log|F|` 图；**禁止**调用会去平面的 `stm_lf_apply.py` / `stm_apply_transform.py`（它们属于各自的 CSV 帧入口，且 affine 那个还会减平面——本 skill 用的是本地镜像的几何）。
 
 **d. Z3**：对每张矫正后 map 的 `F`，`Z = (F + R120 F + R240 F)/3` 在**复数域**做，旋转**绕 DC 像素**：`R` 为平面内 120/240 度旋转矩阵，`offset = c - R c`，`c = fftshift 后 DC 的像素坐标（浮点，偶数 N 时为 N/2）`，`scipy.ndimage.affine_transform(matrix=R, offset=c-R c, order=3, mode='nearest')`。存 complex128 npy + `log|Z|` 图，log 报 DC 保留（应为 1.0000）、三重残差输出/输入之比、能量比。
 
@@ -155,7 +189,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 
 | 项 | 约定 |
 | --- | --- |
-| 窗函数 | `--spatial-window {none,hamming,hanning}`（**独立 flag**，不与 `--fft-window` 共用），**默认 hamming**；`none` = 历史行为（只有无窗那套，逐字节不变）。作用位置：`F = fftshift(fft2(x * W))`，即窗加在 **fft2 之前**的空间域（不是频域滤波） |
+| 窗函数 | `--spatial-window {none,hamming,hanning}`（**独立 flag**，不与 `--fft-window` 共用），**默认 hamming**；`none` = 历史行为（只有无窗那套，逐字节不变）。作用位置：`F = fftshift(fft2(x * W))`，即窗加在 **fft2 之前**的空间域（不是频域滤波）。**两条通路都生效**：affine 通路同样按 `--spatial-window` 出两套，只是落在 `<out>/affine/` 下（其 `fft_corrected/z3/c3dc` 的 `taps` 是 affine 画布边长，本例 331） |
 | 1D/2D | `W = np.outer(w, w)`，`w = np.hamming(n)`（或 `np.hanning(n)`），`n` = 该阶段的输入画布边长：`fft_raw` 用 map 边长（本例 304），`fft_corrected`/`z3`/`c3dc` 用矫正画布边长（本例 350）。窗永远作用在 **NaN 填充之后**的图上 |
 | 命名 | 无窗那套**文件名不变**：`<label>_fft2.npy`、`<label>_fft.png`。加窗那套在**同一目录**下加窗名：`<label>_fft2_hamming.npy`、`<label>_fft_hamming.png`（`--spatial-window hanning` 时后缀是 `_hanning`）。四个族（`fft_raw`/`fft_corrected`/`z3`/`c3dc`）都如此——族由**目录**区分、窗由**文件名后缀**区分，无歧义 |
 | Z3/C3dc | 两套各自从**自己那个 F** 出发：无窗 `z3_symmetrize(F)`、加窗 `z3_symmetrize(F_W)`（C3dc 同理，`C3dc = (|F| + R120|F| + R240|F|)/3`）。绝不拿无窗的 F 去算加窗的 Z3 |
@@ -200,17 +234,42 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
                                  # c3dc 负值个数与相对幅度
 ```
 
+**affine 通路**（`--transform` 是 affine 包时）由代码把所有产物前缀成 `<out>/affine/`（调用方仍传 `-o <out>`），
+**只落 c–e 阶段**——目录名与 LF 通路**同类同名**，只是根不同：
+
+```
+<OUT>/affine/corrected/<role>/<i>_<bias>meV.csv|.png        # 1:1, viridis
+<OUT>/affine/fft_corrected/<role>/<i>_<bias>meV_fft2.npy|_fft.png          # 无窗, plasma
+<OUT>/affine/fft_corrected/<role>/<i>_<bias>meV_fft2_<win>.npy|_fft_<win>.png
+<OUT>/affine/z3/<role>/<i>_<bias>meV_fft2.npy|_fft.png      # 无窗 + 加窗
+<OUT>/affine/c3dc/<role>/<i>_<bias>meV_fft2.npy|_fft.png    # 无窗 + 加窗
+<OUT>/affine/fft_window.json     # 本次选用的 per-role 色标窗（继承来的也写回，§2.4）
+<OUT>/affine/pipeline.log        # 同一套逐步数值 + 一段 affine provenance
+<OUT>/affine/affine_provenance.json  # 机器可读 provenance（字段与 log 一致，§2.4）
+```
+
+**affine 通路不写**：`<out>/affine/raw/`、`<out>/affine/fft_raw/`、`<out>/affine/window_candidates/`
+（既没有 b 阶段，也就没有候选表可建）。同一次 `<out>` 里的 LF 产物（`raw/ fft_raw/ corrected/ fft_corrected/
+z3/ c3dc/ window_candidates/ fft_window.json fft_window_candidates.json pipeline.log`）**一个字节都不动**——
+affine 通路只往 `<out>/affine/` 里写。
+
 ## 4 与 Skill A / lawler-fujita-correction 的分工
 
-| 项 | `grid-lf-pipeline` (Skill A) | `lawler-fujita-correction` | 本 skill |
-| --- | --- | --- | --- |
-| 职责 | 3ds→h5、抽 topo（三步预处理）、LF 拟合并导出位移场包 | 拟合位移场 + 重采样实现 | 列出 channel、按名字抽角色图、把位移场包**只重采样**地套到每张 map、复数 FFT、Z3 / C3 |
-| 依赖方向 | 嵌套调用 `stm_lf_correct.py` | 独立 | **按相对路径** `skills/lawler-fujita-correction/scripts/lf_lib.py` 嵌套调用其 `warp_by_field` |
-| 是否修改对方 | 否 | — | **否**。只运行 `lf_lib` 的只重采样子集，不读不写 `skills/lawler-fujita-correction` 下任何文件，也不写 `skills/grid-lf-pipeline` 下任何文件 |
+| 项 | `grid-lf-pipeline` (Skill A) | `lawler-fujita-correction` | `affine-correction` | 本 skill |
+| --- | --- | --- | --- | --- |
+| 职责 | 3ds→h5、抽 topo（三步预处理）、LF 拟合并导出位移场包 | 拟合位移场 + 重采样实现 | 拟合全局仿射拉伸 M 并导出变换包（+ 自己的 CSV 帧 apply 段） | 列出 channel、按名字抽角色图、把**包**只重采样地套到每张 map、复数 FFT、Z3 / C3 |
+| 依赖方向 | 嵌套调用 `stm_lf_correct.py` | 独立 | 独立 | **按相对路径** `skills/lawler-fujita-correction/scripts/lf_lib.py` 嵌套调用其 `warp_by_field`；**只抄** affine skill 的 `_image_transform` 15 行做本地镜像（`grid_sym.py:image_transform()`，一致性见 §8 第 11 条） |
+| 是否修改对方 | 否 | — | — | **否**。不读不写上面三个 skill 下任何文件；affine 的几何是镜像，不是 import |
 
-**位移场包从哪来**：先跑 Skill A `grid_lf_fit.py <stem>_topo.csv -L <nm> -o <out>/lf`，得到 `<out>/lf/<stem>_transform.json + .h5`；把该目录（或该 json 文件）交给本 skill 的 `--transform`。
+**包从哪来**：① LF 位移场包 —— 先跑 Skill A `grid_lf_fit.py <stem>_topo.csv -L <nm> -o <out>/lf`，得到
+`<out>/lf/<stem>_transform.json + .h5`；② affine 变换包 —— 先跑 `affine-correction` 的
+`stm_topo_correct.py <stem>_topo.csv -L <nm> -o <out>/affine --save-transform <out>/affine/transform.json`。
+把该目录（或该 json 文件）交给本 skill 的 `--transform`；传目录时 `<out>/lf/` 与 `<out>/affine/` 各自只有一个候选，不会歧义。
 
-**为什么是「只重采样」**：本 skill 的 c 阶段只做 `out(r)=T(r+u(r))`（`lf_lib.warp_by_field`），从不减平面/去均值/归一化，也不翻转（0 次 flipud，见 §2.2）；仓库根 `scripts/apply_lf_transform.py` 面向的是 topo CSV 那种帧，它那一次 `flipud` **不适用于本 skill**（本 skill 直接按名字从 `/data` 取名，不经过 topo CSV）。`stm_lf_apply.py` 会减拟合平面，`corrected(r)=T(r+u(r))` 只是 Skill A 自己的复现路径，**迁移到别的 map 时禁止用**——否则目标图自己的 DC 电平与倾斜会被抹掉（实测对 +100 pA / 线性斜坡输入输出差仅 ~1e-22）。本 skill 矫正后 map 的值域与原图一致（例如 current 通道仍 ~5e-10 A 电平）。
+**为什么是「只重采样」**：本 skill 的 c 阶段只做重采样，从不减平面/去均值/归一化，也不翻转（0 次 flipud，见 §2.2）；
+仓库根 `scripts/apply_lf_transform.py` 与两个 apply 工具（`stm_lf_apply.py` / `stm_apply_transform.py`）面向的是
+**CSV 帧**且都会减拟合平面，那两个 flipud 与那次去平面**不适用于本 skill**（本 skill 直接按名字从 `/data` 取名，不经过 topo CSV）。
+实测对 +100 pA / 线性斜坡输入输出差仅 ~1e-22。本 skill 矫正后 map 的值域与原图一致（例如 current 通道仍 ~5e-10 A 电平）。
 
 ## 5 两次运行交互协议
 
@@ -223,6 +282,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
    - 不给显式入口 + 盘上也没有 → fail-closed（非零退出，见 §6）。
    - 多条显式入口同时给时，**顺序与以前一致**：`--pick-window` 赢，`--fft-window-role` 覆盖 `--fft-window`（NOTE 里会写明哪个入口生效、哪些被忽略）。
 4. **角色单位不同（current 与 didv 差 ~26 个 log）时，同一对 vmin/vmax 不可能同时适合两个角色**——这正是 `--pick-window` 按角色取、`--fft-window-role` 按角色给的原因。
+5. **affine 通路没有候选这一步**：它只写 c–e，没有 `fft_raw` 平面可作候选基准，所以 `--window-candidates` / `--pick-window` 在该通路 fail-closed（§6）。它的窗口是**继承** `<out>/fft_window.json`（= 同一次 LF 运行选定的 per-role 窗口）并写回 `<out>/affine/fft_window.json`；要换窗口就给 `--fft-window-role ROLE VMIN VMAX`（可重复）或 `--fft-window VMIN VMAX`。
 
 ## 6 fail-closed（非零退出且不写半成品）
 
@@ -230,7 +290,12 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | --- | --- |
 | 角色通道名匹配不到 / 匹配到多个 | 列出全部可用名字，退出非零，不猜 |
 | 给的是 `[bwd]` 名字 | 拒绝（fwd 名字是规范入口），退出非零 |
-| `--transform` 缺失 / 目录里不唯一（0 或 ≥2 个 `*_transform.json`） | 报错，退出非零 |
+| `--transform` 缺失 / 目录里不唯一（0 或 ≥2 个候选：`*_transform.json` 与 `transform.json`） | 报错（歧义时列出候选文件名），退出非零 |
+| `--transform` 的包**既像 affine 又像 LF**（schema `topo-correction-transform` + 合法 `affine_q` **且** 含 `u_field_file`） | 报错，退出非零（不猜该跑哪条通路） |
+| `--transform` 的包**两条都不像**（schema 不对 / `affine_q` 非有限 2×2 或 `det ≤ 0`，且无 `u_field_file`） | 报错并打两个理由，退出非零。`fallback` 键**不参与**判别 |
+| affine 通路 + `--window-candidates N` | 报错，退出非零，消息指向「继承的窗口 / 显式 `--fft-window-role`」；**在创建任何目录之前**就退出（不留半成品目录） |
+| affine 通路 + `--pick-window K` | 报错，退出非零（该通路没有候选表，`K` 永远无从解析） |
+| affine 通路且自身 `<out>/affine/fft_window.json` 与父目录 `<out>/fft_window.json` 都不存在，又没给显式窗口 | 报错，退出非零，提示先跑 LF 通路选窗、或给 `--fft-window-role` |
 | h5 缺 `/params` 的 `Z (m)` 列 | 报错，退出非零 |
 | 尚未选窗却要求出全套（无 `fft_window.json`，又未给 `--pick-window`/`--fft-window`/`--fft-window-role`） | 提示先跑 `--window-candidates`，退出非零 |
 | 盘上有 `fft_window.json` **且** 给了显式入口 | 不报错：覆盖并打印 `# NOTE: ... overridden by <入口>`（§5 第 3 条） |
@@ -258,6 +323,12 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 8. **数据图无 colorbar、1:1、pad=0**（2026-10 用户要求，见 §2.3）：`raw/ corrected/ fft_raw/ fft_corrected/ z3/ c3dc/` 的 PNG **没有** colorbar/坐标轴/标题/留白，**边长恰好等于数组边长**（每元素 1 像素），窗口仍是调用方选的 vmin/vmax。`window_candidates/` 与 `contact_sheet.png` 是**例外**（选窗工具，保留标注与 colorbar）。判据：把 PNG 从「数组 + 窗口 + cmap」重算出来逐像素比（`save_array_image` 的映射：`LUT(int(clip((v-vmin)/(vmax-vmin))*256))`，`origin="lower"`，NaN→`#b0b0b0`），数据像素必须逐点 ≤1/255 吻合——这条同时排除了 colorbar（任何色条/轴都会占像素、破坏 1:1 映射）。
 
 9. **两套的端点压死比例会差一个量级，而色标窗只对其中一套对口径**（2026-10 实测，基准已改为跟随空间窗）：候选按当前空间窗生成后，色标窗对**加窗**套对口径；**无窗（pure）套**用同一个窗时会明显更紧或更松——本例 `current` 首个 bias 两套相差 +9.2 pp（无窗 0.520 %、加窗 9.749 %）。工具对每族每偏压打一行 `fft window clip ...`（含两套数字与总差），>0.5 pp 再打一行 `WARNING fft window ...` 指明哪一套离基准。处置：**只看自己要在图上用的那一套**——要 pure 图就别改窗，要加窗图就用 `plane_<win>%` 那一列挑窗（§2.5）。
+
+10. **affine 包不是 LF 包，别互相代用**（2026-10 新增）：affine 包只描述**一个全局拉伸 M**（+画布几何），没有 u 场；
+    想"把它塞进 LF 包当线性位移场"是伪造溯源（`method` 会被记错、`u_field_file` 会指向不存在的场），
+    本 skill 的判别正是为此关掉的（同时像两者 → 非零退出）。affine 通路的 `anchor_verdict == "unverifiable"`
+    （本数据）是**拟合段**的结论：affine 通路不重跑锚定自检，provenance 里显式写 "anchor self-check NOT re-run"，
+    读结果时不要把"跑完了"当成"验证过了"。
 
 ## 8 自检口径
 
@@ -333,25 +404,33 @@ EOF
 #    端点（饱和）像素 < 5 %，且落在窗口中间 80 % 区间内的像素 ≥ 50 %
 #    （坐标区取 matplotlib 同一 figure 几何的 ax.get_window_extent()）
 
-# 7) 坐标系（标记法，不看图）：同一物理标记在本 skill 的 corrected CSV 与
-#    LF 家族 apply 工具的 corrected CSV 里必须落在**同一行**（≤3 px）。
-#    末行会打印镜像量 n-1-2r —— 把 np.flipud 加回 apply_transform 后必须重新
-#    出现这个镜像量，否则这条自检是空转。
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - GRID.h5 OUT/SkillA/lf /tmp/out_frame 30 304 <<'EOF'
+# 7) 坐标系（标记法，不看图）：同一物理标记在【LF 与 affine 两条通路】的产物里都必须落在
+#    **输入帧（h5 帧）的同一行**（≤3 px）：
+#      LF    : gs.apply_transform(blob)（h5 帧，0 次 flip）
+#              vs stm_lf_apply.py 的 corrected CSV（该工具按 CSV 帧进出 ⇒ 先 flipud 回 h5 帧再比）
+#      affine: gs.apply_affine(blob, geometry)（h5 帧，0 次 flip）
+#              vs stm_apply_transform.py 的 corrected CSV（同上，flipud 回 h5 帧再比）
+#    两条都带**反例判据**：同一比法若漏掉那次折算（即拿未翻转的产物直接比），必须偏出纯镜像量
+#    n_out-1-2r；偏不出来说明门在空转。（记账：2026-10-14 t1 之后两个 apply 工具的产物都是
+#    「与输入 CSV 同帧」，所以这里比的是 flipud(产物)，不是产物本身。）
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - GRID.h5 OUT/SkillA/lf OUT/affine/transform.json /tmp/out_frame 304 <<'EOF'
 import subprocess, sys
 from pathlib import Path
 import numpy as np
-h5, lfdir, work, L, n = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), float(sys.argv[4]), int(sys.argv[5])
+h5 = Path(sys.argv[1])
+lf_dir = Path(sys.argv[2])
+aff_json = Path(sys.argv[3])
+work = Path(sys.argv[4])
+n = int(sys.argv[5])
 work.mkdir(parents=True, exist_ok=True)
-bundle = sorted(lfdir.glob("*_transform.json"))[0]
 sys.path.insert(0, "skills/grid-sym-fft/scripts")
 import grid_sym as gs
 
 ROW, COL = 20, 152
 rows, cols = np.mgrid[:n, :n]
 blob = np.exp(-(((rows - ROW) ** 2 + (cols - COL) ** 2) / (2 * 2.0 ** 2)))
-payload, u_nm, valid, _ = gs.load_transform(gs.resolve_transform(str(bundle)))
-size_nm = gs._scan_size_nm(h5)
+csv = work / "marker.csv"
+np.savetxt(csv, np.flipud(blob), delimiter=",", fmt="%.10e")   # the CSV frame both tools expect
 
 
 def cen(img):                                # sub-pixel marker row (zeros background)
@@ -361,19 +440,35 @@ def cen(img):                                # sub-pixel marker row (zeros backg
     return float((rr * w).sum() / w.sum())
 
 
-a, n_out, half, _ = gs.apply_transform(blob, size_nm, payload, u_nm, valid)
-csv = work / "marker.csv"                    # the same physical pixel in the CSV frame
-np.savetxt(csv, np.flipud(blob), delimiter=",", fmt="%.10e")   # that stm_lf_apply expects
+def check(name, mine, product, n_out):
+    theirs = np.flipud(np.loadtxt(product, delimiter=","))     # back into the h5 frame
+    a, b = cen(mine), cen(theirs)
+    mirror = n_out - 1 - b                                     # what a missing flip would give
+    print(f"{name}: grid_sym {a:.3f}  tool {b:.3f} (both h5 frame)  |delta| = {abs(a - b):.3f} px ; "
+          f"without the flip it would land at {mirror:.3f} px ({abs(a - mirror):.3f} px off)")
+    assert abs(a - b) <= 3, f"{name}: frames disagree"
+    assert abs(a - mirror) > 3, f"{name}: gate is vacuous (mirror amount too small)"
+
+
+# LF: displacement field, h5 frame in / h5 frame out
+lf_bundle = sorted(lf_dir.glob("*_transform.json"))[0]
+payload, u_nm, valid, _ = gs.load_transform(gs.resolve_transform(str(lf_bundle)))
+size_nm = gs._scan_size_nm(h5)
+a_lf, n_out_lf, half, _ = gs.apply_transform(blob, size_nm, payload, u_nm, valid)
 subprocess.run([sys.executable, "skills/lawler-fujita-correction/scripts/stm_lf_apply.py",
-                str(csv), "--transform", str(bundle), "-L", f"{size_nm:g}",
+                str(csv), "--transform", str(lf_bundle), "-L", f"{size_nm:g}",
                 "-o", str(work / "lf")], check=True)
-l = np.loadtxt(work / "lf" / f"marker_corrected.csv", delimiter=",")
-ra, rl = cen(a), cen(l)
-print(f"marker row: grid_sym.apply_transform {ra:.3f}  stm_lf_apply {rl:.3f}  "
-      f"|delta| = {abs(ra - rl):.3f} px")
-print(f"mirror amount if a flip is (re)introduced: n-1-2*ROW = {n - 1 - 2 * ROW} px")
-assert abs(ra - rl) <= 3, "frames disagree: the map must NOT be flipped before warp_by_field"
-print("frame check ok (the map and u share the h5 frame)")
+check("LF", a_lf, work / "lf" / "marker_corrected.csv", n_out_lf)
+
+# affine: A = P M^-1 P, h5 frame in / h5 frame out, 0 flips
+probe = gs.read_json_object(aff_json)
+geometry = gs.affine_geometry(probe, aff_json)
+a_aff, n_out_aff = gs.apply_affine(blob, geometry)
+subprocess.run([sys.executable, "skills/affine-correction/scripts/stm_apply_transform.py",
+                str(csv), "--transform", str(aff_json), "-L", f"{size_nm:g}",
+                "-o", str(work / "affine")], check=True)
+check("affine", a_aff, work / "affine" / "marker_corrected.csv", n_out_aff)
+print("frame check ok: both branches write the h5 frame with 0 flips")
 EOF
 
 # 8) 画法（1:1 + 无 colorbar + 无轴）：把 PNG 从「数组 + 窗口 + cmap」重算出来逐像素比。
@@ -480,6 +575,41 @@ for role in table["roles"]:
               f"({other} planes absent in this run, cross-check skipped)")
     assert abs(a - b) <= 1e-6, "the table is NOT built on the basis planes"
 print("candidate basis check ok (value-based)")
+EOF
+```
+
+```bash
+# 11) affine 几何镜像必须逐位一致：grid_sym.image_transform 与 affine skill 的
+#     stm_apply_transform._image_transform 对同一 (M, n, pad) 给出的 matrix / n_out / offset
+#     必须完全相同（本 skill 有意不 import 对方的脚本，一致性只能这样钉住）。
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'EOF'
+import importlib.util, sys
+
+import numpy as np
+
+spec = importlib.util.spec_from_file_location(
+    "stm_apply_transform_affine", "skills/affine-correction/scripts/stm_apply_transform.py"
+)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+sys.path.insert(0, "skills/grid-sym-fft/scripts")
+import grid_sym as gs
+
+for M, n, pad in (
+    ([[1.0113155760851729, -0.011608167367382904],
+      [-0.011608167367382904, 0.9802575538146885]], 304, 10),
+    ([[1.0, 0.0], [0.0, 1.0]], 512, 10),
+    ([[1.03, 0.01], [0.01, 0.97]], 331, 7),
+):
+    M = np.asarray(M, dtype=float)
+    mine = gs.image_transform(M, n, pad)
+    theirs = mod._image_transform(M, n, pad)
+    assert np.array_equal(mine[0], theirs[0]), (M, n, pad, "matrix")
+    assert mine[1] == theirs[1], (M, n, pad, "n_out", mine[1], theirs[1])
+    assert np.array_equal(mine[2], theirs[2]), (M, n, pad, "offset")
+    print(f"det M = {np.linalg.det(M):.6f}, n = {n}, pad = {pad}: matrix bit-equal, "
+          f"n_out {mine[1]} == {theirs[1]}, offset bit-equal")
+print("affine geometry mirror is bit-for-bit")
 EOF
 ```
 
