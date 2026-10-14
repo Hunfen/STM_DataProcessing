@@ -70,7 +70,8 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
 `--stm-lib` argparse 块：`"--stm-lib",` / `default=...` / `help=...` / `)`；**行号漂了就按这个锚点找**，2026-10-14 复核过）。
 传给它的 `--save-transform` 是**绝对路径**（`grid_lf_fit.py:156-160` 对默认名和显式值都做 `.resolve()`），
 所以 bundle JSON 里的 `u_field_file` 是绝对路径、Skill B 不需要相对解析；Skill B 仍保留「相对则按 bundle
-所在目录解析」的回退（`skills/grid-sym-fft/scripts/grid_sym.py:193-195`）。可迁移位移场包
+所在目录解析」的回退（`skills/grid-sym-fft/scripts/grid_sym.py:481-482`，即 `load_transform()` 里挨着的两行
+`if not u_path.is_absolute():` / `u_path = bundle_json.parent / u_path`；**行号漂了就按这两行原文找**）。可迁移位移场包
 `<stem>_topo_transform.json` + `<stem>_topo_transform.h5` 落进 `-o` 指定的目录（即流水线布局里的 `<out>/lf/`）。
 
 - 本流程固定用 `--lambda-nm 3`：LF 自己的默认 30 nm 对 30 nm 视场太宽，`correction.log` 会报

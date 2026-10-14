@@ -15,7 +15,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 | --- | --- |
 | 输入 | `<grid>.h5`（`python -m stm_data_processing.io.grid2h5 <grid>.3ds -o <grid>.h5` 得到）；角色映射（`--map ROLE="CHANNEL NAME"`）；Skill A 的位移场包**或** `affine-correction` 的变换包 |
 | h5 结构 | `/data (ny, nx, nch, npts)`、`/channels`、`/channel_units`、`/bias`（V，偏压标签只能从这里读）、`/params` + `/param_columns`、`/header` |
-| 位移场包 | Skill A 产出的 `<stem>_transform.json`（含 `u_field_file`、`n_px_reference`、`field_of_view_nm_reference`、`pad`、`order`）+ `<stem>_transform.h5`（`u_x` / `u_y` / `valid`，nm / 参考网格）。Skill A 写出的 `u_field_file` 是**绝对路径**（`grid_lf_fit.py` 对 `--save-transform` 做 `.resolve()`）；若遇到相对路径，按 bundle 所在目录解析（`scripts/grid_sym.py:193-195`） |
+| 位移场包 | Skill A 产出的 `<stem>_transform.json`（含 `u_field_file`、`n_px_reference`、`field_of_view_nm_reference`、`pad`、`order`）+ `<stem>_transform.h5`（`u_x` / `u_y` / `valid`，nm / 参考网格）。Skill A 写出的 `u_field_file` 是**绝对路径**（`grid_lf_fit.py` 对 `--save-transform` 做 `.resolve()`）；若遇到相对路径，按 bundle 所在目录解析（`scripts/grid_sym.py:481-482`，即 `load_transform()` 里挨着的两行 `if not u_path.is_absolute():` / `u_path = bundle_json.parent / u_path`；**行号漂了就按这两行原文找**） |
 | 变换包（两条通路） | `--transform` 同时接受上面那种 **LF 位移场包** 与 **affine 变换包**（`affine-correction` 的 `transform.json`：schema `topo-correction-transform`，含 `affine_q`（2×2 对称正定拉伸 M）、`pad`、`order`、`n_px_reference`、`field_of_view_nm_reference`，以及溯源字段 `method` / `fallback` / `n_labelled` / `anchor_ring` / `anchor_verdict` / `stretch_scale_sqrt_det`）。判别口径见 §2.4，affine 通路的产物路由见 §3 |
 | 视场 L (nm) | 从 h5 header 解析 `Scan>Scanfield`（`;` 分隔，第 3 段宽 ×1e9=nm），否则退回 `Grid settings`；与 Skill A 的 `grid_topo.py` 同源 |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`（不要用 `uv run`）。**`PYTHONDONTWRITEBYTECODE=1` 是必需的**：本 skill 与 Skill A 都会 import `skills/lawler-fujita-correction/scripts/lf_lib.py`（`grid_sym.py` 把它接进 `sys.path`），不设它就会在 `skills/lawler-fujita-correction/scripts/` 下留下 `__pycache__/`（仓库不该有这些字节码缓存；`.gitignore` 忽略它们，但目录会堆在 checkout 里） |
@@ -56,7 +56,10 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 一句话：**h5 原始帧 = 位移场帧 = affine 包的数组帧；本 skill 全程不翻转**。CSV 帧（topo CSV / 两个 apply 工具的输入与产物帧）
 与它差一次 flip，那是 Skill A / affine skill 内部各自约定的事，与本 skill 无关。
 
-**显示约定**：实空间图与 FFT 图统一用 matplotlib `origin="lower"`（`plot_matrix()`，`grid_sym.py:425`），
+**显示约定**：实空间图与 FFT 图统一用 matplotlib `origin="lower"`（产物图的渲染入口是
+`save_array_image()`（`grid_sym.py` 的 `def` 在 680；实空间图经 `save_map_image()`、FFT 图经
+`save_fft_image()` 都只调它），里面那个 `ax.imshow(mat, ..., origin="lower", interpolation="nearest", aspect="auto")`
+调用的 `origin="lower",` 行在 **716**——**行号漂了就按这个锚点找**），
 与 LF 家族一致（`stm_lf_correct.py:1031/1047`、`stm_lf_apply.py:398/414`——每对是「实空间图的
 `ax.imshow(corrected, cmap=cmap_bad, origin="lower")` 行 / FFT 图里那个 `origin="lower",` 行」，
 **行号漂了就按这两个锚点找**，2026-10-14 复核过）——即**数组第 0 行画在画布底部**，
