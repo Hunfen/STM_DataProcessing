@@ -43,6 +43,13 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+#: Repository root derived from this file's location (``<repo>/skills/affine-correction/
+#: scripts`` -> ``<repo>``); the ``stm_data_processing`` package lives in ``<repo>/src``.
+#: Single source for every package import below, so moving the checkout (or running the
+#: self-test from another clone) does not change which src/ is used.
+REPO_ROOT = HERE.parents[2]
+STM_LIB = REPO_ROOT / "src"
+
 import correction_lib as cl  # noqa: E402
 import h5io  # noqa: E402
 
@@ -105,6 +112,31 @@ def check(name, ok, detail, threshold=""):
 
 def section(title):
     print(f"\n== {title} ==")
+
+
+def require_package(stage):
+    """Import the repository's ``stm_data_processing`` package or record a FAIL.
+
+    Every stage below measures something through that package, so an environment
+    where it cannot be imported has measured nothing: it must fail instead of being
+    recorded as a pass.  Returns the module, or ``None`` (after a FAIL) so the caller
+    can stop its stage.
+    """
+    if str(STM_LIB) not in sys.path:
+        sys.path.insert(0, str(STM_LIB))
+    try:
+        import stm_data_processing
+    except Exception as exc:
+        check(
+            f"{stage} cannot run",
+            False,
+            f"stm_data_processing cannot be imported from {STM_LIB} "
+            f"({type(exc).__name__}: {exc}); run the self-test with the repository "
+            "interpreter, e.g. "
+            ".venv/bin/python skills/affine-correction/scripts/selftest.py",
+        )
+        return None
+    return stm_data_processing
 
 
 # --------------------------------------------------------------------------- #
@@ -358,17 +390,7 @@ def check_h5_schema(path, datasets, generator, units):
 # --------------------------------------------------------------------------- #
 def test_correction_stage(n, workdir):
     section("correction stage: explicit anchor ring (needs the package)")
-    try:
-        sys.path.insert(0, "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src")
-        import stm_data_processing  # noqa: F401
-    except Exception as exc:
-        check(
-            "correction stage skipped",
-            True,
-            f"the package is not importable here ({type(exc).__name__}); run the "
-            f"self-test with the repository interpreter to cover this stage",
-            "informational",
-        )
+    if require_package("correction stage") is None:
         return
 
     env = dict(os.environ)
@@ -576,7 +598,7 @@ def png_renders_array(png_path, array):
     import matplotlib.pyplot as plt
 
     cl.setup_style()
-    stm_lib = "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src"
+    stm_lib = str(STM_LIB)
     cmap, _source = cl.load_colormap(stm_lib)
     cmap_bad = cmap.copy()
     cmap_bad.set_bad(color=cl.BAD_COLOR)
@@ -625,23 +647,23 @@ def marker_case(n, path):
 # --------------------------------------------------------------------------- #
 def test_transform_stage(n, workdir):
     section("two-stage transform: --save-transform export + stm_apply_transform.py")
+    if require_package("two-stage transform") is None:
+        return
     try:
-        sys.path.insert(0, "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src")
         import stm_apply_transform
 
-        import stm_data_processing  # noqa: F401
         from stm_data_processing.utils.bragg_peak import load_image
         from stm_data_processing.utils.bragg_peak.correct import (
             _image_transform as package_image_transform,
         )
     except Exception as exc:
         check(
-            "two-stage transform skipped",
-            True,
-            f"the package or the apply script is not importable here "
+            "two-stage transform cannot run",
+            False,
+            f"stm_apply_transform or the package submodules cannot be imported "
             f"({type(exc).__name__}: {exc}); run the self-test with the repository "
-            f"interpreter to cover this stage",
-            "informational",
+            "interpreter, e.g. "
+            ".venv/bin/python skills/affine-correction/scripts/selftest.py",
         )
         return
 
@@ -999,17 +1021,7 @@ def test_direction_gate(n, workdir):
     section(
         "frame direction gate: output first row = input first row (off-centre marker)"
     )
-    try:
-        sys.path.insert(0, "/Users/hunfen/Documents/GitHub/STM_DataProcessing/src")
-        import stm_data_processing  # noqa: F401
-    except Exception as exc:
-        check(
-            "frame direction gate skipped",
-            True,
-            f"the package is not importable here ({type(exc).__name__}); run the "
-            f"self-test with the repository interpreter to cover this gate",
-            "informational",
-        )
+    if require_package("frame direction gate") is None:
         return
 
     env = dict(os.environ)
