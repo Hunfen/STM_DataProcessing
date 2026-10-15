@@ -25,6 +25,24 @@ states which physical ring the detected anchor is:
     --anchor-ring 1x1   the anchor ring is the 1x1 ring:  a_ref = a
     --anchor-ring r3    the anchor ring is the r3 ring:   a_ref = sqrt(3) * a
 
+The **anchor star can also be pinned by hand**.  The labelling of the detection is
+radius-based and carries tolerances (2 % of |q|, 3 % of the ring radius), so a ring that
+is distorted apart by more than that -- the real 1x1 ring of a strongly anisotropic
+image -- starves its true peaks of labels and labels weak spurious peaks instead, and
+the fit then reports an anisotropy that the data does not have.  ``--anchor-peaks``
+takes six pixels of three hand-checked 1x1 first-ring peaks
+(``Q1X Q1Y Q2X Q2Y Q3X Q3Y``, in the FFT-shift convention ``q_px = index - n // 2``,
+i.e. the offsets the peak table shows).  The three points are localised sub-pixel on
+|FFT|, labelled ``(1,0) (0,1) (-1,1)`` in order of increasing polar angle, and are the
+*only* input of the stretch fit -- with their Friedel partners, all six of them
+independent measurements (``n_labelled = 6``) -- while the reference orientation is
+re-derived from the same three peaks instead of the detection's; every other labelled
+peak is ignored.  The run fails closed (nonzero exit, no output directory, no product)
+when a pinned point cannot hold a localizer patch on the FFT canvas, when the rms
+residual of the fit exceeds 0.5 px (the pinned triple and the stated reference lattice
+do not match: wrong field of view, or a point from another ring), or when the symmetric
+stretch is not positive definite.  A run without the flag is unchanged, byte for byte.
+
 Everything else -- the stretch fit, the resampling rule, the corrected field of
 view ``size_nm * n_out / n_px`` -- is unchanged.  The report prints which path was
 taken, the fit method and fallback flag, |b1| before and after, the canvas, the
@@ -60,7 +78,7 @@ Usage:
     MPLCONFIGDIR=<writable> PYTHONDONTWRITEBYTECODE=1 \
         .venv/bin/python <this script> INPUT.csv -L 50 -o OUT_DIR \
         [--a 0.246] [--anchor-ring 1x1|r3] [--delimiter ','] [--list-peaks] \
-        [--save-transform TRANSFORM.json]
+        [--anchor-peaks Q1X Q1Y Q2X Q2Y Q3X Q3Y] [--save-transform TRANSFORM.json]
 """
 
 from __future__ import annotations
@@ -96,6 +114,21 @@ PATCH_HALF = 8  # sub-pixel Gaussian patch half width: 8 -> 17x17 pixels
 # examples miss it by 42 % / 73 %, while the measured deviation of a correct fit is
 # at most a few percent.
 STRETCH_SCALE_TOL = 0.05
+# Explicit anchor star (--anchor-peaks).  The three hand-checked 1x1 first-ring peaks
+# are labelled in order of increasing polar angle, and that order has to match the
+# hexagonal basis: (1,0) -> (0,1) -> (-1,1) is 60 deg per step, and any cyclic rotation
+# of the triple is an equally valid gauge because the reference orientation is
+# re-derived from the same three peaks.
+ANCHOR_LABELS = ((1, 0), (0, 1), (-1, 1))
+# Fail-closed tolerance of the anchored fit: three peaks of a hexagonal ring cannot be
+# fitted to better than the sub-pixel accuracy of the localizer, so a few 1/100 px of
+# rms mean the triple and the stated reference lattice agree, while a point that
+# belongs to another ring or another field of view leaves several px behind.
+ANCHOR_RMS_TOL_PX = 0.5
+# The three points must be a tight star of ONE ring, not three directions spread over
+# the plane: the largest gap between consecutive polar angles is then at least this
+# value (a 60 deg star leaves ~240 deg; three 120 deg directions leave only 120 deg).
+ANCHOR_SPREAD_MIN_DEG = 150.0
 
 
 def subtract_mean_plane(matrix: np.ndarray) -> np.ndarray:
@@ -180,6 +213,20 @@ def parse_args(argv=None):
         metavar=("Q1X", "Q1Y", "Q2X", "Q2Y"),
         help="optional manual anchor pair (q offsets in px): restrict the "
         "stretch fit to the two detected peaks closest to these",
+    )
+    parser.add_argument(
+        "--anchor-peaks",
+        nargs=6,
+        type=float,
+        default=None,
+        metavar=("Q1X", "Q1Y", "Q2X", "Q2Y", "Q3X", "Q3Y"),
+        help="explicit anchor star: three hand-checked 1x1 first-ring peaks "
+        "(q offsets in px, fftshift convention). The stretch fit then uses "
+        "only these three peaks and their Friedel partners, and the "
+        "reference orientation is re-derived from them instead of from the "
+        "detection's ring labelling; fails closed on a point outside the "
+        "FFT canvas, rms residual > 0.5 px or a non-positive-definite "
+        "stretch",
     )
     parser.add_argument(
         "--delimiter",
@@ -323,6 +370,187 @@ def lattice_orientation_deg(detection):
     return float(np.degrees(np.arctan2(b1[1], b1[0])))
 
 
+def anchor_star(topo, size_nm, coords, a_ref_nm, patch_half):
+    """Build the detection and the reference orientation from three pinned peaks.
+
+    ``coords`` are three measured first-ring peaks of the reference lattice, in the
+    FFT-shift pixel convention (``q_px = index - n // 2``).  Each point is localised
+    sub-pixel on |FFT| with the detector's own Gaussian localizer and then labelled
+    ``(1, 0), (0, 1), (-1, 1)`` in order of increasing polar angle, so the radius-based
+    labelling of the detector is bypassed entirely.
+
+    Returns ``(detection, orientation_deg)``: a detection whose six peaks are the three
+    anchors and their Friedel partners -- each one an independent measurement, so the
+    stretch fit uses all three conjugate pairs at once -- and the reference orientation
+    re-derived from the same three peaks, in the convention of
+    ``lattice_orientation_deg`` (the counter-clockwise angle of the data's own (1,0)
+    direction).  Raises ``ValueError`` when a point cannot hold a localizer patch or
+    does not sit on a sub-pixel |FFT| peak.
+    """
+    from stm_data_processing.utils.bragg_peak import (
+        BraggDetectionResult,
+        BraggPeak,
+        ideal_basis,
+        localize_peak,
+        radial_background,
+        robust_rayleigh_scale,
+    )
+    from stm_data_processing.utils.bragg_peak.fft import (
+        compute_fft2,
+        magnitude,
+        q_axis_limits,
+        radius_map,
+    )
+
+    points = np.asarray(coords, dtype=float).reshape(3, 2)
+    n = int(topo.shape[0])
+    centre = n // 2
+    half = int(patch_half)
+    rows = np.rint(points[:, 1]).astype(int) + centre
+    cols = np.rint(points[:, 0]).astype(int) + centre
+    for (qx, qy), row, col in zip(points, rows, cols, strict=True):
+        if not (half <= row < n - half and half <= col < n - half):
+            raise ValueError(
+                f"anchor peak ({qx:g}, {qy:g}) px is outside the FFT canvas: it "
+                f"needs a {2 * half + 1} px patch on a {n} x {n} canvas"
+            )
+
+    magnitude_map = magnitude(
+        compute_fft2(topo, size_nm, window="hann", subtract_plane=False)
+    )
+    radius = radius_map(n)
+    level, sigma = radial_background(magnitude_map, radius)
+    records = []
+    for row, col in zip(rows, cols, strict=True):
+        noise = float(sigma[row, col])
+        snr = float(
+            (magnitude_map[row, col] - level[row, col])
+            / max(noise, np.finfo(float).tiny)
+        )
+        record = localize_peak(
+            magnitude_map,
+            int(row),
+            int(col),
+            snr=snr,
+            noise_sigma=noise,
+            patch_half=half,
+        )
+        if record["method"] != "gaussian":
+            raise ValueError(
+                f"anchor peak ({col - centre}, {row - centre}) px: no sub-pixel peak "
+                f"on |FFT| (the localizer returned method = {record['method']})"
+            )
+        records.append(record)
+
+    measured = np.array(
+        [[float(record["qx_px"]), float(record["qy_px"])] for record in records]
+    )
+    angles = np.degrees(np.arctan2(measured[:, 1], measured[:, 0])) % 360.0
+    order = np.argsort(angles, kind="stable")
+    sorted_angles = angles[order]
+    gaps = np.diff(np.append(sorted_angles, sorted_angles[0] + 360.0))
+    if float(gaps.max()) < ANCHOR_SPREAD_MIN_DEG:
+        raise ValueError(
+            "the three anchor peaks are not one 60 deg star of a single ring "
+            "(polar angles "
+            + ", ".join(f"{angle:.2f}" for angle in sorted_angles)
+            + " deg)"
+        )
+
+    labels = [ANCHOR_LABELS[int(index)] for index in order]
+    ordered = [records[int(index)] for index in order]
+    basis = ideal_basis(a_ref_nm, "hexagonal", None)
+    ideal = np.array([np.asarray(label, dtype=float) @ basis for label in labels])
+    ideal_angles = np.degrees(np.arctan2(ideal[:, 1], ideal[:, 0]))
+    # Orientation gauge: each of the three peaks states the same rotation of the ideal
+    # basis, so the circular mean of the three offsets is the reference orientation.
+    offsets = np.radians(sorted_angles - ideal_angles)
+    orientation_deg = float(np.degrees(np.angle(np.mean(np.exp(1j * offsets)))))
+
+    dq_nm_inv, q_nyquist = q_axis_limits(n, size_nm)
+    peaks = []
+    for sign in (1.0, -1.0):
+        for label, record in zip(labels, ordered, strict=True):
+            q_px = (sign * float(record["qx_px"]), sign * float(record["qy_px"]))
+            sigma_px = np.asarray(record["sigma_px"], dtype=float)
+            cov_px = np.asarray(record["cov_px"], dtype=float)
+            peaks.append(
+                BraggPeak(
+                    q_px=q_px,
+                    q_nm_inv=(q_px[0] * dq_nm_inv, q_px[1] * dq_nm_inv),
+                    sigma_q_px=(float(sigma_px[0]), float(sigma_px[1])),
+                    sigma_q_nm_inv=(
+                        float(sigma_px[0]) * dq_nm_inv,
+                        float(sigma_px[1]) * dq_nm_inv,
+                    ),
+                    cov_q_px=cov_px,
+                    cov_q_nm_inv=cov_px * dq_nm_inv**2,
+                    amplitude=float(record["amplitude"]),
+                    snr=float(record["snr"]),
+                    index_hk=label if sign > 0 else (-label[0], -label[1]),
+                    chi2_reduced=float(record["chi2_reduced"]),
+                    n_pixels=int(record["n_pixels"]),
+                    method=str(record["method"]),
+                    quality="ok",
+                    independent=True,
+                )
+            )
+    # The second half of the tuple mirrors the first, so peak i pairs with i + 3.  Both
+    # members count as independent measurements: the detector mirrors a peak only when
+    # it never localised the partner itself, whereas here the -q image carries its own
+    # measured position and covariance.
+    peaks = tuple(
+        replace(peak, conjugate_index=(index + 3) % 6)
+        for index, peak in enumerate(peaks)
+    )
+
+    dc_radius_px = 0.03 * n
+    band = (radius >= 3.0 * dc_radius_px) & (radius <= 0.95 * (n // 2))
+    detection = BraggDetectionResult(
+        peaks=peaks,
+        lattice=None,
+        size_nm=float(size_nm),
+        n_px=n,
+        dq_nm_inv=float(dq_nm_inv),
+        q_nyquist_nm_inv=float(q_nyquist),
+        noise_sigma=float(robust_rayleigh_scale(magnitude_map, band)),
+        n_candidates=len(peaks),
+        meta={
+            "basis_source": "anchor-peaks",
+            "anchor_points_px": [[float(v) for v in point] for point in points],
+            "anchor_peaks_px": [[float(v) for v in point] for point in measured],
+            "anchor_labels": [[int(h), int(k)] for h, k in labels],
+            "orientation_deg": orientation_deg,
+            "patch_half": half,
+        },
+    )
+    return detection, orientation_deg
+
+
+def anchor_fit_problem(meta, tol=ANCHOR_RMS_TOL_PX):
+    """Why the anchored stretch fit cannot be trusted, or None when it can.
+
+    Two ways the pinned star fails closed: the symmetric least-squares solution was not
+    positive definite (the package then falls back to a two-vector or identity stretch,
+    which is no correction at all) and residuals above ``tol`` px, which mean the pinned
+    triple and the stated reference lattice do not belong together (a wrong field of
+    view, or a point that sits on another ring).
+    """
+    if meta["method"] != "weighted_lsq":
+        return (
+            f"the symmetric stretch is not positive definite (method = "
+            f"{meta['method']}): the pinned star does not describe this image"
+        )
+    rms = float(meta["rms_residual_px"])
+    if not np.isfinite(rms) or rms > tol:
+        return (
+            f"the pinned star leaves an rms residual of {rms:.3f} px, over the "
+            f"{tol:g} px tolerance: the pinned peaks and the reference lattice "
+            "do not match"
+        )
+    return None
+
+
 def ring_table(peaks, cluster_tol):
     """Radius clustering of the detected peaks (geometry only, no labels)."""
     records = [
@@ -357,6 +585,12 @@ def implied_lattice(radius_nm_inv, a_nm, anchor):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.peaks is not None and args.anchor_peaks is not None:
+        print(
+            "ERROR: --peaks and --anchor-peaks are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
     sys.path.insert(0, args.stm_lib)
     from stm_data_processing.utils.bragg_peak import (
         LatticeSpec,
@@ -368,7 +602,6 @@ def main(argv=None):
 
     csv_path = Path(args.input)
     outdir = Path(args.outdir) if args.outdir else csv_path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
     stem = csv_path.stem
     log_lines = []
 
@@ -379,15 +612,24 @@ def main(argv=None):
     topo = load_matrix(csv_path, resolve_delimiter(args.delimiter), load_image)
     topo = np.flipud(subtract_mean_plane(topo))  # first row = top scan line
 
-    detection = detect_bragg_peaks(
-        topo,
-        args.size_nm,
-        patch_half=args.patch_half,
-        subtract_plane=False,
-        return_fft2=False,
-    )
-    orientation_deg = lattice_orientation_deg(detection)
     a_ref = float(args.a) if args.anchor_ring == "1x1" else float(args.a) * np.sqrt(3.0)
+    if args.anchor_peaks is None:
+        detection = detect_bragg_peaks(
+            topo,
+            args.size_nm,
+            patch_half=args.patch_half,
+            subtract_plane=False,
+            return_fft2=False,
+        )
+        orientation_deg = lattice_orientation_deg(detection)
+    else:
+        try:
+            detection, orientation_deg = anchor_star(
+                topo, args.size_nm, args.anchor_peaks, a_ref, args.patch_half
+            )
+        except ValueError as error:
+            print(f"ERROR: --anchor-peaks: {error}", file=sys.stderr)
+            return 2
     spec = LatticeSpec(
         a_nm=a_ref, symmetry="hexagonal", orientation_deg=orientation_deg
     )
@@ -414,6 +656,18 @@ def main(argv=None):
         "inside the 1x1 ring (radius ratio 1/sqrt(3)) an anchor assumption of 1x1 "
         "would stretch the r3 ring up to the 1x1 radius"
     )
+    if args.anchor_peaks is not None:
+        star = detection.meta
+        emit(
+            "# anchor star (--anchor-peaks): the pinned peaks "
+            + ", ".join(f"({qx:g}, {qy:g})" for qx, qy in star["anchor_points_px"])
+            + " px localized on |FFT| to "
+            + ", ".join(f"({qx:.3f}, {qy:.3f})" for qx, qy in star["anchor_peaks_px"])
+            + " px, labelled "
+            + ", ".join(f"({h},{k})" for h, k in star["anchor_labels"])
+            + ": the stretch fit uses only these three peaks and their Friedel "
+            "partners, and the reference orientation is re-derived from them"
+        )
 
     rings = ring_table(detection.peaks, args.ring_cluster_tol)
     if rings:
@@ -468,6 +722,11 @@ def main(argv=None):
         topo, args.size_nm, lattice=spec, result=detection, return_fft2=False
     )
     meta = correction.meta
+    if args.anchor_peaks is not None:
+        problem = anchor_fit_problem(meta)
+        if problem is not None:
+            print(f"ERROR: --anchor-peaks: {problem}", file=sys.stderr)
+            return 2
     b_ideal = float(meta["target_radius_nm_inv"])
     before = implied_lattice(meta["measured_radius_nm_inv"], args.a, args.anchor_ring)
     stretch_scale = float(np.sqrt(np.linalg.det(correction.affine_q)))
@@ -675,6 +934,12 @@ def main(argv=None):
     # the working frame flipud(...) (first row = top scan line), so the corrected
     # array is flipped back exactly once, here, and every product below -- CSV, h5,
     # npy and both pngs -- is derived from this one array.
+    # Every output below is written only once the fit has passed every gate, and the
+    # output directory is created here rather than at the start of the run: a run that
+    # fails closed (a pinned --anchor-peaks point outside the FFT canvas, a residual
+    # over tolerance or a non-positive-definite stretch) exits above without creating
+    # the directory and without writing a single product.
+    outdir.mkdir(parents=True, exist_ok=True)
     corrected = np.flipud(np.asarray(correction.image, dtype=float))  # input frame
     out_csv = outdir / f"{stem}_corrected.csv"
     np.savetxt(out_csv, corrected, delimiter=",", fmt="%.10e")
@@ -786,6 +1051,17 @@ def main(argv=None):
         "corrected_csv": str(out_csv),
         "corrected_fft2_npy": str(out_fft2),
     }
+    if args.anchor_peaks is not None:
+        # Provenance of a hand-pinned star: the points the caller gave, where they were
+        # localized on |FFT|, the labels they were given in order of polar angle and the
+        # patch the localizer used.  The report is the machine-readable product, so the
+        # pin is recorded here as well as in the log.
+        report["anchor_star"] = {
+            "points_px": star["anchor_points_px"],
+            "localized_px": star["anchor_peaks_px"],
+            "labels": star["anchor_labels"],
+            "patch_half": star["patch_half"],
+        }
     (outdir / "correction_report.json").write_text(json.dumps(report, indent=2) + "\n")
     emit("")
     emit(

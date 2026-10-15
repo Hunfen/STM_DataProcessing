@@ -21,6 +21,7 @@ description: STM 拓扑图 CSV 的几何矫正：正方形数值矩阵（可含 
 | 视场 L (nm) | 正方形扫描边长，**必须显式给出**（文件名里的标注不可信） |
 | 参考晶格 | 六方，1x1 晶格常数 `a`（默认 0.246 nm）；**取向取数据自身的 (1,0) 方向**，不做点群推断 |
 | 锚定环 | 必须显式指定：`--anchor-ring 1x1`（默认）/ `r3`（见 §2.1） |
+| 锚定星（可选） | `--anchor-peaks Q1X Q1Y Q2X Q2Y Q3X Q3Y`：手工确认的同一 1x1 第一环上的三个峰（px，FFT-shift 约定）；给了它，拟合只用这三个峰及其 Friedel 伙伴（见 §2.3） |
 | 分隔符 | 自动识别；显式用 `--delimiter ','` / `--delimiter '\t'` |
 | 解释器 | 仓库 venv：`cd /path/to/STM_DataProcessing && MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <脚本>`。**不要用 `uv run`**（会写仓库 `.venv`） |
 | 绘图 | `text.usetex=False`（mpl 3.10 + TeX Live 2026 有编码 bug），mathtext cm + Palatino |
@@ -39,6 +40,11 @@ export MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1
 # 第二段（可选）：把同一变换应用到另一张拓扑图，-L 给的是那张图自己的视场
 .venv/bin/python skills/affine-correction/scripts/stm_apply_transform.py \
   TARGET.csv --transform OUT/transform.json -L 50 -o OUT_TARGET
+
+# 可选：检测的标注把真峰漏掉时（畸变 > 3 %，见 §2.3），把肉眼确认的三个真峰钉死
+.venv/bin/python skills/affine-correction/scripts/stm_topo_correct.py \
+  INPUT.csv -L 30 -o OUT --anchor-peaks 71 130 -71 134 -142 5 \
+  --save-transform OUT/transform.json
 ```
 
 流程：读入 → `flipud(subtract_mean_plane(...))`（本 skill 内联的 NaN 安全平面拟合，纯 numpy，
@@ -100,6 +106,52 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 **什么都没矫正**（数组只是重铺到更大的 NaN 画布上）——脚本会照实打印并打 WARNING，
 **信任结果前先看 `method`/`fallback`**。
 
+### 2.3 手工钉死锚定星（`--anchor-peaks`）
+
+**动机**（§2.2 的"已知限制"有两副面孔）。包的标注容差是 |q| 的 **2 %**（另加 2 px 下限，
+`_LABEL_TOL_FRAC` / `_LABEL_TOL_MIN_PX`）与环半径聚类 **3 %**。畸变超过 3 % 时真峰在**半径**
+上就被拉开到容差之外，于是：真峰拿不到 `index_hk`，而半径接近理想值的**弱伪峰**被标上，拟合
+只在这些弱峰上做，报出一个数据里并不存在的各向异性——而这一版 `--anchor-ring` 是拦不住它的
+（锚定环没写错，错的只是"哪个峰算这一环的成员"）。
+实测（c6lic6 `20251115_grid1_50mV500pA_30nm`，304 px / 30 nm）：真 1x1 环被畸变拉开 7–8 %，
+检测给半径 ≈140.3 px 的两个弱峰（`snr` 21.3 / 9.0、`|F|/max` 0.024 / 0.012）打了 (1,0) / (0,1)
+标签 → 拟合报 **3.97 %** 的假各向异性（`n_labelled = 3`、`rms = 1.507 px`），真峰一个没进拟合。
+
+**语义**：`--anchor-peaks Q1X Q1Y Q2X Q2Y Q3X Q3Y` 接受三个浮点坐标对（px，**FFT-shift 约定**，
+即 `q_px = index − n//2` 的偏移量，与 `--list-peaks` 打印的 `q=(qx, qy)` 同口径）：调用者在放大
+图上肉眼确认过的**同一个 1x1 第一环**上的三个峰（作为矢量互为 60°，即三对共轭）。给了它：
+
+1. 每个点先用检测器自己的高斯定位器在 |FFT| 上**定位到亚像素**（`localize_peak`，窗口
+   `--patch-half`，默认 8 → 17×17 px），**不用**检测给出的半径标签；
+2. 三个定位后的峰按极角排序，依次贴 `(1,0)` → `(0,1)` → `(−1,1)`，**只**用这三个峰与它们的
+   Friedel 伙伴做对称拉伸最小二乘（`n_labelled = 6`，三对共轭全用上，不再是检测挑出来的那 3 个）；
+3. **参考基的取向也由这三个峰重新确定**：取三个峰相对理想基矢的旋转角的圆平均
+   （`orientation_deg`）——不沿用检测给出的取向，因为那正是被弱伪峰拖偏的一个。
+
+实测同一数据集（`--anchor-peaks 71 130 -71 134 -142 5`）：三点定位到 (71.488, 129.451)、
+(−70.917, 134.648)、(−142.403, 5.338) px，贴 (1,0) / (0,1) / (−1,1)，取向 58.906°（检测给
+58.462°）、`affine_q = [[1.011122, −0.016999], [−0.016999, 1.083168]]`（各向异性 **7.909 %**，
+与肉眼复核用的 `[[1.010263, −0.016454], [−0.016454, 1.081426]]` 逐元素差 ≤ 0.0018）、
+`n_labelled = 6`、`rms = 0.051 px`、`n_out = 355`。用该矩阵矫正后，矫正后 FFT 上 1x1 环沿
+三条理想线的半径各向异性 **0.73 %**（同一判据用在**默认路径**的错误锚定矩阵上是 7.7 %——
+合同里引作反面基线的 6.03 % 是同一张 FFT、另一套量测窗口下的读数）。
+
+**失败关闭**：下列任一发生即打印原因、以退出码 **2** 结束，且**不创建输出目录、不写任何产物**
+（`outdir.mkdir()` 在所有门之后，见 §3）：
+
+| 条件 | 判据 |
+| --- | --- |
+| 给定点落在 FFT 画布之外 | 该点需要 `2·patch_half + 1` px 定位窗口，画布边缘内放不下 |
+| 定位器没给出高斯解（`method != "gaussian"`） | 该点不在 |FFT| 的亚像素峰上 |
+| 三点不构成同一个 60° 星 | 极角排序后**最大**间隔 < `ANCHOR_SPREAD_MIN_DEG` = 150°（三点摊得过开，例如互为 120°，而不是同一环的 60° 星；60° 星留 ~240°） |
+| 拟合残差 `rms > ANCHOR_RMS_TOL_PX`（0.5 px） | 钉死的峰与参考晶格不是一回事（L 错、点落在别的环上） |
+| 对称拉伸非正定（`method != "weighted_lsq"`，包已回退 two-vector / identity） | 钉死的星描述不了这张图 |
+
+`--peaks`（两点手工锚定对，v2 之前的口子）与 `--anchor-peaks` 互斥。**不给 `--anchor-peaks`
+时整条流水线**（检测、取向、拟合、全部产物与 log）**与旧版逐字节不变**。钉死的三个点、它们的
+亚像素位置与标签同时进 log（`# anchor star (--anchor-peaks): ...`）与 `correction_report.json`
+的 `anchor_star`（机器可读的溯源）。
+
 ## 3 输出与下游接口契约
 
 输出（`-o OUT`）：`<stem>_corrected.csv`、`<stem>_corrected.h5`、`<stem>_corrected_fft2.npy`
@@ -130,6 +182,8 @@ inconsistent**）；矫正后退化为不足两环时，若拉伸尺度仍在容
 | 输入画布视场 | log 的 `# canvas ... field of view <L> nm` 行（原始 L，供对照） |
 | `affine_q` | `correction_report.json` 里拟合出的对称正定拉伸 M：把**测得**倒格矢映射到**理想**倒格矢；实空间矫正重采样用的是 M⁻¹（数组坐标 `A = P·M⁻¹·P`，`P` 为轴交换） |
 | `anchor_self_check` | `verdict` ∈ `consistent` / `inconsistent` / `unverifiable` + 两条 tell-tale 的字段（见 §2.2） |
+| `anchor_star` | **只在 `--anchor-peaks` 给出时出现**：钉死的三个点（`points_px`）、它们的亚像素位置（`localized_px`）、按极角给的标签（`labels`）与定位窗口（`patch_half`）（见 §2.3） |
+| 失败关闭 | 带 `--anchor-peaks` 的运行若在开跑前就判定不可信（点出画布、不构成 60° 星、残差 > 0.5 px、拉伸非正定），以退出码 2 结束且**不建输出目录、不写任何产物**；`outdir.mkdir()` 在所有门之后 |
 
 **把变换应用到其他图像（两段式，v2.2）**：`--save-transform FILE` 把拟合出的变换写成独立 JSON
 （schema `topo-correction-transform`，`schema_version = 1`；**该 schema id 是冻结的产物标识，本 skill 改名后保持不变**），
@@ -194,6 +248,16 @@ MPLCONFIGDIR=<可写目录> PYTHONDONTWRITEBYTECODE=1 \
 包不可导入时检查 1、6、7、8、9 各自以 informational 跳过（同原 self-test 的分支）。
 
 ## 5 修改记录
+
+2026-10（锚定星手工钉死）：`stm_topo_correct.py` 新增 `--anchor-peaks Q1X Q1Y Q2X Q2Y Q3X Q3Y`
+（px，FFT-shift 约定）——给出三个肉眼确认过的 1x1 第一环峰后，拟合**只**用这三个峰及其 Friedel
+伙伴（`n_labelled = 6`），参考基取向也由这三个峰重新确定（不再沿用检测的取向）；点出画布 /
+三点不构成 60° 星 / 定位不到亚像素峰 / 残差 > 0.5 px / 拉伸非正定一律失败关闭（退出码 2，且
+不建输出目录、不写任何产物）；`correction_report.json` 增加 `anchor_star` 溯源块。**不加该开关
+时全部产物与 log 逐字节不变**（实测：同一输出路径下 HEAD 版与新版逐文件 sha256 相同——
+`transform.json` / `correction.log` / CSV / 两个 png / `.npy` / `correction_report.json` 逐字节
+一致，`.h5` 只差包内自带的挂钟属性 `creation_date`，同一版本连跑两次也差同一处）。动机、语义
+与失败条件见 §2.3。self-test 仍 9 项（未增项，重跑全绿）。
 
 2026-10（帧约定，本版）：`stm_topo_correct.py` 与 `stm_apply_transform.py` 的数组产物改为
 **输出与输入同帧**——重采样仍在 `flipud(subtract_mean_plane(...))` 工作帧里做，写回前**翻转一次**，
