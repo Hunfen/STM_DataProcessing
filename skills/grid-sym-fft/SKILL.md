@@ -130,6 +130,11 @@ affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就
 .venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
     --map current="Current (A)" --map didv="DSP 7280 Y (%)" \
     --transform OUT2/affine/transform.json -o OUT        # 色标窗继承 OUT/fft_window.json
+# affine 通路 + --upsample N>1：一次 cubic 重采样到 n·N 细网格（画布 = 足迹方形 bbox）
+#             + FFT 家族裁回原生 q 窗口（见 §2.6；默认 1 = 现行为）
+.venv/bin/python skills/grid-sym-fft/scripts/grid_sym.py GRID.h5 \
+    --map current="Current (A)" --map didv="DSP 7280 Y (%)" \
+    --transform OUT2/affine/transform.json --upsample 8 -o OUT
 # 两个 flag 各管一件事，不共用：
 #   --spatial-window {none,hamming,hanning}  数据窗（fft2 之前乘 2D 窗）
 #   --fft-window VMIN VMAX                   色标窗，**必须两个浮点数**（套给所有角色；
@@ -142,7 +147,7 @@ affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就
 
 | 项 | LF 通路 | affine 通路 |
 | --- | --- | --- |
-| 矫正 | `lf_lib.warp_by_field`：`corrected(r) = T(r + u(r))`，画布 `n + 2(⌈max|u|⌉ + pad)` | `A = P·M⁻¹·P` + `_image_transform(A, n, pad)` 的 `n_out`/offset，`scipy.ndimage.affine_transform(order, cval=NaN)`；画布按**目标 n 现算**（本数据 304 → 331，不硬编码） |
+| 矫正 | `lf_lib.warp_by_field`：`corrected(r) = T(r + u(r))`，画布 `n + 2(⌈max|u|⌉ + pad)` | `A = P·M⁻¹·P` + `_image_transform(A, n, pad)` 的 `n_out`/offset，`scipy.ndimage.affine_transform(order, cval=NaN)`；画布按**目标 n 现算**（本数据 304 → 331，不硬编码）。`--upsample N > 1` 换成**一次 cubic 重采样到 n·N 细网格**、画布 = 足迹方形 bbox（2432²，无 pad 带），FFT 家族再裁回原生 q 窗口（310²）——见 §2.6 |
 | 帧 | h5 帧，0 次 flip（§2.2 第 5 条） | h5 帧，**0 次 flip**（§2.2 第 6 条） |
 | 阶段 | a+b+c+d+e（第一次还出候选） | **只有 c+d+e**：不写 `raw/`、`fft_raw/`、`window_candidates/`（§3） |
 | 产物根 | `<out>/` | **`<out>/affine/`**（调用方仍传 `-o <out>`） |
@@ -158,7 +163,7 @@ affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就
 
 **c. 矫正**：LF 通路用 `--transform` 指向的位移场包矫正每个角色每张 map（**只重采样、绝不改值域、也绝不翻转**，见 §2.2）；affine 通路用 `A = P·M⁻¹·P` 与同一 offset 直接作用在 h5 帧的 map 上（**同样 0 次翻转**，§2.2 第 6 条；画布按目标 n 现算）。两条都：写 corrected CSV + PNG（viridis，窗口 = 该图 `nanmedian ± 5σ`）+ 该阶段自己的复数 FFT + `log|F|` 图；**禁止**调用会去平面的 `stm_lf_apply.py` / `stm_apply_transform.py`（它们属于各自的 CSV 帧入口，且 affine 那个还会减平面——本 skill 用的是本地镜像的几何）。
 
-**d. Z3**：对每张矫正后 map 的 `F`，`Z = (F + R120 F + R240 F)/3` 在**复数域**做，旋转**绕 DC 像素**：`R` 为平面内 120/240 度旋转矩阵，`offset = c - R c`，`c = fftshift 后 DC 的像素坐标（浮点，偶数 N 时为 N/2）`，`scipy.ndimage.affine_transform(matrix=R, offset=c-R c, order=3, mode='nearest')`。存 complex128 npy + `log|Z|` 图，log 报 DC 保留（应为 1.0000）、三重残差输出/输入之比、能量比。
+**d. Z3**：对每张矫正后 map 的 `F`，`Z = (F + R120 F + R240 F)/3` 在**复数域**做，旋转**绕 DC 像素**：`R` 为平面内 120/240 度旋转矩阵，`offset = c - R c`，`c = fftshift 后 DC 的像素坐标（浮点，偶数 N 时为 N/2）`，`scipy.ndimage.affine_transform(matrix=R, offset=c-R c, order=3, mode='nearest')`。存 complex128 npy + `log|Z|` 图，log 报 DC 保留（偶数画布应为 1.0000，本 skill 的 affine 画布在 N>1 时是偶数 2432、在 N=1 时是奇数 331，见 §2.6 末注）、三重残差输出/输入之比、能量比。
 
 **e. 绕 DC 的 C3**：先取幅度 `A = |F|`，再同样绕 DC 像素转 120/240 并平均 `C3dc = (A + R120 A + R240 A)/3`（与 Z3 **唯一区别就是先取模**）。存 npy + `log|C3dc|` 图。三次插值振铃会给出少量负值，故 log 用 `log|C3dc|`，并把负值个数与相对幅度记进 log。
 
@@ -210,8 +215,45 @@ affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就
 | `.../didv_corrected_upscaling_fft_C3dc_hamming/` | `c3dc/<role>/<label>_fft2_hamming.npy` |
 | `corrected_didv_fft_hamming/` | `fft_corrected/<role>/<label>_fft2_hamming.npy`（同一物） |
 
-（旧目录名里的 `upscaling` = 4× 上采样后再 FFT，**本 skill 不做**，是另一件事。）
+（旧目录名里的 `upscaling` = 4× zoom 后再 FFT：那是用户 2025-11-10 的旧路子（先矫正再上采样）；本 skill 的 `--upsample N` 按用户 2026-10 的最终选择改口径为「一次 cubic 重采样到 n·N 细网格 + 画布取足迹方形 bbox + FFT 裁回原生 q 窗口」，**没有**线性预放大那一步，见 §2.6。）
 **口径说明**：默认 hamming 下「选窗的平面」与「最终画的平面」是同一套，色标不再对加窗图偏紧；无窗（pure）套用同一个色标窗时可能与基准差一个量级（见上表 warning），那是**故意的**——pure 套保留原样、不改窗。
+
+### 2.6 `--upsample N`：一次 cubic 重采样到 n·N 细网格（只对 affine 通路）
+
+**口径出处（取代了最初的口述，2026-10-15）**：用户最初的口述是「对图像 N 倍**线性**上采样，之后再做仿射变换」，那句来自他对旧 notebook 的记忆；把 notebook 的真实机制（`论文/c6lic6/data_processing/gSiC_Dleft/data_processing.ipynb` 的 `didv_correction`：先 `coords_transformed = (T @ coords_original.T).T`，再交给 `_resample_coords()`，后者只做**一次** `scipy_griddata(..., method="cubic")` 重采样到指定细网格，画布取变换后足迹的方形 bbox、`linspace` 含端点、外插 NaN）摊开后，他在 2026-10-15 本会话的「①/②/③ 各选 A」问答里明确选定 **①A/②A/③A**，**取代**最初的口述。仓库内没有那次问答的机器可读记录，出处是本会话（队长裁定，t3 F1）；因此本 skill **不实现**「先 `zoom(order=1)` 再 warp」的两步链。
+
+**口径**：坐标变换一次算好，在**原图**上做**一次**三阶（cubic）重采样；画布按 notebook 的 **bbox 语义**；FFT 家族再裁回**原生 q 窗口**；全程不做任何值域操作。`--upsample N` 默认 **1**（= §2.4 的现行为）；`N > 1` 时：
+
+**两条链不是同一件事，产物确实不同**：一步 cubic 与「先 `zoom(N, order=1, grid_mode=True, mode="nearest")` 再 cubic warp」走不同的插值路径，同一张 map、同一最终几何下逐点比较**非零**（|Δ| 的 median 量级 ~0.08 %（current）/ ~0.51 %（didv）值域、max ~17 % / 14 %）。量级本身**不作为交付数字**：两步探针必须先做索引换算（第二道 affine 用 `matrix_two = N·A_fine`、`offset_two = N·off_fine + (N−1)/2`，因为 zoom 的 grid_mode 把细索引 `j` 映到源坐标 `(j+0.5)/N − 0.5`），再加 `mode`/`cval`、比较掩码（是否 `isfinite(A) & isfinite(B)`）与是否剔除足迹边缘的不同选择，median/p99/max 会在同一张 map 上成倍变化——早期写进本文档的那套数字正是选错换算得出的，已按 t5（N1）撤掉。**唯一稳定、可机械判定的判据在 §8 第 12 条：把 map 先 zoom 再 warp 的结果必须与出厂 corrected 不同（非零）**，相同就说明实现退回了「先线性上采样再仿射」的两步链。t3 提到的「corrected 略软」属旧两步链；本文档不对两条链的高频含量作强弱结论。
+
+| 项 | 约定 |
+| --- | --- |
+| 重采样 | **一次** cubic 直接作用在**原图**上：`scipy.ndimage.affine_transform(map, A/scale, offset, output_shape=(n·N, n·N), order=<包的 order>，本例 3, mode="constant", cval=NaN)`。没有预放大、没有中间细网格；NaN 只是「采样点落在原图外」的结果 |
+| 画布（bbox 语义） | 画布 = **n·N × n·N**（本例 304×8 = **2432²**）：把**变换后足迹**的**方形 bbox**（bx、by 都取 max span）**铺满** n·N 像素，**不加 pad 边带**。足迹 = 源图 n 像素方块的**像**，其轴对齐半宽 `extent = max|A⁻¹·corners|`（corner = ±(n-1)/2，`A = P·M⁻¹·P`）——与 notebook `_resample_coords` 里「把变换施于**源**网格、取变换后点的 `ptp`」是同一件事。N=1 的画布仍是旧语义 `2(⌈extent⌉+pad)+1`，两种语义以 N=1/N>1 分界 |
+| 实算几何 | `extent = (150.2677, 154.9729)`、**span = 309.9459 粗像素**、canvas **2432²**、`scale = (n·N−1)/span = 7.843304` 画布 px/粗像素、`FOV_out = size_nm·span/n = 30.5868 nm`、`Δx_out = FOV_out/(n·N) = 0.0125762 nm/px`（按「像素中心铺满 bbox」实现取 `FOV_out/(n·N−1) = 0.0125814`，差 0.04 %） |
+| 与契约估计的差 | 契约给的量级 span ~312.7 / FOV ~30.9 / Δx ~0.01269 用的是 **A**（拟合矩阵的反向：把 `A` 当成源→输出），而 notebook 语义是**源→输出**方向（数组空间 = `A⁻¹`；`303×max(|M₁₁|+|M₁₂|, |M₂₁|+|M₂₂|) = 309.946`，与 `A⁻¹` 同一数值，因为 max span 对轴交换不变）。**实现取 notebook 方向 = 309.9459**，理由：bbox 必须恰好是 NaN 区域的 bbox；用 A 会多出 ~0.9 % 空边、NaN 占比从 5.3 % 升到 6.9 % |
+| NaN 占比 | **5.27 %**（几何式 `1 − |det A⁻¹|·(n−1)²/span²`；实测 5.35 %，多出的 0.08 pp 是三阶样条在越界坐标上的边界带）。对照 N=1 的 331² 画布 **16.96 %**：那一版 = 足迹 + `pad=10` 边带 + `⌈extent⌉` 取整，四角与四条 pad 带全是 NaN；N>1 的画布正好等于足迹 bbox，NaN 只剩平行四边形四个角 ⇒ 占比与 N 无关（N=2 与 8 都是 5.3 %）。契约估计的 ~4.6 % 对应「bbox 用像素中心方块、面积用像素边方块」的混用（4.64 %），自洽版本是 5.27 % |
+| 比例自洽（N=2 实算） | canvas **608²**、`scale = 607/309.9459 = 1.958406`、`FOV_out = 30.5868 nm`（与 N=8 相同：bbox 语义下 FOV 只由足迹决定）、`Δx_out = 30.5868/608 = 0.0503073 nm/px`、`C = 310`。span / FOV 与 N 无关、只有像素数随 N 变 |
+| FFT 家族裁窗（②A） | 在 2432² 细网格上算 FFT（含可选 `--spatial-window`）→ **Z3/C3dc 在细 FFT 上做旋转与平均**（旋转在裁剪前完成，避免裁边效应）→ 结果裁到中央 **C×C**：`C = round(FOV_out/size_nm·n) = round(span) = 310`。`fft_corrected`/`z3`/`c3dc` 存的 npy 与 PNG **都是裁后 310²**，`dq = 2π/FOV_out`；裁剪以 `N//2 − C//2` 起算，DC 仍落在 `C//2` |
+| 不变量变化 | **「Z3/C3dc shape == corrected 画布」在 N>1 时不再成立**（310² vs 2432²）——这是显式例外；N=1 时不裁，该不变量仍成立 |
+| `--upsample 1` 的回归**范围** | **四个数据族（corrected / fft_corrected / z3 / c3dc 的 csv+npy）+ 全部 PNG + `<out>/affine/fft_window.json` 与已落地 `<DATA>/affine/` 那批逐字节相同**；`<out>/affine/affine_provenance.json` 与已落地那份**键集合、键序、数值都相同**（`upsample`/`nm_per_px`/`fine_canvas_semantics`/`footprint_span_px`/`footprint_extent_px`/`fft_crop_n_px`/`fft_crop_rule` 这 7 个键**只在 N>1 写**）；`pipeline.log` 的 `correct <role> <i>:` 行与既有那句**逐字符相同**（`..., no flip), pad 10, order 3`），N>1 时**另起一行**打 `<N>x fine bbox canvas (n*N, no pad band), NaN … %`——不要笼统写「一切逐字节不变」 |
+| 值域 | **不做任何值域操作**：不减平面、不归一化、NaN 不填成均值、不改符号（用户 ③A）。注意 notebook 的 `didv_correction` 里有 `input_data/max(input)` 归一化、`remove_tilt_with_nan_fill` 减平面 + NaN 补均值，本 skill **都不做** |
+| 与 `griddata(method="cubic")` 对照 | 同一次坐标变换、同一批目标点上，`affine_transform(order=3)`（B 样条 + prefilter）与 notebook 的 `griddata(method="cubic")`（Clough–Tocher 三角片）**几何完全相同**：线性 ramp 探针 interior median |Δ| = 1.05e-8（值域 1424），而且两者的有限/NaN 掩码**逐像素一致**（0 处不一致）。差异只在核：**本条（含同句 ramp 探针）的 `interior` 口径 = 剔除距源图边界 ≤2 px 的采样带**（实现者 /tmp 探针的定义；不剔除、或改带宽，数值会变——本行测的正是像素级粗糙度那一项，所以必须先声明口径再引用数字）：真实 map interior median |Δ| = **0.041 %**（current）/ **0.22 %**（didv）值域、p99 = 0.43 % / 1.78 %、max = 15.3 % / 13.6 %（单点粗糙处）；把 map 先 σ=1 高斯平滑后 median 掉到 0.006 % / 0.025 % ⇒ 差异来自核作用在**像素级粗糙度**上（didv 的 median|1st diff| = 1.68），不是几何 |
+| 色标窗 | 按**裁后** fft_corrected 平面重算（recipe = 父窗那一档候选的百分数对；盘上无可复用档位时退回 index 0 最宽档），写 `<out>/affine/fft_window.json`，打 NOTE。**三种对照口径必须分开读**（都是 hamming 基准的 pooled log\|F\|，父画布 = affine 通路自己的 331² 平面）：
+  (i) **真父窗 + ln(N²) vs 出厂重算窗**（idx0 配方）= **−0.6702/+0.5620**（current）、**−0.6576/+0.4550**（didv）⇒「**父窗不可平移复用**」（残差是窗口宽 ~9.7 log 单位的 7 %，足以把大量像素压到一个色标端点）；
+  (ii) **同一 percentile index、父画布 331² vs 细画布 310²** = 残差 **0.083–0.299**（idx0：−0.2542/−0.0927（current）、−0.1463/−0.0827（didv）；idx1：−0.2990/−0.1203、−0.2119/−0.1293）⇒ 这一项含 **FOV 变化 32.6645 → 30.5868 nm**（父画布带 pad 带）与 q 网格差；
+  (iii) **同 FOV(30.5868 nm)、同配方、只差 N 的 N=2↔N=8** = 位移 **+2.7967/+2.7787**（current）、**+2.7917/+2.7688**（didv）vs ln16 = 2.7726，残差 **≤0.024**（中位数残差 +0.0004/+0.0014）⇒ 这才是「**ln(N²) 刚性平移模型成立**」的严格证据（cross-check：换 idx1 配方时 current 的 p0.1 残差 −0.053，p0.1 对裁剪边缘最敏感）。
+  **因果**：裁回原生 q 窗口解决的是 **q 窗口对齐**（同一 FOV、同一 q 网格、把像素数归一），(ii) 里剩下的 0.08–0.30 来自**视场/网格变化**，而 (i) 的 0.46–0.67 里还额外含「**父窗本身取自另一块画布**（LF 332²，带 pad 带）」这一项 |
+| 只对 affine 通路 | LF 包 + `N>1` 非零退出；`N` 必须是 ≥1 的整数（0/负 → 非零退出；非整数由 argparse 拦，退出码 2）；`N>1` 与 `--window-candidates`/`--pick-window` 同用 → 非零退出；**affine 包是 `fallback:true` / `method:'identity_fallback'` 时 `N>1` 也非零退出**（没有任何变换 ⇒ 没有足迹可铺，n·N 画布无从填充；同一个包用 N=1 仍照旧跑并落 304² 的拷贝），退出发生在创建任何输出目录之前 |
+| 三个读数字的坑 | ① **画布像素数 ≠ 网格细化倍数**：2432² = 5 914 624 px 是 304² 的 **64×**，但 Δx 只从 0.0986842 细到 **0.0125768 nm/px = 7.8465×**（bbox 画布 FOV 30.5868 nm ≠ N=1 画布 32.6645 nm）；`scale = (n·N−1)/span = 7.843304`（画布 px / 粗像素）是**第三个量**。判据：说「细了多少」就用 Δx 比。
+  ② **偶数 C 的裁窗留下非 Hermitian 边行边列**：C=310 ⇒ 保留 k ∈ [−155, +154]，k=−155 的镜像伙伴 k=+155 不在窗内（**619 个边像素** = 310+310−1，占 310² 的 0.64 %），存盘平面只在 k ≥ −154 上满足 Hermitian（正确的 mod-n 配对残差 ~3e-17，机器精度量级）。**量度（写清定义才可用）**：对存盘裁后平面取 `np.fft.ifft2(np.fft.ifftshift(F))` 的 `rms(imag)/rms(real)` = **6.29e-5（current, hamming）/ 6.90e-4（didv, hamming）**（无窗套为 1.08e-4 / 7.30e-4——换定义/换窗都会变，所以这个数只在「hamming + 该定义」下引用）。判据：别把存盘的 `fft_corrected` 当成「实信号谱、可直接反变换得实图」；Z3/C3dc 是**先在全细谱上旋转再裁自己的输出**，不受这条影响。
+  ③ **order=3 在 NaN 边界会振铃**：corrected 极值会略微超出原图值域。**判据（逐张）**：`(nanmax(corr) − nanmax(raw))/range` 与 `(nanmin(raw) − nanmin(corr))/range`，`range = nanmax(raw) − nanmin(raw)`，>0 记「超」。**全量 20 张实测**（raw = h5 抽出的 fwd/bwd nanmean，corr = 出厂 corrected；N=1 画布 331² / N=8 画布 2432²）：**N=1 有 7/20 张超**（max 侧 2/20，最大 **+6.09 %** 在 current 3_73meV；min 侧 6/20，最大 **+4.61 %**），**N=8 有 20/20 张超**（max 侧 17/20，最大 **+8.68 %**；min 侧 18/20，最大 **+9.83 %**，两者都在 current 3_73meV）⇒ **是否超极值是数据/画布相关的、不是 N>1 独有**。判据：判「值域不重缩放」用 `nanmean`/中位数——20 张的 `|Δnanmean|/|nanmean|` **≤1.2e-4**（0_50meV 那四例是 9.2e-6…5.9e-5），**不要用 max/min** |
+| 体积（本例 2 角色 × 10 bias） | corrected CSV 2432² **≈88 MB/张**（20 张 ≈1.8 GB，是目前最大头）、corrected PNG 2432² ≈5 MB/张、`fft_corrected`/`z3` 各 40 个 310² complex128 ≈1.5 MB/文件（各 ≈60 MB）、`c3dc` 40 个 310² float64（≈31 MB）⇒ **合计 ≈2 GB**（比不裁窗小一个量级）。**画布 2432² 与 FFT 家族 310² 是两个画布**，别按同一个边长估体积 |
+
+**机制：细网格是同信息量的插值产物**。n·N 画布是那一条 304² 数据的**插值像**（固定核的一次 cubic），信息量与 304² 相同、没有新数据进来；这正是 ②A 要裁回原生 q 窗口的原因（窗口外只剩插值/加窗的内容）。所以 `--upsample N>1` 的收益**不在 corrected 图本身的"精度"**（把 flag 读成"矫正得更准"是误读），而在 **FFT/Z3/C3dc**：q 采样变密（dq = 2π/FOV_out）与 120°/240° 旋转的插值误差随之变小。把 N>1 的 corrected 与 N=1 逐点比较，得到的是"更细但同信息"的插值/视场差（两者画布尺寸与 FOV 都不同），不能当作精度提升的证据。
+
+**细画布上的 DC 旋转**：`rotate_about_dc()` 的不动点是浮点中心 `c = (N/2, N/2)`；`fftshift` 后的 DC 像素在**偶数**画布上位于 `N/2`，两者重合。N>1 的 affine 画布是 `n·N = 2432²`（偶数，DC index 1216），所以旋转恰好绕 DC、`DC_retained`/`R120 keeps` ≈ 1.0000（实测见报告）。N=1 的画布是 `2k+1 = 331`（奇数，DC index 165 ≠ 165.5），`R120 keeps` 实测 0.086–0.090 —— 那是**既有行为**（与 `--upsample` 无关），本 skill 不改 Z3/C3dc 的数学，只如实说明：§2.4 的 d 里「应为 1.0000」只对偶数画布成立。
+
 
 ## 3 产物布局
 
@@ -250,6 +292,12 @@ affine 通路 `n=304→n_out=331`，纯镜像 ~290 px），偏不出这个量就
 <OUT>/affine/pipeline.log        # 同一套逐步数值 + 一段 affine provenance
 <OUT>/affine/affine_provenance.json  # 机器可读 provenance（字段与 log 一致，§2.4）
 ```
+
+**`--upsample N>1` 时有两套画布（别按同一边长估体积）**：`corrected/` 是 **n·N × n·N 细画布**（本例 2432²），
+而 `fft_corrected/`、`z3/`、`c3dc/` 是**裁回原生 q 窗口的 C × C**（本例 310²）——"Z3/C3dc shape == corrected 画布"这条
+不变量在 N>1 时**不成立**（N=1 时成立，且逐字节保留）。实测体积（本例 2 角色 × 10 bias）：corrected CSV 2432²
+≈88 MB/张（20 张 ≈1.8 GB，最大头）、corrected PNG 2432² ≈5 MB/张、`fft_corrected`/`z3` 各 40 个 310² complex128
+≈1.5 MB/文件、`c3dc` 40 个 310² float64 ≈0.8 MB/文件 ⇒ **合计 ≈2 GB**（比"全链停在 2432²"的小一个量级）。
 
 **affine 通路不写**：`<out>/affine/raw/`、`<out>/affine/fft_raw/`、`<out>/affine/window_candidates/`
 （既没有 b 阶段，也就没有候选表可建）。同一次 `<out>` 里的 LF 产物（`raw/ fft_raw/ corrected/ fft_corrected/
@@ -297,6 +345,11 @@ affine 通路只往 `<out>/affine/` 里写。
 | `--transform` 的包**既像 affine 又像 LF**（schema `topo-correction-transform` + 合法 `affine_q` **且** 含 `u_field_file`） | 报错，退出非零（不猜该跑哪条通路） |
 | `--transform` 的包**两条都不像**（schema 不对 / `affine_q` 非有限 2×2 或 `det ≤ 0`，且无 `u_field_file`） | 报错并打两个理由，退出非零。`fallback` 键**不参与**判别 |
 | affine 通路 + `--window-candidates N` | 报错，退出非零，消息指向「继承的窗口 / 显式 `--fft-window-role`」；**在创建任何目录之前**就退出（不留半成品目录） |
+| LF 通路（`--transform` 是位移场包）+ `--upsample N>1` | 报错，退出非零（LF 只有 `warp_by_field` 一次重采样，没有 n·N 细网格语义）；**在创建任何目录之前**退出 |
+| `--upsample N` 的 `N` 不是 ≥1 的整数（0 / 负数） | 报错，退出非零；非整数（如 `2.5`、`abc`）由 argparse 拦下，退出码 2 |
+| affine 通路 + `--upsample N>1` + `--window-candidates`/`--pick-window` | 报错，退出非零（该口径自行按裁后 `fft_corrected` 平面重算窗，且 affine 通路本就没有候选表） |
+| affine 包是 `fallback:true` / `method='identity_fallback'` + `--upsample N>1` | 报错，退出非零（「没有变换 ⇒ 没有足迹可铺，n·N 画布无从填充」，提示改用 N=1 或先拟合真变换）；**在创建任何输出目录之前**退出（负对照实测：输出目录不存在）。同一个包 + N=1 仍退出 0、落 304² 拷贝 |
+| `--upsample N>1` 算出的原生 q 窗口 C 不小于细画布边长 | 报错，退出非零（拒绝裁一个并不比窗口宽的谱） |
 | affine 通路 + `--pick-window K` | 报错，退出非零（该通路没有候选表，`K` 永远无从解析） |
 | affine 通路且自身 `<out>/affine/fft_window.json` 与父目录 `<out>/fft_window.json` 都不存在，又没给显式窗口 | 报错，退出非零，提示先跑 LF 通路选窗、或给 `--fft-window-role` |
 | h5 缺 `/params` 的 `Z (m)` 列 | 报错，退出非零 |
@@ -615,6 +668,23 @@ for M, n, pad in (
 print("affine geometry mirror is bit-for-bit")
 EOF
 ```
+
+**12) `--upsample N>1` 的三条口径**（都可离线复算，不需要跑全链）：
+
+- **画布与几何**：`fine_image_transform(M, n, N)` 给出 `n_out = n·N`、`span = 2·max|A⁻¹·corners|`
+  （corners = ±(n−1)/2）、`scale = (n_out−1)/span`、`offset = (n−1)/2 − (A/scale)·((n_out−1)/2)`；几何 NaN 占比
+  `1 − |det A⁻¹|·(n−1)²/span²` 应等于 corrected CSV 的实测 NaN 占比（本例 5.27 % 对 5.35 %，差 ≤0.1 pp 是三阶样条的
+  边界带；N=1 的旧画布是 16.96 %，因为多了 pad 带）。同一 (M, n, N) 下 `span`/`FOV_out` **与 N 无关**，只有像素数变。
+- **一次 cubic、没有预放大**：corrected CSV 必须等于
+  `affine_transform(map, A/scale, offset, (n·N, n·N), order=order, mode="constant", cval=NaN)`
+  的 `%.10e` 量化（逐位或 ≤1e-11 相对）；把 map 先 `zoom(N, order=1, grid_mode=True, mode='nearest')` 再 warp 的结果必须**不同（非零）**——完全相同就说明实现退回了「先线性上采样再仿射」的两步链。本条只判「不同/相同」，**不引用任何量级**（量级随两步探针的索引换算 `matrix_two = N·A_fine`、`offset_two = N·off_fine + (N−1)/2`、`mode`/`cval`、掩码与是否剔除边缘而变，见 §2.6）。
+  与 notebook 的 `griddata(method="cubic")` 对照（同一坐标、同一目标点）：线性 ramp 探针两引擎必须一致到 ~1e-9
+  （几何门，本例 interior median 1.05e-8 / 值域 1424）；真实 map 上 interior median |Δ| / 值域 = 0.22 %（didv）与
+  0.04 %（current），σ=1 平滑后降到 0.025 % / 0.006 % ⇒ 差异来自核（B 样条 vs Clough–Tocher）作用在像素级粗糙度上，
+  不是几何（`interior` 口径见 §2.6：剔除距源图边界 ≤2 px 的采样带；换口径数值会变）；两者的有限掩码（NaN 区）必须一致（本例 0 处不一致）。
+- **FFT 裁窗**：`C = round(span)`；`fft_corrected`/`z3`/`c3dc` 的 npy 形状必须是 `(C, C)`
+  （N=1 时不裁、等于 corrected 画布），`z3` complex128、`c3dc` 实数；裁剪从 `N_fft//2 − C//2` 起算 ⇒ 裁后 DC 仍在
+  `C//2`。`fft_corrected/*_fft2.npy` 的取值必须等于「corrected CSV 复算的 `fftshift(fft2(填 NaN + 空间窗))` 后取的同一中央块」。
 
 
 **本 skill 未修改 `skills/lawler-fujita-correction` 与 `skills/grid-lf-pipeline` 下任何文件。**

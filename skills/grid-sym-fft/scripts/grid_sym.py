@@ -46,6 +46,26 @@ field lives in (see the "coordinate frames" section of ``SKILL.md`` and
   ``anchor_verdict`` / ``n_labelled`` are passed through as they are, and the
   anchor self-check is *not* re-run here).
 
+**N x fine grid** (``--upsample N``, affine branch only, default 1 = the behaviour
+above; the single-pass cubic form below *replaces* the user's first verbal
+description, "linearly upsample N x first, then affinely transform it" -- he chose
+it explicitly (2026-10-15, options 1A/2A/3A) after the real mechanism of his
+notebook's ``didv_correction``/``_resample_coords`` (one coordinate transform, then
+one ``griddata(method="cubic")`` resample onto the fine grid) was laid out).  With ``N > 1`` the map is resampled onto an ``n * N`` square canvas by
+**one** cubic pass on the original map (no pre-upsampling) and the whole chain
+(``corrected`` / ``fft_corrected`` / ``z3`` / ``c3dc``) runs on that fine grid.  The
+canvas follows the reference notebook's ``didv_correction -> _resample_coords``
+semantics: the square bbox of the transformed footprint (both sides = the larger
+axis half-extent) is stretched to fill the ``n * N`` pixels, there is **no pad
+band**, and the four corners outside the footprint are NaN.  Geometry is still the
+verified array-space ``A = P M^-1 P``, only scaled so the bbox fills the canvas.
+The FFT families are then cropped back to the **native q window** -- Z3/C3dc rotate
+and average on the *full* fine spectrum and only their result is cropped -- because
+the single cubic pass carries no data beyond the original grid's q range; the
+per-role colour window is re-derived on those cropped planes (a fine canvas is
+another plane: other FOV, other q grid).  ``--upsample`` is fail-closed on the LF
+branch and together with ``--window-candidates`` / ``--pick-window``.
+
 **Two-run color-scale protocol.**  The user looks at real candidate figures
 before committing to a FFT colormap (they dislike formula-derived windows):
 
@@ -82,6 +102,7 @@ Usage::
     (then)  ... -o OUT --pick-window 3
     (or)    ... -o OUT --fft-window-role current -22 -16 \\
                           --fft-window-role didv 4 10
+    (affine branch, 8x fine grid) ... -o OUT --upsample 8
 """
 
 from __future__ import annotations
@@ -393,7 +414,8 @@ def image_transform(stretch, n, pad):
     It is mirrored instead of imported so this skill keeps its single dependency
     (``lf_lib``) and never reaches into another skill's script, and the mirror
     agrees with the original bit for bit -- that agreement is a self-check in
-    ``SKILL.md`` §8 item 11.
+    ``SKILL.md`` §8 item 11.  This is the ``--upsample 1`` geometry (the historical
+    one, pad band included); ``--upsample N > 1`` uses :func:`fine_image_transform`.
     """
     matrix = AXIS_SWAP @ np.linalg.inv(np.asarray(stretch, dtype=float)) @ AXIS_SWAP
     corners = (
@@ -403,6 +425,59 @@ def image_transform(stretch, n, pad):
     n_out = 2 * (int(np.ceil(float(extent.max()))) + int(pad)) + 1
     offset = (n - 1) / 2.0 - matrix @ np.array([(n_out - 1) / 2.0, (n_out - 1) / 2.0])
     return matrix, n_out, offset
+
+
+def footprint_extent(stretch, n):
+    """Axis-aligned half-extents (px) of the transformed source footprint.
+
+    The source image is the ``n``-pixel square whose pixel centres span
+    ``+-(n - 1) / 2`` index units around the centre.  It is resampled as
+    ``out[i] = src[A i + offset]``, so the set of *output* pixels that sample inside
+    the source is the parallelogram ``A^-1`` of that square; this returns its
+    axis-aligned half-extents ``(e_x, e_y)`` -- the same ``extent`` term
+    :func:`image_transform` uses, and the array-space form of the reference
+    notebook's ``_resample_coords`` range (which applies the transform to the
+    *source* grid and takes ``ptp`` of the *transformed* points).
+    """
+    matrix = AXIS_SWAP @ np.linalg.inv(np.asarray(stretch, dtype=float)) @ AXIS_SWAP
+    corners = (
+        np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]]) * (n - 1) / 2.0
+    )
+    return np.abs(np.linalg.inv(matrix) @ corners.T).max(axis=1), matrix
+
+
+def fine_image_transform(stretch, n, factor):
+    """Matrix, canvas side and offset of the ``--upsample N > 1`` resampling.
+
+    The canvas follows the reference notebook's ``_resample_coords`` semantics
+    (``didv_correction`` -> ``_resample_coords`` in the user's data-processing
+    notebook): the canvas is ``n * factor`` pixels square, the transformed
+    footprint's **square bbox** (both sides = the larger axis half-extent, see
+    :func:`footprint_extent`) is stretched to fill it exactly, and there is **no pad
+    band** -- the four corners of the bbox outside the parallelogram are NaN.
+
+    The resampling is a *single* cubic pass on the original map
+    (:func:`apply_affine`, ``order`` from the bundle): there is no pre-upsampling
+    step, because the notebook transforms coordinates once and interpolates once.
+    Geometry is still the verified array-space ``A = P M^-1 P`` (not the notebook's
+    physical-coordinate ``T = A_ideal^T A_meas^-T``), only scaled: the canvas index
+    step corresponds to ``1 / scale`` corrected-space index steps, so the sampling
+    matrix is ``A / scale`` and the offset keeps the footprint centred (canvas
+    centre -> source centre).
+
+    Returns ``(matrix_fine, n_out, offset, span, extent)`` with ``span = 2 *
+    max(extent)`` in *coarse pixel* units -- the number the notebook reports as
+    ``max_range``.
+    """
+    extent, matrix = footprint_extent(stretch, n)
+    n_out = int(n) * int(factor)
+    span = 2.0 * float(extent.max())
+    scale = (n_out - 1) / span
+    matrix_fine = matrix / scale
+    offset = (int(n) - 1) / 2.0 - matrix_fine @ np.array(
+        [(n_out - 1) / 2.0, (n_out - 1) / 2.0]
+    )
+    return matrix_fine, n_out, offset, span, extent
 
 
 def apply_affine(role_map: np.ndarray, geometry):
@@ -422,20 +497,37 @@ def apply_affine(role_map: np.ndarray, geometry):
     ``method == identity_fallback`` means the fit solved nothing: the map is copied
     onto its own canvas with no NaN added, exactly like the affine skill's apply
     stage.
+
+    With ``--upsample N > 1`` (``geometry["upsample"]``) the canvas and matrix come
+    from :func:`fine_image_transform`: one cubic pass on the **original** map onto
+    the ``n * N`` square bbox canvas (no pre-upsampling, no pad band).
     """
     n = int(role_map.shape[0])
+    factor = int(geometry.get("upsample", 1))
+    order = int(geometry["order"])
     if geometry["fallback"]:
+        # Nothing was solved, so the product is the map copied onto its own canvas --
+        # exactly the affine skill's identity fallback.  There is no footprint, so an
+        # N x canvas has nothing to fill: main() refuses --upsample N > 1 with a
+        # fallback bundle before any output directory is created.
         return np.array(role_map, dtype=float, copy=True), n
-    matrix, n_out, offset = image_transform(geometry["affine_q"], n, geometry["pad"])
+    if factor > 1:
+        matrix, n_out, offset, _, _ = fine_image_transform(
+            geometry["affine_q"], n, factor
+        )
+    else:
+        matrix, n_out, offset = image_transform(
+            geometry["affine_q"], n, geometry["pad"]
+        )
     corrected = scipy.ndimage.affine_transform(
         role_map,
         matrix,
         offset=offset,
         output_shape=(n_out, n_out),
-        order=int(geometry["order"]),
+        order=order,
         mode="constant",
         cval=np.nan,
-        prefilter=int(geometry["order"]) > 1,
+        prefilter=order > 1,
     )
     return corrected, n_out
 
@@ -467,6 +559,54 @@ def read_window_file(path: Path, role_names):
             f"holds {sorted(windows)}"
         )
     return windows
+
+
+def inherited_window_fractions(cand_file: Path, windows, role_names):
+    """Percentile pair of the candidate whose window is the inherited per-role one.
+
+    The affine branch inherits the parent run's window, which was picked from the
+    parent's ``--window-candidates`` table, so the recipe behind it is the
+    ``_WINDOW_CANDIDATE_FRACS`` pair of that candidate (``candidate_window_list``
+    builds every candidate from exactly such a pair).  Rebuilding a window on a
+    fine canvas has to re-apply the **same pair** on the new distribution, so the
+    candidate index is read back here by matching the inherited ``(vmin, vmax)`` of
+    **every** role against that role's table.
+
+    Returns ``((fmin, fmax), index)``, or ``(_WINDOW_CANDIDATE_FRACS[0], None)``
+    when the table is missing/unreadable or no single index matches every role (a
+    hand-written ``--fft-window-role`` window, a table from another basis, or a run
+    in a fresh output directory): with no pick to re-run, the first candidate --
+    documented as the widest, least-clipping window -- is the only defensible
+    default, and the caller logs which of the two it used.
+    """
+    fallback = (_WINDOW_CANDIDATE_FRACS[0], None)
+    if windows is None or not cand_file.is_file():
+        return fallback
+    try:
+        doc = json.loads(cand_file.read_text())
+    except OSError, ValueError:
+        return fallback
+    roles = doc.get("roles")
+    if not isinstance(roles, dict):
+        return fallback
+    common = None
+    for role in role_names:
+        entries = (roles.get(role) or {}).get("candidates") or []
+        want = windows.get(role) or {}
+        hits = {
+            int(c["index"])
+            for c in entries
+            if c.get("vmin") == want.get("vmin") and c.get("vmax") == want.get("vmax")
+        }
+        common = hits if common is None else (common & hits)
+        if not common:
+            return fallback
+    if common is None or len(common) != 1:
+        return fallback
+    index = common.pop()
+    if not (0 <= index < len(_WINDOW_CANDIDATE_FRACS)):
+        return fallback
+    return _WINDOW_CANDIDATE_FRACS[index], index
 
 
 def load_transform(bundle_json: Path):
@@ -564,6 +704,42 @@ def compute_fft(x: np.ndarray, window: str = "none") -> np.ndarray:
         w = taps(arr.shape[0])
         arr = arr * np.outer(w, w)
     return np.fft.fftshift(np.fft.fft2(arr)).astype(np.complex128)
+
+
+def native_q_window_n(span):
+    """``C`` for the ``--upsample N > 1`` FFT crop: the native q window in pixels.
+
+    The fine canvas covers ``span`` coarse pixels of field of view (see
+    :func:`fine_image_transform`), so its FFT q step is ``2 pi / FOV_out`` with
+    ``FOV_out = size_nm * span / n``; the original ``n``-pixel grid resolved q only
+    up to ``n / size_nm``, which is ``C = round(FOV_out / size_nm * n) =
+    round(span)`` fine-FFT pixels wide.  Everything outside is the single cubic
+    pass' own interpolation content, not data.
+
+    ``None`` (no crop) is returned when ``span`` is unusable, so callers keep the
+    historical canvas.
+    """
+    if span is None or not np.isfinite(span) or span <= 0:
+        return None
+    return int(np.floor(float(span) + 0.5))
+
+
+def crop_to_native_q(arr: np.ndarray, n_crop) -> np.ndarray:
+    """Central ``n_crop x n_crop`` crop of a ``fftshift``-ed spectrum.
+
+    The DC pixel of a ``fftshift``-ed spectrum is at index ``N // 2``, so the crop
+    starts at ``N // 2 - n_crop // 2``; that keeps the DC at ``n_crop // 2`` of the
+    product for both parities.  No-op (and never a copy) when ``n_crop`` already
+    covers the array, which is what keeps the ``--upsample 1`` path byte identical.
+    """
+    if n_crop is None:
+        return arr
+    side = int(n_crop)
+    n = int(arr.shape[0])
+    if side >= n:
+        return arr
+    lo = n // 2 - side // 2
+    return arr[lo : lo + side, lo : lo + side]
 
 
 def _rotation_matrix(angle_deg: float) -> np.ndarray:
@@ -909,6 +1085,46 @@ def default_fft_window(roles, h5_path, bias_meV, window="none"):
     return windows
 
 
+def fine_canvas_window(
+    roles, h5_path, geometry, spatial_window, fractions, crop_n=None
+):
+    """Per-role colour window re-derived on the ``--upsample N > 1`` fine canvas.
+
+    The inherited parent window is calibrated on the parent canvas, whose FFT is a
+    different plane (other field of view, other q grid, other pixel count), so it
+    cannot be reused: the window is rebuilt here from the **pooled log|F| of this
+    canvas's own corrected planes** -- the recipe of :func:`candidate_window_list`,
+    with ``fractions`` the percentile pair of the inherited window
+    (:func:`inherited_window_fractions`), so the same candidate index is re-run on
+    the new distribution.
+
+    ``crop_n`` must be the same native-q crop the FFT families are stored with
+    (:func:`native_q_window_n`), so the window is calibrated on the very planes the
+    figures draw.  ``spatial_window`` must be the one the run writes
+    (``--spatial-window``), because that is the basis the parent window was
+    calibrated on and the basis the plots are drawn from.
+    """
+    fmin, fmax = fractions
+    bias_meV = load_bias_meV(h5_path)
+    with h5py.File(h5_path, "r") as handle:
+        data = handle["data"][:]
+    windows = {}
+    for role_desc in roles:
+        chunks = []
+        for i in range(len(bias_meV)):
+            m = extract_role_map(data, role_desc, i)
+            corrected, _ = apply_affine(m, geometry)
+            plane = crop_to_native_q(compute_fft(corrected, spatial_window), crop_n)
+            logmag = _logmag(plane)
+            chunks.append(logmag[np.isfinite(logmag)])
+        pooled = np.concatenate(chunks)
+        windows[role_desc["role"]] = {
+            "vmin": float(np.percentile(pooled, fmin)),
+            "vmax": float(np.percentile(pooled, fmax)),
+        }
+    return windows
+
+
 # --------------------------------------------------------------------------
 # pipeline stages
 # --------------------------------------------------------------------------
@@ -928,6 +1144,7 @@ class Pipeline:
         spatial_window="none",
         candidate_basis=None,
         affine=None,
+        fft_crop_n=None,
     ):
         self.h5_path = h5_path
         self.roles = roles
@@ -950,6 +1167,11 @@ class Pipeline:
         self.affine = affine
         # machine-readable provenance of an affine run, written by finish_log()
         self.affine_provenance = None
+        # ``--upsample N > 1``: side of the central crop the FFT families
+        # (fft_corrected / z3 / c3dc) store, in fine-canvas pixels -- the native q
+        # window of the original n-pixel grid (see native_q_window_n).  ``None`` (or
+        # a value >= the plane side) means no crop, which is the N=1 behaviour.
+        self.fft_crop_n = fft_crop_n
         self.windowed_files = []
         self.windowed_taps = set()
         self.log_lines = []
@@ -981,6 +1203,24 @@ class Pipeline:
         if win is None or win.get("vmin") is None:
             raise SystemExit(f"ERROR: no FFT colour window selected for role {role!r}")
         return win
+
+    def saved_fft(self, F):
+        """The spectrum the FFT families store: cropped to the native q window.
+
+        The rotations (Z3 / C3dc) act on the **full fine plane** and only their
+        result is cropped, so the crop never reintroduces edge effects into the
+        average; ``--upsample 1`` has ``fft_crop_n = None`` and this is the identity.
+        """
+        return crop_to_native_q(F, self.fft_crop_n)
+
+    def crop_note(self, n_plane):
+        """Log fragment tying a stored spectrum's side to the fine canvas."""
+        if self.fft_crop_n is None or int(self.fft_crop_n) >= int(n_plane):
+            return ""
+        return (
+            f"; FFT family canvas {int(self.fft_crop_n)} (native q window, "
+            f"dq = 2pi/FOV_out) != corrected canvas {int(n_plane)}"
+        )
 
     def save_windowed_plane(
         self, directory, label, role, arr, plain_plane, log_fn=_logmag
@@ -1118,12 +1358,15 @@ class Pipeline:
                     cdir / f"{label}.png", corr, med - 5 * std, med + 5 * std
                 )
                 FC = compute_fft(corr)
-                np.save(fdir / f"{label}_fft2.npy", FC)
-                save_fft_image(fdir / f"{label}_fft.png", FC, self.window_for(role))
+                FCs = self.saved_fft(FC)
+                np.save(fdir / f"{label}_fft2.npy", FCs)
+                save_fft_image(fdir / f"{label}_fft.png", FCs, self.window_for(role))
                 FCW = None
                 if self.spatial_window != "none":
                     FCW = compute_fft(corr, self.spatial_window)
-                    self.save_windowed_plane(fdir, label, role, FCW, _logmag(FC))
+                    self.save_windowed_plane(
+                        fdir, label, role, self.saved_fft(FCW), _logmag(FCs)
+                    )
                 corrected[(role, i)] = (FC, corr, FCW)
                 if self.affine is None:
                     self.log(
@@ -1137,14 +1380,24 @@ class Pipeline:
                         f"NaN added)"
                     )
                 else:
-                    self.log(
-                        f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, affine "
-                        f"A = P M^-1 P applied in the h5 frame (no flip), pad "
-                        f"{self.affine['pad']}, order {self.affine['order']}"
-                    )
+                    factor = int(self.affine.get("upsample", 1))
+                    if factor > 1:
+                        self.log(
+                            f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, affine "
+                            f"A = P M^-1 P applied in the h5 frame (no flip), "
+                            f"{factor}x fine bbox canvas (n*N, no pad band), "
+                            f"NaN {100.0 * float(np.mean(~np.isfinite(corr))):.3f} %"
+                        )
+                    else:
+                        self.log(
+                            f"correct {role} {i}: canvas {m.shape[0]}->{n_out}, affine "
+                            f"A = P M^-1 P applied in the h5 frame (no flip), pad "
+                            f"{self.affine['pad']}, order {self.affine['order']}"
+                        )
                 self.log(
                     f"fft_corrected {role} {i}: F[{self.window_for(role)['vmin']:.3g},"
                     f"{self.window_for(role)['vmax']:.3g}]"
+                    f"{self.crop_note(n_out)}"
                 )
         return corrected
 
@@ -1157,12 +1410,15 @@ class Pipeline:
             for i, b in enumerate(bias_meV):
                 F, _, FW = corrected[(role, i)]
                 Z = z3_symmetrize(F)
+                Zs = self.saved_fft(Z)
                 label = f"{i}_{round(b)}meV"
-                np.save(d / f"{label}_fft2.npy", Z)
-                save_fft_image(d / f"{label}_fft.png", Z, self.window_for(role))
+                np.save(d / f"{label}_fft2.npy", Zs)
+                save_fft_image(d / f"{label}_fft.png", Zs, self.window_for(role))
                 if FW is not None:
                     ZW = z3_symmetrize(FW)
-                    self.save_windowed_plane(d, label, role, ZW, _logmag(Z))
+                    self.save_windowed_plane(
+                        d, label, role, self.saved_fft(ZW), _logmag(Zs)
+                    )
                     self.log(
                         f"z3 windowed {role} {i}: residual_in {_residual_metric(FW):.4g} "
                         f"-> residual_out {_residual_metric(ZW):.4g}; "
@@ -1197,16 +1453,17 @@ class Pipeline:
             for i, b in enumerate(bias_meV):
                 F, _, FW = corrected[(role, i)]
                 C = c3dc_symmetrize(F)
+                Cs = self.saved_fft(C)
                 label = f"{i}_{round(b)}meV"
-                np.save(d / f"{label}_fft2.npy", C)
+                np.save(d / f"{label}_fft2.npy", Cs)
                 if FW is not None:
                     CW = c3dc_symmetrize(FW)
                     self.save_windowed_plane(
                         d,
                         label,
                         role,
-                        CW,
-                        _logmag(C),
+                        self.saved_fft(CW),
+                        _logmag(Cs),
                         log_fn=lambda x: np.log(np.abs(x)),
                     )
                     self.log(
@@ -1222,7 +1479,7 @@ class Pipeline:
                 # log|C3dc| -- negatives are spline-ringing, take abs inside log
                 save_fft_image(
                     d / f"{label}_fft.png",
-                    C,
+                    Cs,
                     self.window_for(role),
                     log_fn=lambda x: np.log(np.abs(x)),
                 )
@@ -1254,17 +1511,43 @@ class Pipeline:
         re-verified here.
         """
         geometry = self.affine
-        n_out = (
-            n_in
-            if geometry["fallback"]
-            else image_transform(geometry["affine_q"], n_in, geometry["pad"])[1]
-        )
-        size_out = float(self.size_nm) * n_out / n_in
+        factor = int(geometry.get("upsample", 1))
+        span = None
+        extents = None
+        if geometry["fallback"]:
+            # Nothing was solved: the product is the map copied onto its own canvas,
+            # so there is no footprint and no fine geometry -- N is not applicable
+            # (main() refuses N > 1 with a fallback bundle before any output dir is
+            # created; this branch stays safe if it is ever reached).
+            n_out = n_in
+        elif factor > 1:
+            _, n_out, _, span, extents = fine_image_transform(
+                geometry["affine_q"], n_in, factor
+            )
+        else:
+            n_out = image_transform(geometry["affine_q"], n_in, geometry["pad"])[1]
+        # Physical pixel size of the *canvas*: at N > 1 the canvas is n*N pixels
+        # covering the footprint bbox, so FOV_out = size_nm * span / n (span in
+        # coarse pixels, 1 coarse px = size_nm / n nm) and nm/px = FOV_out / n_out.
+        # That is NOT size_nm / (n*N) unless span == n: the bbox canvas trades the
+        # N=1 pad band for the footprint span, so the two canvases differ in FOV.
+        # At N = 1 (and for the identity fallback, which has no span at all) the
+        # historical pad-band canvas is unchanged: nm/px = size_nm / n.
+        if factor > 1 and span is not None:
+            size_out = float(self.size_nm) * span / int(n_in)
+        else:
+            size_out = float(self.size_nm) * n_out / int(n_in)
+        nm_per_px = size_out / n_out
+        crop_n = None if (factor <= 1 or span is None) else native_q_window_n(span)
 
         def shown(value):
             return "missing" if value is None else f"{value:.6g}"
 
-        doc = {
+        # The historical document (N = 1) is exactly the one the landed
+        # <DATA>/affine/ batch carries -- same keys, same order, same values -- so
+        # an N = 1 run stays byte-identical there too.  The N > 1 mode's extra
+        # fields are added only for factor > 1.
+        base = {
             "branch": "affine",
             "transform_file": str(bundle_json),
             "schema": payload.get("schema"),
@@ -1294,6 +1577,44 @@ class Pipeline:
                 "anchor self-check NOT re-run",
             ],
         }
+        fine_keys = {}
+        fine_notes = []
+        if factor > 1:
+            fine_keys = {
+                "upsample": factor,
+                "nm_per_px": float(nm_per_px),
+                "fine_canvas_semantics": (
+                    "identity fallback: the map is copied at n px (no footprint, "
+                    "--upsample not applicable)"
+                    if geometry["fallback"]
+                    else "n*N square bbox of the transformed footprint, no pad band"
+                ),
+                "footprint_span_px": None if span is None else float(span),
+                "footprint_extent_px": None
+                if extents is None
+                else [float(v) for v in extents],
+                "fft_crop_n_px": crop_n,
+                "fft_crop_rule": (
+                    None
+                    if crop_n is None
+                    else "C = round(FOV_out / size_nm * n) = round(span); the FFT "
+                    "families (fft_corrected/z3/c3dc) store the central C x C native "
+                    "q window, the corrected canvas stays n*N"
+                ),
+            }
+            fine_notes = [
+                f"one cubic ({geometry['order']}-order) resampling pass on the "
+                f"ORIGINAL map onto the n*N fine canvas (no pre-upsampling, no pad "
+                f"band): the canvas is the square bbox of the transformed footprint, "
+                f"ground = the source map, corners outside NaN",
+                f"fft_corrected/z3/c3dc store the central {crop_n} x {crop_n} native "
+                f"q window of the {n_out} x {n_out} fine FFT",
+            ]
+        doc = {
+            **{k: v for k, v in base.items() if k != "notes"},
+            **fine_keys,
+            "notes": base["notes"] + fine_notes,
+        }
         self.affine_provenance = doc
         self.log(f"# affine transform: {doc['transform_file']}")
         self.log(
@@ -1302,11 +1623,34 @@ class Pipeline:
             f"-> corrected_this_run {doc['corrected_this_run']}"
         )
         self.log(f"#   affine_q M = {doc['affine_q']}")
-        self.log(
-            f"#   pad {doc['pad']}, order {doc['order']}; canvas {doc['n_px_in']} -> "
-            f"{doc['n_out']} px; field of view {doc['field_of_view_nm']:g} -> "
-            f"{doc['corrected_field_of_view_nm']:.6g} nm"
-        )
+        if factor > 1:
+            self.log(
+                f"#   order {doc['order']}; --upsample {factor}: ONE {doc['order']}-order "
+                f"(cubic) resampling pass on the original map onto the n*N fine "
+                f"canvas (no pre-upsampling), canvas = square bbox of the "
+                f"transformed footprint, no pad band"
+            )
+            self.log(
+                f"#   footprint extent {[round(float(v), 4) for v in extents]} px, "
+                f"span (square bbox side) {span:.4f} coarse px; canvas "
+                f"{doc['n_px_in']} -> {doc['n_out']} px; nm/px "
+                f"{doc['nm_per_px']:.7g}; FOV_out = size_nm*span/n = "
+                f"{doc['corrected_field_of_view_nm']:.4f} nm"
+            )
+            self.log(
+                f"#   FFT families store the native q window: C = "
+                f"round(FOV_out/size_nm*n) = round({span:.4f}) = {crop_n} px "
+                f"(dq = 2pi/FOV_out), so fft_corrected/z3/c3dc are {crop_n}x{crop_n} "
+                f"while the corrected canvas is {doc['n_out']}x{doc['n_out']}; Z3/C3dc "
+                f"rotate on the full {doc['n_out']}x{doc['n_out']} spectrum first"
+            )
+        else:
+            self.log(
+                f"#   pad {doc['pad']}, order {doc['order']}; canvas "
+                f"{doc['n_px_in']} -> {doc['n_out']} px; field of view "
+                f"{doc['field_of_view_nm']:g} -> "
+                f"{doc['corrected_field_of_view_nm']:.6g} nm"
+            )
         self.log(
             f"#   fit provenance: n_labelled {doc['n_labelled']}, anchor_ring "
             f"{doc['anchor_ring']}, anchor_verdict {doc['anchor_verdict']}, stretch "
@@ -1328,6 +1672,16 @@ class Pipeline:
                 "unchanged, no NaN added); do not read the corrected/z3/c3dc "
                 "products as corrected"
             )
+            if factor > 1:
+                # Unreachable through main() (N > 1 + fallback exits non-zero before
+                # any output dir exists), but state it rather than pretend the fine
+                # geometry happened.
+                self.log(
+                    f"# WARNING affine: --upsample {factor} is IGNORED here: an "
+                    f"identity fallback has no transformed footprint, so there is no "
+                    f"n*N bbox canvas to fill (canvas stays {n_out}, field of view "
+                    f"unchanged)"
+                )
 
     def finish_log(self, include_window=True):
         with (self.outdir / "pipeline.log").open("w") as fh:
@@ -1414,6 +1768,22 @@ def parse_args(argv=None):
         "fft_window.json and run the full chain",
     )
     parser.add_argument(
+        "--upsample",
+        type=int,
+        default=1,
+        metavar="N",
+        help="affine branch only: resample onto an n*N fine grid with ONE cubic pass "
+        "on the original map (no pre-upsampling).  The corrected canvas is n*N "
+        "square, filled by the square bbox of the transformed footprint (no pad "
+        "band; the corners outside the footprint are NaN), and the FFT families "
+        "(fft_corrected / z3 / c3dc) store the central C x C native q window of that "
+        "fine spectrum, C = round(FOV_out/size_nm*n).  The per-role colour window is "
+        "re-derived on those cropped planes.  Default 1 = the current behaviour "
+        "(pad-band canvas, FFT canvas = corrected canvas), unchanged.  N must be an "
+        "integer >= 1, and N > 1 is fail-closed on the LF branch and together with "
+        "--window-candidates / --pick-window.",
+    )
+    parser.add_argument(
         "--spatial-window",
         choices=sorted(SPATIAL_WINDOWS),
         default=DEFAULT_SPATIAL_WINDOW,
@@ -1486,6 +1856,28 @@ def main(argv=None):
     affine_mode = kind == "affine"
     root_outdir = Path(args.outdir)
     parent_window_file = root_outdir / FFT_WINDOW_FILE
+    # ---- --upsample is the affine branch's linear pre-upsampling (fail-closed) --
+    if args.upsample < 1:
+        raise SystemExit(f"ERROR: --upsample N must be >= 1, got {args.upsample}")
+    if args.upsample > 1 and not affine_mode:
+        raise SystemExit(
+            f"ERROR: --upsample {args.upsample} has no meaning in the LF branch: "
+            f"{bundle_json} is a Lawler-Fujita displacement-field bundle, whose "
+            f"correction is lf_lib.warp_by_field (one resampling onto the u-field "
+            f"canvas, no fine-grid geometry).  --upsample is affine-only; drop the "
+            f"flag or pass the affine transform bundle."
+        )
+    if args.upsample > 1 and (
+        args.window_candidates is not None or args.pick_window is not None
+    ):
+        raise SystemExit(
+            f"ERROR: --upsample {args.upsample} cannot be combined with "
+            f"--window-candidates / --pick-window: N > 1 re-derives the per-role "
+            f"colour window on the fine canvas' native q window, and the affine "
+            f"branch has no candidate table of its own.  Run --upsample "
+            f"{args.upsample} alone (with -o), or pass --fft-window-role ROLE VMIN "
+            f"VMAX / --fft-window VMIN VMAX to set the window explicitly."
+        )
     if affine_mode:
         # Fail-closed BEFORE anything is created: this branch writes no raw/fft_raw
         # plane, so there is no plane set for a candidate table, and a --pick-window
@@ -1509,6 +1901,25 @@ def main(argv=None):
                 f"the window from {parent_window_file} or pass "
                 f"--fft-window-role ROLE VMIN VMAX."
             )
+    if (
+        affine_mode
+        and args.upsample > 1
+        and (probe.get("fallback") or probe.get("method") == "identity_fallback")
+    ):
+        # Fail-closed BEFORE anything is created.  The n*N canvas is the square bbox
+        # of the *transformed footprint*; with ``fallback`` the fit solved nothing,
+        # so there is no footprint to fill it and the product would silently be an
+        # n-pixel copy while the flag asked for N x.  Same predicate as
+        # affine_geometry() builds into geometry["fallback"].
+        raise SystemExit(
+            f"ERROR: --upsample {args.upsample} cannot be honoured by "
+            f"{bundle_json}: it is an identity fallback "
+            f"(fallback={probe.get('fallback')!r}, method={probe.get('method')!r}), "
+            f"so the fit solved no transform -- there is no transformed footprint "
+            f"for an n*N bbox canvas to hold, and the correct product would be the "
+            f"map copied at n pixels.  Rerun with --upsample 1 (the fallback product "
+            f"is written as before), or fit a real transform first."
+        )
     outdir = root_outdir / AFFINE_DIRNAME if affine_mode else root_outdir
     outdir.mkdir(parents=True, exist_ok=True)
     # Every affine product is prefixed with <out>/affine/ by moving the pipeline's
@@ -1516,12 +1927,32 @@ def main(argv=None):
 
     if affine_mode:
         geometry = affine_geometry(probe, bundle_json)
+        geometry["upsample"] = int(args.upsample)
         payload, u_nm, valid, u_path = probe, None, None, None
     else:
         geometry = None
         payload, u_nm, valid, u_path = load_transform(bundle_json)
     roles = resolve_roles(src, args.map)
     size_nm = _scan_size_nm(src)
+    # ---- N>1 fine geometry: canvas, footprint span and native-q crop ---------
+    # Computed once here for the window recipe and the Pipeline; announce_affine()
+    # derives the identical numbers again for the provenance document.
+    n_in = None
+    span = None
+    fft_crop_n = None
+    if affine_mode and int(args.upsample) > 1:
+        with h5py.File(src, "r") as handle:
+            n_in = int(handle["data"].shape[0])
+        _, n_fine_out, _, span, _extents = fine_image_transform(
+            geometry["affine_q"], n_in, int(args.upsample)
+        )
+        fft_crop_n = native_q_window_n(span)
+        if fft_crop_n is None or fft_crop_n > n_fine_out:
+            raise SystemExit(
+                f"ERROR: --upsample {args.upsample}: the native q window came out as "
+                f"{fft_crop_n} px for the {n_fine_out} px fine canvas; refusing to "
+                f"crop a spectrum that is not wider than the window"
+            )
 
     # ---- decide the window and mode ------------------------------------
     # A window is always a {role: (vmin, vmax)} table: the roles carry different
@@ -1611,6 +2042,12 @@ def main(argv=None):
             )
         mode = "candidates"
         windows = {r: {"vmin": None, "vmax": None} for r in role_names}
+    elif affine_mode and args.upsample > 1 and not explicit:
+        # ``--upsample N > 1`` re-derives the window on the fine canvas: a window
+        # calibrated on the parent canvas is at another log|F| level there, so it is
+        # neither inherited nor needed -- the fine canvas is self-sufficient.
+        windows = {r: {"vmin": None, "vmax": None} for r in role_names}
+        mode = "full"
     elif window_file.is_file() and not explicit:
         windows = read_window_file(window_file, role_names)
         mode = "full"
@@ -1705,6 +2142,79 @@ def main(argv=None):
                 f"{FFT_WINDOW_FILE} in the output directory."
             )
 
+    if affine_mode and args.upsample > 1 and not explicit:
+        # Re-derive the per-role window on the cropped fine planes.  The recipe is
+        # the percentile pair the inherited window was picked from (recovered from
+        # the parent's candidate table), so the same candidate index is re-run on the
+        # new distribution; with nothing to re-run the widest (least clipping)
+        # candidate is used, and the log says which of the two it was.
+        reference = None
+        for candidate_file in (parent_window_file, window_file):
+            if candidate_file.is_file():
+                try:
+                    reference = read_window_file(candidate_file, role_names)
+                except SystemExit:
+                    reference = None
+                if reference is not None:
+                    break
+        fractions, cand_index = inherited_window_fractions(
+            root_outdir / CANDIDATES_FILE, reference, role_names
+        )
+        windows = fine_canvas_window(
+            roles,
+            src,
+            geometry,
+            args.spatial_window,
+            fractions,
+            crop_n=fft_crop_n,
+        )
+        fmin, fmax = fractions
+        ln_shift = float(np.log(float(args.upsample) ** 2))
+        recipe = (
+            f"percentiles [{fmin:g}, {fmax:g}] (candidate index {cand_index} of "
+            f"{root_outdir / CANDIDATES_FILE})"
+            if cand_index is not None
+            else f"percentiles [{fmin:g}, {fmax:g}] (candidate 0, the widest "
+            f"least-clipping window: no parent pick was on disk to re-run)"
+        )
+        if window_file.is_file():
+            pre_notes.append(
+                f"# NOTE: {window_file} exists but is NOT inherited by "
+                f"--upsample {args.upsample}: the fine canvas is another plane "
+                f"(other FOV, other q grid), so the window is re-derived and the "
+                f"file rewritten"
+            )
+        pre_notes.append(
+            f"# NOTE: --upsample {args.upsample} re-derives the per-role colour "
+            f"window on the {fft_crop_n}x{fft_crop_n} native-q fft_corrected planes "
+            f"(spatial window {args.spatial_window!r}), recipe {recipe}; the "
+            f"inherited parent window is NOT reused: it was calibrated on another "
+            f"canvas (the parent keeps its pad band and its own FOV/q grid), so even "
+            f"the same percentile recipe lands elsewhere -- the residual below is the "
+            f"size of that difference.  The level shift ln(N^2) = "
+            f"ln({args.upsample**2}) = +{ln_shift:.4f} is what the *same* canvas moves "
+            f"by when N changes (measured N=2 vs N=8 at fixed FOV: residual <= 0.024 "
+            f"in log|F|), which is why the shift alone cannot carry a parent window "
+            f"over"
+        )
+        for role in role_names:
+            got = windows[role]
+            if reference is not None and role in reference:
+                ref = reference[role]
+                pre_notes.append(
+                    f"#   window {role}: re-derived [{got['vmin']:.6g}, "
+                    f"{got['vmax']:.6g}] vs inherited [{ref['vmin']:.6g}, "
+                    f"{ref['vmax']:.6g}] + ln(N^2) = "
+                    f"[{ref['vmin'] + ln_shift:.6g}, {ref['vmax'] + ln_shift:.6g}] "
+                    f"(residual {got['vmin'] - ref['vmin'] - ln_shift:+.4f} / "
+                    f"{got['vmax'] - ref['vmax'] - ln_shift:+.4f})"
+                )
+            else:
+                pre_notes.append(
+                    f"#   window {role}: re-derived [{got['vmin']:.6g}, "
+                    f"{got['vmax']:.6g}] (no parent window on disk to compare)"
+                )
+
     if affine_mode:
         print(f"# grid: {src}")
         print(f"# transform: {bundle_json} (affine; products under {outdir})")
@@ -1767,6 +2277,7 @@ def main(argv=None):
         spatial_window=args.spatial_window,
         candidate_basis=candidate_basis,
         affine=geometry,
+        fft_crop_n=fft_crop_n,
     )
     for note in pre_notes:
         pipe.log(note)
