@@ -83,7 +83,9 @@ np.savetxt(<out>/<stem>_topo.csv, z, delimiter=",", fmt="%.10e")
   `correction_report.json` 记录 `fallback: true` 即没有可用的位移场）→ 脚本**只删除本次运行新增的产物**、打印
   原因、非零退出；`-o` 目录里原有的文件一律保留（脚本进入时先记下目录内容，见 `scripts/grid_lf_fit.py:137` 的
   `pre_existing`），退出信息形如 `fail-closed: fit failed, removed N file(s) written by this run from <dir>
-  (files that were already there are kept)`（删除循环见 `scripts/grid_lf_fit.py:210-211`，退出信息见
+  (files that were already there are kept)`（删除循环见 `scripts/grid_lf_fit.py:210-216`：210 是循环头
+  `for path in sorted(lf_dir.iterdir()):`、211 是守卫 `if path.name not in pre_existing:`、212-216 是删除体；
+  **行号漂了就按这三段原文找**；退出信息见
   `scripts/grid_lf_fit.py:217-221`）。
   所以重跑前把已有产物留在 `-o` 里是安全的：这次失败不会清空它们，非空目录也不阻碍重跑。
 

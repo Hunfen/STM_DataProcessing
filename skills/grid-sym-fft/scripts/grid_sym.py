@@ -698,16 +698,20 @@ def save_array_image(out_png: Path, mat, vmin, vmax, cmap: str, png_dpi=300):
     # No-data pixels (the corrected canvas is NaN outside the valid displacement
     # field) get the Lawler-Fujita family's opaque bad colour instead of the
     # default transparent/white, so the picture is a plain opaque RGB image with
-    # no white frame -- same convention as stm_lf_correct.py:1011.
+    # no white frame -- same convention as stm_lf_correct.py:1029
+    # (cmap_bad.set_bad(color=lf.BAD_COLOR); find it by that anchor if the number
+    # drifts).
     cmap_bad = plt.get_cmap(cmap).copy()
     cmap_bad.set_bad(lf_lib.BAD_COLOR)
     fig = plt.figure(
         figsize=(n_cols / png_dpi, n_rows / png_dpi), dpi=png_dpi, frameon=False
     )
     ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
-    # Same display convention as the Lawler-Fujita family
-    # (stm_lf_correct.py:1013/1029, stm_lf_apply.py:386/402): row 0 (the smallest
-    # physical Y) at the bottom, so corrected maps and the fitted topo agree.
+    # Same display convention as the Lawler-Fujita family: row 0 (the smallest
+    # physical Y) at the bottom, so corrected maps and the fitted topo agree.  The
+    # LF pair there is stm_lf_correct.py:1031/1047 and stm_lf_apply.py:398/414 (the
+    # maps' ax.imshow(corrected, cmap=cmap_bad, origin="lower") line and the FFT
+    # figure's origin="lower", line; find them by those anchors if the numbers move).
     ax.imshow(
         mat,
         cmap=cmap_bad,

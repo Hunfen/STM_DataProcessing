@@ -59,7 +59,7 @@ description: 把 Nanonis grid spectroscopy（`.h5`，经 `stm_data_processing.io
 **显示约定**：实空间图与 FFT 图统一用 matplotlib `origin="lower"`（产物图的渲染入口是
 `save_array_image()`（`grid_sym.py` 的 `def` 在 680；实空间图经 `save_map_image()`、FFT 图经
 `save_fft_image()` 都只调它），里面那个 `ax.imshow(mat, ..., origin="lower", interpolation="nearest", aspect="auto")`
-调用的 `origin="lower",` 行在 **716**——**行号漂了就按这个锚点找**），
+调用的 `origin="lower",` 行在 **720**——**行号漂了就按这个锚点找**），
 与 LF 家族一致（`stm_lf_correct.py:1031/1047`、`stm_lf_apply.py:398/414`——每对是「实空间图的
 `ax.imshow(corrected, cmap=cmap_bad, origin="lower")` 行 / FFT 图里那个 `origin="lower",` 行」，
 **行号漂了就按这两个锚点找**，2026-10-14 复核过）——即**数组第 0 行画在画布底部**，
